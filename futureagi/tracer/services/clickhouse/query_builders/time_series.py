@@ -21,6 +21,7 @@ answered "All" at a multiple of the sum of its own filtered parts; see
 """
 
 import re
+from dataclasses import replace
 from datetime import datetime, timedelta
 from typing import Any
 
@@ -31,6 +32,38 @@ from tracer.services.clickhouse.query_builders.hourly_aggregate_states import (
 )
 
 _SAFE_CLUSTER_NAME_RE = re.compile(r"\A[A-Za-z0-9_-]+\Z")
+
+
+def plan_hiding_simulated(plan: Any, *, observe_type: str) -> Any:
+    """Add the hide rule to an exact graph plan as one more row predicate.
+
+    An exact plan is evaluated on the current span row, so the rule has to be
+    a row predicate too; a ``trace_id NOT IN (SELECT ... FROM spans)`` would
+    open a second read of ``spans`` that the plan compiler refuses on purpose.
+    A span graph keeps the rows that carry no mark. A trace graph requires that
+    no live span of the trace carries one (a negative any-sibling requirement,
+    as the Voice chart's simulator toggle uses), so a marked span takes its
+    unmarked siblings out with it, and a trace whose root never arrived is
+    still left out when its children carry the mark.
+    """
+
+    # Imported at call time so that loading the query-builder package never
+    # depends on the visibility module, which reaches the model layer.
+    from tracer.services.simulation_visibility import row_exclusion_sql
+
+    unmarked = row_exclusion_sql(map_column="attrs_string")
+    if observe_type == "span":
+        predicate, required = unmarked, True
+    else:
+        predicate, required = f"NOT ({unmarked})", False
+    index = len(plan.predicates)
+    return replace(
+        plan,
+        predicates=(*plan.predicates, predicate),
+        output_window_only=(*plan.output_window_only, False),
+        required_matches=(*plan.required_matches, required),
+        match_condition_groups=(*plan.match_condition_groups, ((index, required),)),
+    )
 
 
 class TimeSeriesQueryBuilder(BaseQueryBuilder):
@@ -54,6 +87,9 @@ class TimeSeriesQueryBuilder(BaseQueryBuilder):
             ``"month"``).
         system_metric_filters: Additional keyword filters (currently unused;
             reserved for future per-model breakdowns).
+        hide_simulated: Leave out the spans of marked traces. The hourly
+            aggregate states carry no attribute to test, so a builder that
+            hides reads raw rows even when no filter is present.
     """
 
     # Denormalized raw table. Both the filtered scan and the unfiltered
@@ -76,9 +112,12 @@ class TimeSeriesQueryBuilder(BaseQueryBuilder):
         raw_replica_shard_count: int = 1,
         raw_trace_candidate_predicate: str = "",
         raw_trace_candidate_params: dict[str, Any] | None = None,
+        *,
+        hide_simulated: bool = False,
         **kwargs: Any,
     ) -> None:
         super().__init__(project_id, **kwargs)
+        self.hide_simulated = bool(hide_simulated)
         self.filters = filters or []
         self.interval = interval
         self.system_metric_filters = system_metric_filters or {}
@@ -142,6 +181,10 @@ class TimeSeriesQueryBuilder(BaseQueryBuilder):
                 observe_type=self.observe_type,
                 annotation_label_ids=self.annotation_label_ids,
             )
+            if self.hide_simulated:
+                exact_filter_plan = plan_hiding_simulated(
+                    exact_filter_plan, observe_type=self.observe_type
+                )
             extra_params = exact_filter_plan.params
         else:
             filter_builder = ClickHouseFilterBuilder(
@@ -152,6 +195,15 @@ class TimeSeriesQueryBuilder(BaseQueryBuilder):
                 query_mode=self.observe_type,
             )
             extra_where, extra_params = filter_builder.translate(self.filters)
+            if self.hide_simulated:
+                # A non-empty clause sends the build down the raw-row query,
+                # which is the only one that can test a span's attributes.
+                from tracer.services.simulation_visibility import row_exclusion_sql
+
+                unmarked = row_exclusion_sql(map_column="attrs_string")
+                extra_where = (
+                    f"({extra_where}) AND {unmarked}" if extra_where else unmarked
+                )
         self.params.update(extra_params)
 
         if self.exact_snapshot:
@@ -718,6 +770,8 @@ class TimeSeriesQueryBuilder(BaseQueryBuilder):
             compile_exact_graph_row_predicates,
         )
 
+        # The hide rule is not added here: the caller enumerated these trace
+        # ids under it, so a marked trace is not among them.
         exact_filter_plan = compile_exact_graph_row_predicates(
             self.filters,
             project_id=str(self.project_id),
@@ -816,6 +870,12 @@ class TimeSeriesQueryBuilder(BaseQueryBuilder):
                 project_id=str(self.project_id),
                 observe_type=self.observe_type,
                 annotation_label_ids=self.annotation_label_ids,
+            )
+        if self.hide_simulated:
+            # The caller routes on the request's own plan; the rule joins it
+            # here, for every partition, so no slice can be read without it.
+            exact_filter_plan = plan_hiding_simulated(
+                exact_filter_plan, observe_type=self.observe_type
             )
         self.params.update(exact_filter_plan.params)
         self.params.update(
