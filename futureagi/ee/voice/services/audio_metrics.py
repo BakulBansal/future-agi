@@ -50,7 +50,7 @@ def analyze_audio(audio_bytes: bytes) -> AudioMetrics:
 
     frame_length = max(256, min(2048, samples.size))
     hop_length = max(1, frame_length // 4)
-    rms = librosa.feature.rms(y=samples, frame_length=frame_length, hop_length=hop_length, center=False)[0]
+    rms = librosa.feature.rms(\n        y=samples, frame_length=frame_length, hop_length=hop_length, center=False\n    )[0]
     power = np.square(rms)
     power = power[np.isfinite(power)]
     snr = None
