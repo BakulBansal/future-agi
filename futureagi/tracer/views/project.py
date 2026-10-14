@@ -83,6 +83,9 @@ from tracer.services.filter_principal_context import (
     bind_request_my_annotations_principal,
 )
 from tracer.services.project_deletion import soft_delete_projects
+from tracer.services.simulation_visibility import (
+    hide_simulated as project_hides_simulated,
+)
 from tracer.utils.constants import (
     INSTALLATION_GUIDE,
     INSTRUMENTORS,
@@ -899,6 +902,7 @@ class ProjectView(BaseModelViewSetMixinWithUserOrg, ModelViewSet):
                 refresh=refresh,
                 organization_id=str(project.organization_id),
                 workspace_id=str(workspace_id) if workspace_id else None,
+                hide_simulated=project_hides_simulated(project_id),
             )
             if not graph_payload_is_publishable(
                 response_data,

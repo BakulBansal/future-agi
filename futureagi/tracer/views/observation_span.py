@@ -172,6 +172,10 @@ from tracer.services.filter_principal_context import (
     FilterPrincipalContextError,
     bind_request_my_annotations_principal,
 )
+from tracer.services.simulation_visibility import (
+    hide_simulated as project_hides_simulated,
+)
+from tracer.services.simulation_visibility import holding_projects
 from tracer.utils.annotations import build_annotation_subqueries
 from tracer.utils.bounded_csv import (
     BOUNDED_SPAN_EXPORT_PAGE_SIZE,
@@ -2162,6 +2166,13 @@ class ObservationSpanView(BaseModelViewSetMixin, ModelViewSet):
                 "Cursor pagination is unavailable for this query shape.",
             )
         cursor_enabled = cursor_requested and cursor_supported
+        # One read for the request: when any project of an organization-wide
+        # read holds, the whole read leaves marked spans out.
+        hide_simulated = (
+            bool(holding_projects(scope_project_ids))
+            if org_scope
+            else project_hides_simulated(str(project_id))
+        )
         builder = SpanListQueryBuilderV2(
             project_id=None if org_scope else str(project_id),
             project_ids=[str(p) for p in org_project_ids] if org_scope else None,
@@ -2172,6 +2183,7 @@ class ObservationSpanView(BaseModelViewSetMixin, ModelViewSet):
             annotation_label_ids=annotation_label_ids,
             annotation_label_ids_by_project=annotation_label_ids_by_project,
             bounded_internal_scan=cursor_enabled,
+            hide_simulated=hide_simulated,
         )
         requires_cursor = builder.requires_cursor_for_long_filtered_read()
         if requires_cursor and not cursor_supported:
@@ -2996,6 +3008,7 @@ class ObservationSpanView(BaseModelViewSetMixin, ModelViewSet):
             eval_config_ids=eval_config_ids,
             annotation_label_ids=annotation_label_ids,
             project_version_id=str(project_version_id),
+            hide_simulated=project_hides_simulated(project_id),
         )
 
         # Phase 1: Paginated spans (light columns — no input/output). Filtered
@@ -3302,6 +3315,10 @@ class ObservationSpanView(BaseModelViewSetMixin, ModelViewSet):
                         id=project_id,
                         organization=_get_request_organization(request),
                     )
+                    # One read per request, shared by whichever chart read runs
+                    # below. It follows the lookup, so a project that does not
+                    # exist costs no read.
+                    hide_simulated = project_hides_simulated(project_id)
             except Project.DoesNotExist:
                 return finish(
                     self._gm.bad_request("Project not found or access denied")
@@ -3377,6 +3394,7 @@ class ObservationSpanView(BaseModelViewSetMixin, ModelViewSet):
                         ),
                         workspace_id=str(workspace_id) if workspace_id else None,
                         timeout_ms=graph_action_remaining_ms(deadline),
+                        hide_simulated=hide_simulated,
                     )
                 elif metric_type == "EVAL":
                     graph = fetch_eval_graph_ch(
@@ -3394,6 +3412,7 @@ class ObservationSpanView(BaseModelViewSetMixin, ModelViewSet):
                         ),
                         workspace_id=str(workspace_id) if workspace_id else None,
                         timeout_ms=graph_action_remaining_ms(deadline),
+                        hide_simulated=hide_simulated,
                     )
                 else:
                     graph = fetch_annotation_graph_ch(
@@ -3411,6 +3430,7 @@ class ObservationSpanView(BaseModelViewSetMixin, ModelViewSet):
                         ),
                         workspace_id=str(workspace_id) if workspace_id else None,
                         timeout_ms=graph_action_remaining_ms(deadline),
+                        hide_simulated=hide_simulated,
                     )
                 graph.update(
                     graph_query_evidence(
@@ -4382,6 +4402,7 @@ class ObservationSpanView(BaseModelViewSetMixin, ModelViewSet):
             end_user_id=str(end_user_id) if end_user_id is not None else None,
             bounded_internal_scan=True,
             bounded_identity_only=True,
+            hide_simulated=project_hides_simulated(str(project_id)),
         )
         error_code = builder.bounded_filter_degraded_error_code()
         if error_code or not builder.supports_bounded_filter_scan():
