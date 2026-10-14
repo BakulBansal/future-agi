@@ -37,8 +37,11 @@ from tracer.services.clickhouse.query_builders.filters import (
 )
 from tracer.services.clickhouse.query_builders.latest_filter_predicates import (
     partition_span_filter_plans,
+    simulation_hide_plan,
+    simulation_unmarked_row_sql,
     supports_span_filters,
     targets_span_filter_domain,
+    with_simulation_hidden,
 )
 from tracer.services.clickhouse.v2.id_remap_sql import (
     remap_left_join,
@@ -115,6 +118,9 @@ class SpanListQueryBuilder(BaseQueryBuilder):
         sort_params: Frontend sort specification list.
         eval_config_ids: List of ``CustomEvalConfig`` UUID strings.
         annotation_label_ids: List of ``AnnotationsLabels`` UUID strings.
+        hide_simulated: Leave out every span that carries a simulation mark. It
+            never joins ``filters``: the decisions that shape a read (cursor,
+            seed lane) must see only what the request asked for.
     """
 
     TABLE = "spans"
@@ -323,9 +329,12 @@ class SpanListQueryBuilder(BaseQueryBuilder):
         bounded_anchor_probe: bool = False,
         bounded_sampling_salt: str | None = None,
         bounded_sampling_rate: float | None = None,
+        *,
+        hide_simulated: bool = False,
         **kwargs: Any,
     ) -> None:
         super().__init__(project_id=project_id, project_ids=project_ids, **kwargs)
+        self.hide_simulated = bool(hide_simulated)
         self.page_number = page_number
         self.page_size = page_size
         self.filters = filters or []
@@ -1306,6 +1315,9 @@ class SpanListQueryBuilder(BaseQueryBuilder):
             # plan parameters stay untouched for the other necessary leaves.
             params.update(relation_params)
             predicate = f"({predicate}) AND ({relation_sql})"
+        if self.hide_simulated:
+            # A marked span never matches, so seeding it only spends the limit.
+            predicate = f"({predicate}) AND {simulation_unmarked_row_sql()}"
         datetime_predicate, datetime_params = (
             BaseQueryBuilder.bounded_datetime_exclusion_sql(
                 self.filters,
@@ -1491,6 +1503,10 @@ class SpanListQueryBuilder(BaseQueryBuilder):
         )
         scope_to_request_window = not candidate_full_state or has_explicit_time_filter
         plans, residual_filters = partition_span_filter_plans(self.filters)
+        if self.hide_simulated:
+            # Added after the request's own plans, which every decision about
+            # the shape of a read keeps reading alone.
+            plans = [*plans, simulation_hide_plan(scope="span")]
         params: dict[str, Any] = {
             **self.params,
             "candidate_span_ids": span_ids,
@@ -1893,7 +1909,10 @@ class SpanListQueryBuilder(BaseQueryBuilder):
         offset = self.page_number * self.page_size
         self.params["limit"] = offset + 2 * self.page_size
 
-        filter_fragment = f"AND {extra_where}" if extra_where else ""
+        filter_fragment = with_simulation_hidden(
+            f"AND {extra_where}" if extra_where else "",
+            hide_simulated=self.hide_simulated,
+        )
         datetime_fragment = (
             f"\n          AND {datetime_predicate}" if datetime_predicate else ""
         )
@@ -2094,7 +2113,10 @@ class SpanListQueryBuilder(BaseQueryBuilder):
             )
         )
         self.params.update(datetime_params)
-        filter_fragment = f"AND {extra_where}" if extra_where else ""
+        filter_fragment = with_simulation_hidden(
+            f"AND {extra_where}" if extra_where else "",
+            hide_simulated=self.hide_simulated,
+        )
         datetime_fragment = (
             f"\n          AND {datetime_predicate}" if datetime_predicate else ""
         )
@@ -2230,7 +2252,10 @@ class SpanListQueryBuilder(BaseQueryBuilder):
         )
         params.update(datetime_params)
 
-        filter_fragment = f"AND {extra_where}" if extra_where else ""
+        filter_fragment = with_simulation_hidden(
+            f"AND {extra_where}" if extra_where else "",
+            hide_simulated=self.hide_simulated,
+        )
         datetime_fragment = (
             f"\n                      AND {datetime_predicate}"
             if datetime_predicate

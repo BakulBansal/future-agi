@@ -34,8 +34,11 @@ from tracer.services.clickhouse.query_builders.filters import (
 from tracer.services.clickhouse.query_builders.latest_filter_predicates import (
     LatestFilterPredicate,
     partition_trace_filter_plans,
+    simulation_hide_plan,
+    simulation_unmarked_row_sql,
     supports_trace_filters,
     targets_trace_filter_domain,
+    with_simulation_hidden,
 )
 from tracer.utils.filter_operators import normalize_span_attribute_filter_type
 
@@ -171,6 +174,10 @@ class TraceListQueryBuilder(BaseQueryBuilder):
         sort_params: Frontend sort specification list.
         eval_config_ids: List of ``CustomEvalConfig`` UUID strings to
             fetch eval scores for.
+        hide_simulated: Leave out every trace whose live root carries a
+            simulation mark. It never joins ``filters``: the decisions that
+            shape a read (cursor, batch size, seed lane) must see only what the
+            request asked for.
     """
 
     TABLE = "spans"
@@ -241,9 +248,12 @@ class TraceListQueryBuilder(BaseQueryBuilder):
         bounded_global_span_witnesses: bool = False,
         bounded_sampling_salt: str | None = None,
         bounded_sampling_rate: float | None = None,
+        *,
+        hide_simulated: bool = False,
         **kwargs: Any,
     ) -> None:
         super().__init__(project_id=project_id, project_ids=project_ids, **kwargs)
+        self.hide_simulated = bool(hide_simulated)
         self.page_number = page_number
         self.page_size = page_size
         self.filters = filters or []
@@ -408,6 +418,24 @@ class TraceListQueryBuilder(BaseQueryBuilder):
             filters,
             filter_builder_cls=self._FILTER_BUILDER_CLS,
         )
+
+    def _membership_trace_filter_plans(
+        self,
+        filters: list[dict[str, Any]],
+    ) -> tuple[list[LatestFilterPredicate], list[dict[str, Any]]]:
+        """The plans a statement applies to decide which traces it returns.
+
+        Only a statement that seeds or classifies traces reads this; every
+        decision about the shape of a read keeps reading the request's own
+        plans, which is why hiding is added here and not in the partition above.
+        """
+
+        plans, residual = self._partition_trace_filter_plans(filters)
+        if self.hide_simulated:
+            # Last, so every request leaf keeps the index its parameters were
+            # named with; the plan carries no parameter of its own.
+            plans = [*plans, simulation_hide_plan(scope="root")]
+        return plans, residual
 
     def _bounded_match_filters(self) -> list[dict[str, Any]]:
         """Return the full-window predicates used for latest-state membership."""
@@ -2612,6 +2640,15 @@ class TraceListQueryBuilder(BaseQueryBuilder):
         if self.project_version_id:
             params["project_version_id"] = self.project_version_id
             project_version_fragment = "AND project_version_id = %(project_version_id)s"
+        # The live root decides, as in the classifier: this verifier is the
+        # only membership test the partitioned graph lane applies to a root.
+        hide_aggregate = hide_condition = ""
+        if self.hide_simulated:
+            hide_aggregate = (
+                f",\n                argMax({simulation_unmarked_row_sql()}, "
+                "_peerdb_version) AS latest_unmarked_root"
+            )
+            hide_condition = "\n          AND latest_unmarked_root = 1"
         query = f"""
         SELECT grouped_trace_id AS trace_id
         FROM (
@@ -2620,7 +2657,7 @@ class TraceListQueryBuilder(BaseQueryBuilder):
                 argMax(tuple(parent_span_id), _peerdb_version).1
                     AS latest_parent_span_id,
                 argMax(start_time, _peerdb_version) AS latest_start_time,
-                argMax(is_deleted, _peerdb_version) AS latest_is_deleted
+                argMax(is_deleted, _peerdb_version) AS latest_is_deleted{hide_aggregate}
             FROM {self.TABLE}
             PREWHERE {self.project_filter_sql()}
               {project_version_fragment}
@@ -2633,7 +2670,7 @@ class TraceListQueryBuilder(BaseQueryBuilder):
                 trace_id,
                 id
         ) AS latest_root_spans
-        WHERE latest_is_deleted = 0
+        WHERE latest_is_deleted = 0{hide_condition}
           AND (latest_parent_span_id IS NULL OR latest_parent_span_id = '')
           AND latest_start_time >= fromUnixTimestamp64Micro(
                 %(exact_graph_root_start_us)s
@@ -2716,6 +2753,15 @@ class TraceListQueryBuilder(BaseQueryBuilder):
                 "AND trace_id > %(exact_graph_root_after_trace_id)s"
             )
 
+        # The live root decides, as in the classifier: this verifier is the
+        # only membership test the partitioned graph lane applies to a root.
+        hide_aggregate = hide_condition = ""
+        if self.hide_simulated:
+            hide_aggregate = (
+                f",\n                argMax({simulation_unmarked_row_sql()}, "
+                "_peerdb_version) AS latest_unmarked_root"
+            )
+            hide_condition = "\n          AND latest_unmarked_root = 1"
         query = f"""
         SELECT grouped_trace_id AS trace_id
         FROM (
@@ -2724,7 +2770,7 @@ class TraceListQueryBuilder(BaseQueryBuilder):
                 argMax(tuple(parent_span_id), _peerdb_version).1
                     AS latest_parent_span_id,
                 argMax(start_time, _peerdb_version) AS latest_start_time,
-                argMax(is_deleted, _peerdb_version) AS latest_is_deleted
+                argMax(is_deleted, _peerdb_version) AS latest_is_deleted{hide_aggregate}
             FROM {self.TABLE}
             PREWHERE {self.project_filter_sql()}
               {project_version_fragment}
@@ -2749,7 +2795,7 @@ class TraceListQueryBuilder(BaseQueryBuilder):
                 trace_id,
                 id
         ) AS latest_root_spans
-        WHERE latest_is_deleted = 0
+        WHERE latest_is_deleted = 0{hide_condition}
           AND (latest_parent_span_id IS NULL OR latest_parent_span_id = '')
           AND latest_start_time >= fromUnixTimestamp64Micro(
                 %(exact_graph_root_start_us)s
@@ -3435,7 +3481,7 @@ class TraceListQueryBuilder(BaseQueryBuilder):
             raise ValueError("trace seed slice must stay inside the request window")
         self.start_date, self.end_date = request_start, request_end
         self.params.update({"start_date": request_start, "end_date": request_end})
-        plans, _ = self._partition_trace_filter_plans(self._bounded_filters())
+        plans, _ = self._membership_trace_filter_plans(self._bounded_filters())
         # Provider-normalized root strings parse unindexed JSON. Keep ordinary
         # ordered seeds as cheap root-identity supersets; candidate
         # classification below remains the exact latest-state authority. The
@@ -3827,7 +3873,7 @@ class TraceListQueryBuilder(BaseQueryBuilder):
             raise ValueError("trace keyset values must be provided together")
 
         request_start, request_end = self.parse_time_range(self.filters)
-        plans, _ = self._partition_trace_filter_plans(self._bounded_filters())
+        plans, _ = self._membership_trace_filter_plans(self._bounded_filters())
         root_plans = [
             plan
             for plan in plans
@@ -4241,7 +4287,7 @@ class TraceListQueryBuilder(BaseQueryBuilder):
         # Preserve an explicit user time filter, however, because that *is*
         # part of the task's selection contract.
         scope_to_request_window = not candidate_full_state or has_explicit_time_filter
-        plans, residual_filters = self._partition_trace_filter_plans(match_filters)
+        plans, residual_filters = self._membership_trace_filter_plans(match_filters)
         root_plans = [plan for plan in plans if plan.scope == "root"]
         any_span_plans = [plan for plan in plans if plan.scope == "any"]
         # Public trace time filters bind only to the canonical root. Once a
@@ -5121,7 +5167,10 @@ class TraceListQueryBuilder(BaseQueryBuilder):
         self.params["limit"] = offset + 2 * self.page_size
 
         # Build optional filter fragment
-        filter_fragment = f"AND {extra_where}" if extra_where else ""
+        filter_fragment = with_simulation_hidden(
+            f"AND {extra_where}" if extra_where else "",
+            hide_simulated=self.hide_simulated,
+        )
         datetime_fragment = (
             f"\n          AND {datetime_predicate}" if datetime_predicate else ""
         )
@@ -5259,7 +5308,10 @@ class TraceListQueryBuilder(BaseQueryBuilder):
             )
         )
         self.params.update(datetime_params)
-        filter_fragment = f"AND {extra_where}" if extra_where else ""
+        filter_fragment = with_simulation_hidden(
+            f"AND {extra_where}" if extra_where else "",
+            hide_simulated=self.hide_simulated,
+        )
         datetime_fragment = (
             f"\n          AND {datetime_predicate}" if datetime_predicate else ""
         )
@@ -5478,7 +5530,10 @@ class TraceListQueryBuilder(BaseQueryBuilder):
         )
         params.update(datetime_params)
 
-        filter_fragment = f"AND {extra_where}" if extra_where else ""
+        filter_fragment = with_simulation_hidden(
+            f"AND {extra_where}" if extra_where else "",
+            hide_simulated=self.hide_simulated,
+        )
         datetime_fragment = (
             f"\n          AND {datetime_predicate}" if datetime_predicate else ""
         )

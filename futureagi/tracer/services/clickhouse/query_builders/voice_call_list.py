@@ -25,6 +25,9 @@ from django.conf import settings
 from tracer.services.clickhouse.eval_logger_table import eval_logger_source
 from tracer.services.clickhouse.query_builders.base import BaseQueryBuilder
 from tracer.services.clickhouse.query_builders.filters import ClickHouseFilterBuilder
+from tracer.services.clickhouse.query_builders.latest_filter_predicates import (
+    with_simulation_hidden,
+)
 from tracer.services.clickhouse.query_builders.trace_list import TraceListQueryBuilder
 from tracer.services.simulator_phones import SIMULATOR_PHONE_NUMBERS
 from tracer.utils.attribute_accessor import vapi_customer
@@ -118,6 +121,9 @@ class VoiceCallListQueryBuilder(BaseQueryBuilder):
         filters: Frontend filter list.
         eval_config_ids: Eval config UUID strings for Phase 2.
         remove_simulation_calls: Whether to exclude simulator calls.
+        hide_simulated: Leave out every call whose live root carries a
+            simulation mark. Unlike ``remove_simulation_calls`` it is not a
+            request choice: the view sets it from what the project holds.
     """
 
     TABLE = "spans"
@@ -149,9 +155,12 @@ class VoiceCallListQueryBuilder(BaseQueryBuilder):
         bounded_identity_only: bool = False,
         bounded_sampling_salt: str | None = None,
         bounded_sampling_rate: float | None = None,
+        *,
+        hide_simulated: bool = False,
         **kwargs: Any,
     ) -> None:
         super().__init__(project_id, **kwargs)
+        self.hide_simulated = bool(hide_simulated)
         self.page_number = page_number
         self.page_size = page_size
         self.filters = filters or []
@@ -257,6 +266,7 @@ class VoiceCallListQueryBuilder(BaseQueryBuilder):
                 self._bounded_internal_scan or not public_candidate_witness
             ),
             bounded_identity_only=self._bounded_identity_only,
+            hide_simulated=self.hide_simulated,
         )
         delegate.TABLE = self.TABLE
         # Residual end-user/eval/annotation filters must use the same schema
@@ -960,7 +970,10 @@ class VoiceCallListQueryBuilder(BaseQueryBuilder):
         )  # fetch one extra for has_more detection
         self.params["offset"] = offset
 
-        filter_fragment = f"AND {extra_where}" if extra_where else ""
+        filter_fragment = with_simulation_hidden(
+            f"AND {extra_where}" if extra_where else "",
+            hide_simulated=self.hide_simulated,
+        )
         simulation_filter = self._build_simulation_filter()
 
         # Light columns only — heavy span_attributes_raw fetched via
@@ -1025,7 +1038,10 @@ class VoiceCallListQueryBuilder(BaseQueryBuilder):
         )
         extra_where, extra_params = fb.translate(self.filters)
         self.params.update(extra_params)
-        filter_fragment = f"AND {extra_where}" if extra_where else ""
+        filter_fragment = with_simulation_hidden(
+            f"AND {extra_where}" if extra_where else "",
+            hide_simulated=self.hide_simulated,
+        )
 
         query = f"""
         SELECT id
@@ -1166,7 +1182,10 @@ class VoiceCallListQueryBuilder(BaseQueryBuilder):
         params = dict(self.params)
         params.update(extra_params)
 
-        filter_fragment = f"AND {extra_where}" if extra_where else ""
+        filter_fragment = with_simulation_hidden(
+            f"AND {extra_where}" if extra_where else "",
+            hide_simulated=self.hide_simulated,
+        )
         simulation_filter = self._build_simulation_filter()
 
         query = f"""
