@@ -91,13 +91,17 @@ def _ch_available() -> bool:
     return client is not None and client.is_configured
 
 
-def list_attribute_keys_for_project(project_id: str) -> list[AttributeKey]:
+def list_attribute_keys_for_project(
+    project_id: str, *, hide_simulated: bool = False
+) -> list[AttributeKey]:
     """Return every distinct span attribute key seen for the project.
 
     Walks the three shredded Map columns on the ``spans`` table
     (``attrs_string`` / ``attrs_number`` / ``attrs_bool``) and reports
     each key with its inferred type and total occurrence count, sorted by
     occurrences descending.
+
+    ``hide_simulated`` leaves the spans of marked traces out of the inventory.
 
     Returns an empty list (with a log) if ClickHouse is unavailable.
     """
@@ -115,6 +119,7 @@ def list_attribute_keys_for_project(project_id: str) -> list[AttributeKey]:
         [project_id],
         include_counts=True,
         order_by_count_desc=True,
+        hide_simulated=hide_simulated,
     )
 
     logger.info(

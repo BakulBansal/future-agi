@@ -17,6 +17,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import re
 import threading
 import time
 import uuid
@@ -683,6 +684,47 @@ def _attribute_window_bounds(
     return min(start for start, _ in windows), max(end for _, end in windows)
 
 
+def _unmarked_row_sql() -> str:
+    """The row test every hiding read shares, written for the v2 spans table."""
+
+    # Imported at call time: the visibility module reaches the model layer, and
+    # this module is loaded while the query service is still importing.
+    from tracer.services.simulation_visibility import row_exclusion_sql
+
+    return row_exclusion_sql(map_column="attrs_string")
+
+
+# The latest-state replays judge a span by its winning version, so a marked
+# span is read as deleted rather than filtered out of the physical rows: a row
+# filter would hand an older, unmarked version of the same span the win, and
+# the replay would return fewer identities than it was asked about.
+_TUPLE_IS_DELETED_LINE = re.compile(r"^(?P<indent>[ ]+)is_deleted,$", re.MULTILINE)
+_PROJECTED_IS_DELETED_LINE = re.compile(r"^(?P<indent>[ ]+)is_deleted$", re.MULTILINE)
+
+
+def _replay_sql_reading_marked_as_deleted(sql: str) -> str:
+    """Rewrite a latest-state replay so a marked span comes back deleted.
+
+    Each replay template carries exactly one raw ``is_deleted`` that the
+    ``argMax(_version)`` state picks the winner of. A template that drifts from
+    that shape fails here instead of silently hiding nothing.
+    """
+
+    unmarked = _unmarked_row_sql()
+    rewritten, tuple_hits = _TUPLE_IS_DELETED_LINE.subn(
+        rf"\g<indent>if({unmarked}, is_deleted, 1),", sql
+    )
+    rewritten, projected_hits = _PROJECTED_IS_DELETED_LINE.subn(
+        rf"\g<indent>if({unmarked}, is_deleted, 1) AS is_deleted", rewritten
+    )
+    if tuple_hits + projected_hits != 1:
+        raise IncompleteLatestStateReplay(
+            "Attribute latest-state replay has no single deletion state to "
+            "carry the simulated-trace rule"
+        )
+    return rewritten
+
+
 class V2AttributeQueryExecutor:
     """CH25 read executor; direct diagnostic callers stay bounded by default."""
 
@@ -1254,6 +1296,10 @@ class AttributeReadSelector:
     the wall governs admission between public statements, not statement aborts.
     Standalone diagnostics and benchmarks can explicitly opt out of application
     policy; an injected executor retains its own execution policy.
+
+    ``hide_simulated`` leaves the spans of marked traces out of every read. A
+    selector serves one request, so the flag is never shared between a hiding
+    and a non-hiding caller.
     """
 
     def __init__(
@@ -1266,9 +1312,17 @@ class AttributeReadSelector:
         typed_only: bool = False,
         json_attribute_mode: JsonAttributeMode | None = None,
         application_read: bool = True,
+        hide_simulated: bool = False,
     ):
         if not isinstance(application_read, bool):
             raise TypeError("Application read mode must be bool")
+        if not isinstance(hide_simulated, bool):
+            raise TypeError("Simulated-trace rule must be bool")
+        # Decided once by the caller for the whole request. Every candidate
+        # sample, latest-state replay and value-proof read below leaves out the
+        # spans of marked traces when it is set, and none of them changes when
+        # it is not.
+        self._hide_simulated = hide_simulated
         self._executor = executor or V2AttributeQueryExecutor(
             application_read=application_read
         )
@@ -1700,6 +1754,8 @@ class AttributeReadSelector:
         candidate_sql = self._single_project_scope_sql(
             candidate_sql, project_ids, params
         )
+        if self._hide_simulated:
+            predicate = f"({predicate})\n      AND {_unmarked_row_sql()}"
         rows = self._execute(
             candidate_sql.format(candidate_predicate=predicate),
             params,
@@ -1826,6 +1882,11 @@ class AttributeReadSelector:
                 "OR (raw_source.trace_id = %(distinct_before_trace_id)s AND "
                 "toString(raw_source.project_id) "
                 "< %(distinct_before_project_id)s)))))"
+            )
+
+        if self._hide_simulated:
+            raw_frontier_predicate = (
+                f"({raw_frontier_predicate})\n      AND {_unmarked_row_sql()}"
             )
 
         if len(project_ids) == 1:
@@ -1955,6 +2016,8 @@ class AttributeReadSelector:
         }
         if attribute_key is not None:
             params["attribute_key"] = attribute_key
+        if self._hide_simulated:
+            sql = _replay_sql_reading_marked_as_deleted(sql)
         replay_sql = self._single_project_scope_sql(
             sql.format(candidate_predicate=candidate_predicate),
             project_ids,

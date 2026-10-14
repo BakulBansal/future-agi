@@ -314,8 +314,12 @@ class AnalyticsQueryService:
         window_start: datetime | None = None,
         window_end: datetime | None = None,
         exact_key: str | None = None,
+        hide_simulated: bool = False,
     ) -> AttributeKeyInventory:
         """Return the bounded CH25 key inventory for one or more projects.
+
+        ``hide_simulated`` leaves the spans of marked traces out of the
+        inventory; the caller decides it once for its request.
 
         This compatibility facade intentionally does *not* call
         :meth:`execute_ch_query`: that method is bound to the legacy ClickHouse
@@ -328,6 +332,7 @@ class AnalyticsQueryService:
         selector = AttributeReadSelector(
             wall_timeout_ms=timeout_ms,
             typed_only=True,
+            hide_simulated=hide_simulated,
         )
         read = selector.discover_keys(
             project_ids,
@@ -341,7 +346,11 @@ class AnalyticsQueryService:
         return AttributeKeyInventory(read, include_counts=include_counts)
 
     def get_span_attribute_keys_ch(
-        self, project_id: str, *, exact_key: str | None = None
+        self,
+        project_id: str,
+        *,
+        exact_key: str | None = None,
+        hide_simulated: bool = False,
     ) -> AttributeKeyInventory:
         """Get distinct span attribute keys with types from ClickHouse.
 
@@ -360,7 +369,7 @@ class AnalyticsQueryService:
         #     and wide `attrs_*` maps hit Code: 307 (max_bytes_to_read)
         #     because every row's Map gets exploded.
         return self.get_span_attribute_keys_ch_for_projects(
-            [project_id], exact_key=exact_key
+            [project_id], exact_key=exact_key, hide_simulated=hide_simulated
         )
 
     @staticmethod

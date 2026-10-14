@@ -28,6 +28,7 @@ from tracer.services.annotation_label_source import AnnotationLabelScoresProject
 from tracer.services.clickhouse.read_budget import ReadDeadline, ReadDeadlineExceeded
 from tracer.services.clickhouse.v2.query_service import V2AnalyticsQueryService
 from tracer.services.postgres_read_policy import application_postgres_reads
+from tracer.services.simulation_visibility import holding_projects
 
 logger = structlog.get_logger(__name__)
 
@@ -101,6 +102,17 @@ def _run_metrics_catalog_pg_snapshot(deadline: ReadDeadline, read):
         raise MetricsCatalogUnavailable("catalog_page") from exc
     except Exception as exc:
         raise MetricsCatalogUnavailable("catalog_page") from exc
+
+
+def _catalog_scope_holds_simulated(deadline: ReadDeadline, project_ids) -> bool:
+    """Does any project of this catalog scope hold marked traces?"""
+    return bool(
+        _run_metrics_catalog_pg_read(
+            deadline,
+            "project_scope",
+            lambda: holding_projects(project_ids),
+        )
+    )
 
 
 def _can_use_metrics_catalog_cache() -> bool:
@@ -585,6 +597,7 @@ def build_metrics_catalog(
     source: str = "",
     deadline: ReadDeadline | None = None,
     _resolved_project_scope: tuple[list[str], bool] | None = None,
+    _hides_simulated: bool | None = None,
 ):
     """Assemble the full unified metrics catalog for the workspace.
 
@@ -1006,6 +1019,17 @@ def build_metrics_catalog(
                 }
             )
 
+    # Decided here, on the request's thread, because the worker below must not
+    # open a second database connection. A caller that already decided (to key
+    # its cache) hands the answer in so the request reads it once.
+    hides_simulated = False
+    if want_custom_attributes and project_ids:
+        hides_simulated = (
+            _catalog_scope_holds_simulated(deadline, project_ids)
+            if _hides_simulated is None
+            else _hides_simulated
+        )
+
     # Span attributes are independent of the definition families, so retain
     # their concurrency while binding both the CH timeout and Future wait to
     # this same request-owned wall.
@@ -1016,6 +1040,7 @@ def build_metrics_catalog(
             recent_days=None,
             timeout_ms=deadline.remaining_ms(METRICS_CATALOG_TIMEOUT_MS),
             outer_limit=settings.DASHBOARD_METRICS_ATTRIBUTE_KEY_LIMIT,
+            hide_simulated=hides_simulated,
         )
         attrs = []
         for row in rows:
@@ -2211,21 +2236,57 @@ def get_cached_metrics_catalog(
             logger.warning("metrics_catalog_cache_get_failed", exc_info=True)
     if metrics is None:
         deadline.remaining_ms(floor_ms=1)
-        metrics = build_metrics_catalog(
-            workspace,
-            project_ids_param=project_ids_param,
-            agent_definition_id=agent_definition_id,
-            per_eval_config=per_eval_config,
-            include_custom_attributes=include_custom_attributes,
-            category=category,
-            source=source,
-            deadline=deadline,
-        )
-        # ``build_metrics_catalog`` has no partial-success return path. Only a
-        # complete catalog reaches this best-effort cache set.
-        if use_cache:
-            try:
-                cache.set(cache_key, metrics, timeout=ttl)
-            except Exception:
-                logger.warning("metrics_catalog_cache_set_failed", exc_info=True)
+        # Only a catalog that lists attribute keys depends on whether a project
+        # holds marked traces, and only a request that missed the cache needs
+        # the answer. A catalog cached under the plain key was built while its
+        # projects did not hold, so it carries no key of a marked trace, except
+        # when a request that decided "not holding" just before a project's first
+        # marked export read ClickHouse after that export became visible: that
+        # entry can be served for up to the 60-second cache window. One built for
+        # a holding scope lives under its own key, never the plain one.
+        resolved_scope = None
+        hides_simulated = None
+        if (
+            include_custom_attributes
+            and str(category or "") in ("", "custom_attribute")
+            and str(source or "") in ("", "traces")
+        ):
+            resolved_scope = _resolve_metrics_catalog_project_scope(
+                workspace,
+                project_ids_param,
+                include_workspace_projects=True,
+                deadline=deadline,
+            )
+            hides_simulated = bool(resolved_scope[0]) and (
+                _catalog_scope_holds_simulated(deadline, resolved_scope[0])
+            )
+            if hides_simulated:
+                cache_key += ":hide_simulated"
+                if use_cache:
+                    try:
+                        metrics = cache.get(cache_key)
+                    except Exception:
+                        logger.warning(
+                            "metrics_catalog_cache_get_failed", exc_info=True
+                        )
+        if metrics is None:
+            metrics = build_metrics_catalog(
+                workspace,
+                project_ids_param=project_ids_param,
+                agent_definition_id=agent_definition_id,
+                per_eval_config=per_eval_config,
+                include_custom_attributes=include_custom_attributes,
+                category=category,
+                source=source,
+                deadline=deadline,
+                _resolved_project_scope=resolved_scope,
+                _hides_simulated=hides_simulated,
+            )
+            # ``build_metrics_catalog`` has no partial-success return path. Only
+            # a complete catalog reaches this best-effort cache set.
+            if use_cache:
+                try:
+                    cache.set(cache_key, metrics, timeout=ttl)
+                except Exception:
+                    logger.warning("metrics_catalog_cache_set_failed", exc_info=True)
     return metrics

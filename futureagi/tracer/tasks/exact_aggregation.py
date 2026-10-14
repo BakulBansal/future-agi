@@ -304,6 +304,9 @@ def _attribute_detail_payload(identity: dict[str, Any]) -> Any:
         project_id=str(identity["project_id"]),
         attribute_key=str(identity["attribute_key"]),
         horizon_days=int(identity.get("horizon_days") or 365),
+        # The rule comes from the identity being refreshed, as in the other
+        # exact refreshes: its snapshot is stored under that key.
+        hide_simulated=bool(identity.get("hide_simulated")),
     )
 
 

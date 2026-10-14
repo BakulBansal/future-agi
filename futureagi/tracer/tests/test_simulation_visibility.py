@@ -37,6 +37,7 @@ from tracer.services.simulation_visibility import (
     hide_simulated,
     holding_projects,
     marked_trace_ids,
+    postgres_span_exclusion_sql,
     record_holding,
     resource_mark_sql,
     row_exclusion_sql,
@@ -115,6 +116,22 @@ def _statements():
 
 
 # ─── The text ─────────────────────────────────────────────────────────────────
+
+
+def test_postgres_span_exclusion_sql_text():
+    # True for a row that is NOT marked. Each test is COALESCEd so a null column
+    # keeps the row, the span mark is looked for in both attribute columns, and
+    # the resource mark in resource_attributes only.
+    assert postgres_span_exclusion_sql() == (
+        "NOT (COALESCE(jsonb_exists(span_attributes, "
+        "'fi.simulator.call_execution_id'), FALSE) "
+        "OR COALESCE(jsonb_exists(eval_attributes, "
+        "'fi.simulator.call_execution_id'), FALSE) "
+        "OR COALESCE(jsonb_exists(resource_attributes, "
+        "'fi.simulation.origin'), FALSE))"
+    )
+    # No bound placeholder: the caller binds only its own parameters.
+    assert "%" not in postgres_span_exclusion_sql()
 
 
 def test_row_exclusion_sql_text():

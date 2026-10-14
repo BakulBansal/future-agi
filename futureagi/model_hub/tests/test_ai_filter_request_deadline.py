@@ -171,6 +171,7 @@ def test_smart_mode_reuses_the_request_owned_deadline():
             "_authorize_smart_property_schema",
             return_value=schema,
         ),
+        mock.patch.object(ai_filter, "holding_projects", return_value=frozenset()),
         mock.patch.object(ai_filter, "_run_smart_agent", return_value=[]) as run_agent,
     ):
         response = ai_filter.AIFilterView.as_view()(
@@ -213,6 +214,7 @@ def test_smart_completion_failure_is_typed_and_sanitized():
             "_authorize_smart_property_schema",
             return_value=schema,
         ),
+        mock.patch.object(ai_filter, "holding_projects", return_value=frozenset()),
         mock.patch("agentic_eval.core.llm.llm.LLM") as llm_cls,
     ):
         llm_cls.return_value._get_completion_with_tools.side_effect = TimeoutError(

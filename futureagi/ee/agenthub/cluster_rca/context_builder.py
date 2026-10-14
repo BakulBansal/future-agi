@@ -16,6 +16,9 @@ import structlog
 from tracer.services.clickhouse.span_attribute_lookups import (
     list_attribute_keys_for_project,
 )
+from tracer.services.simulation_visibility import (
+    hide_simulated as project_hides_simulated,
+)
 
 logger = structlog.get_logger(__name__)
 
@@ -58,7 +61,9 @@ def build_project_schema_context(project_id: str | None) -> str:
         return ""
 
     try:
-        keys = list_attribute_keys_for_project(project_id)
+        keys = list_attribute_keys_for_project(
+            project_id, hide_simulated=project_hides_simulated(str(project_id))
+        )
     except Exception as exc:
         logger.warning(
             "cluster_rca_schema_context_failed",

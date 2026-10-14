@@ -57,6 +57,10 @@ def test_cached_catalog_late_complete_or_failure(monkeypatch, clock, rows, phase
         catalog, "_can_use_metrics_catalog_cache", lambda: phase != "disabled"
     )
     monkeypatch.setattr(catalog, "build_metrics_catalog", builder)
+    # A hit never needs the project scope or the holding decision; a miss reads
+    # the scope once and hands it to the builder.
+    resolve = Mock(return_value=(["owned-project"], True))
+    monkeypatch.setattr(catalog, "_resolve_metrics_catalog_project_scope", resolve)
     failed = phase in {"build_error", "query_error"}
     with pytest.raises(type(error)) if failed else nullcontext() as caught:
         result = catalog.get_cached_metrics_catalog(
@@ -67,6 +71,13 @@ def test_cached_catalog_late_complete_or_failure(monkeypatch, clock, rows, phase
         )
         assert result is rows
     assert builder.call_count == (0 if phase == "hit" else 1)
+    assert resolve.call_count == (0 if phase == "hit" else 1)
+    if phase != "hit":
+        assert builder.call_args.kwargs["_resolved_project_scope"] == (
+            ["owned-project"],
+            True,
+        )
+        assert builder.call_args.kwargs["_hides_simulated"] is False
     assert cache.get.call_count == (0 if phase == "disabled" else 1)
     assert cache.set.call_count == (0 if failed or phase in {"hit", "disabled"} else 1)
     if cache.set.called:
@@ -96,11 +107,14 @@ def test_late_cache_miss_cannot_start_required_build(monkeypatch, clock, phase):
     monkeypatch.setattr(catalog, "cache", cache)
     monkeypatch.setattr(catalog, "_can_use_metrics_catalog_cache", eligible)
     monkeypatch.setattr(catalog, "build_metrics_catalog", builder)
+    resolve = Mock()
+    monkeypatch.setattr(catalog, "_resolve_metrics_catalog_project_scope", resolve)
     with pytest.raises(ReadDeadlineExceeded):
         catalog.get_cached_metrics_catalog(
             SimpleNamespace(id="owned"), deadline=deadline
         )
     builder.assert_not_called()
+    resolve.assert_not_called()
     cache.set.assert_not_called()
 
 

@@ -6,6 +6,9 @@ from pydantic import Field
 from ai_tools.base import BaseTool, ToolContext, ToolResult
 from ai_tools.formatting import markdown_table, section
 from ai_tools.registry import register_tool
+from tracer.services.simulation_visibility import (
+    hide_simulated as project_hides_simulated,
+)
 
 
 class GetProjectEvalAttributesInput(PydanticBaseModel):
@@ -41,9 +44,11 @@ class GetProjectEvalAttributesTool(BaseTool):
         except Project.DoesNotExist:
             return ToolResult.not_found("Project", str(params.project_id))
 
-        # Fetch all distinct attribute keys for the project
+        # Fetch all distinct attribute keys for the project. The user reads this
+        # list, so a project that holds simulated traces leaves their keys out.
         attributes = SQL_query_handler.get_span_attributes_for_project(
-            str(params.project_id)
+            str(params.project_id),
+            hide_simulated=project_hides_simulated(str(params.project_id)),
         )
 
         if not attributes:

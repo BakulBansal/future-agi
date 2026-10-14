@@ -3528,11 +3528,14 @@ class ObservationSpanView(BaseModelViewSetMixin, ModelViewSet):
         if not self._attribute_project_for_request(request, project_id):
             return self._gm.not_found("Project not found")
 
-        selector = AttributeReadSelector(
-            typed_only=True,
-            json_attribute_mode="structured",
-        )
         try:
+            # Decided inside the guarded block, so a database error here is
+            # answered like any other failure of this read.
+            selector = AttributeReadSelector(
+                typed_only=True,
+                json_attribute_mode="structured",
+                hide_simulated=project_hides_simulated(str(project_id)),
+            )
             keys, metadata = self._get_span_attribute_inventory(
                 project_id,
                 selector=selector,
@@ -3603,14 +3606,17 @@ class ObservationSpanView(BaseModelViewSetMixin, ModelViewSet):
         if not self._attribute_project_for_request(request, project_id):
             return self._gm.not_found("Project not found")
 
-        selector = AttributeReadSelector(
-            typed_only=True,
-            # Eval field mapping can resolve arbitrary JSON values.  Unlike a
-            # filter picker it needs the key even when the value is an object,
-            # null, or a JSON-only scalar.
-            json_attribute_mode="all",
-        )
         try:
+            # Decided inside the guarded block, so a database error here is
+            # answered like any other failure of this read.
+            selector = AttributeReadSelector(
+                typed_only=True,
+                # Eval field mapping can resolve arbitrary JSON values.  Unlike a
+                # filter picker it needs the key even when the value is an object,
+                # null, or a JSON-only scalar.
+                json_attribute_mode="all",
+                hide_simulated=project_hides_simulated(str(project_id)),
+            )
             span_attribute_keys, discovery_metadata = (
                 self._get_span_attribute_inventory(
                     project_id,

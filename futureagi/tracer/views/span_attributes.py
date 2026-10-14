@@ -59,6 +59,10 @@ from tracer.services.clickhouse.v2.property_catalog.cursor import (
 )
 from tracer.services.exact_aggregation_cache import read_or_schedule_exact_snapshot
 from tracer.services.postgres_read_policy import application_postgres_reads
+from tracer.services.simulation_visibility import (
+    hide_simulated as project_hides_simulated,
+)
+from tracer.services.simulation_visibility import holding_projects
 from tracer.utils.workspace_scope import project_queryset_for_request
 
 logger = structlog.get_logger(__name__)
@@ -250,6 +254,16 @@ class SpanAttributeKeysView(APIView):
             ):
                 return self._gm.not_found("Project not found")
 
+            # One decision for this request. A workspace walk crosses project
+            # batches, so it decides per batch where the batch is known.
+            hides_simulated = (
+                False
+                if workspace_scope
+                else _run_span_attribute_pg_read(
+                    request_deadline, lambda: project_hides_simulated(project_id)
+                )
+            )
+
             if page_size is not None:
                 page_size = int(page_size)
                 project_ids: tuple[str, ...] | list[str]
@@ -280,6 +294,11 @@ class SpanAttributeKeysView(APIView):
                 # be replayed against the narrower filter inventory.
                 if discovery_mode != "filter":
                     cursor_query["discovery_mode"] = discovery_mode
+                if hides_simulated:
+                    # Signed only when set: a hiding walk never resumes under
+                    # the other rule, and a project that does not hold keeps
+                    # its cursors as they were.
+                    cursor_query["hide_simulated"] = True
                 if exact_key is not None:
                     # Signed cursor and server-side seen state are scoped to
                     # the normalized exact key. A continuation for one search
@@ -464,6 +483,15 @@ class SpanAttributeKeysView(APIView):
                     )
 
                 if project_ids:
+                    if workspace_scope:
+                        # This batch's own projects decide; the walk's position
+                        # and seen digests stay valid under either answer.
+                        hides_simulated = bool(
+                            _run_span_attribute_pg_read(
+                                request_deadline,
+                                lambda: holding_projects(project_ids),
+                            )
+                        )
                     selector = AttributeReadSelector(
                         typed_only=True,
                         json_attribute_mode=(
@@ -472,6 +500,7 @@ class SpanAttributeKeysView(APIView):
                         wall_timeout_ms=request_deadline.remaining_ms(
                             ATTRIBUTE_PROPERTY_PICKER_WALL_TIMEOUT_MS
                         ),
+                        hide_simulated=hides_simulated,
                     )
                     page_read = selector.read_key_cursor_page(
                         project_ids,
@@ -631,6 +660,7 @@ class SpanAttributeKeysView(APIView):
                 wall_timeout_ms=request_deadline.remaining_ms(
                     ATTRIBUTE_PROPERTY_PICKER_WALL_TIMEOUT_MS
                 ),
+                hide_simulated=hides_simulated,
             )
             read = selector.discover_keys([project_id], exact_key=exact_key)
             if _attribute_read_metadata_is_unavailable(read.metadata):
@@ -720,12 +750,13 @@ class SpanAttributeValuesView(APIView):
             key = query_params["key"]
             q = query_params.get("q")
             limit = query_params.get("limit", 50)
+            if not _project_is_in_request_scope(request, project_id):
+                return self._gm.not_found("Project not found")
             selector = AttributeReadSelector(
                 typed_only=True,
                 json_attribute_mode="arrays",
+                hide_simulated=project_hides_simulated(project_id),
             )
-            if not _project_is_in_request_scope(request, project_id):
-                return self._gm.not_found("Project not found")
             # This endpoint predates signed retained-data pagination. Keep it
             # as a responsive compatibility sample: a narrow exact latest-state
             # slice is useful to old clients and cannot turn a dense 365-day
@@ -845,6 +876,11 @@ class SpanAttributeDetailView(APIView):
                 "attribute_key": key,
                 "horizon_days": 365,
             }
+            if project_hides_simulated(project_id):
+                # Part of the snapshot's key, and only when set: a snapshot
+                # stored before the project held is never served to a request
+                # that hides, and the refresh reads the rule from this key.
+                identity["hide_simulated"] = True
             payload = read_or_schedule_exact_snapshot(
                 "attribute-detail",
                 identity,

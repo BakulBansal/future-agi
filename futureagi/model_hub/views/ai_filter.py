@@ -39,6 +39,7 @@ from model_hub.serializers.ai_filter import (
 from tfc.utils.api_contracts import validated_request
 from tfc.utils.api_serializers import ApiTextErrorResponseSerializer
 from tfc.utils.general_methods import GeneralMethods
+from tracer.services.simulation_visibility import holding_projects
 
 logger = structlog.get_logger(__name__)
 
@@ -321,6 +322,7 @@ def _fetch_trace_field_values(
     *,
     search_query,
     deadline=None,
+    hide_simulated=False,
 ):
     """Return an exact query-scoped value vocabulary from direct-write CH25.
 
@@ -354,6 +356,7 @@ def _fetch_trace_field_values(
                 limit=SMART_FILTER_VALUE_LIMIT,
                 lookback_days=365,
                 deadline=deadline,
+                hide_simulated=hide_simulated,
             )
             if not read.query_complete:
                 logger.warning(
@@ -371,6 +374,7 @@ def _fetch_trace_field_values(
                 typed_only=True,
                 json_attribute_mode="arrays",
                 wall_timeout_ms=deadline.remaining_ms(SMART_FILTER_VALUE_READ_WALL_MS),
+                hide_simulated=hide_simulated,
             ).read_values(
                 project_ids,
                 metric_name,
@@ -1748,6 +1752,12 @@ class AIFilterView(APIView):
                             workspace=request.workspace,
                             project_ids=project_ids,
                         )
+                        # Decided once for the request, inside the same bound,
+                        # so the model is never offered a value that only
+                        # simulated calls carry.
+                        hides_simulated = bool(
+                            holding_projects([str(value) for value in project_ids])
+                        )
                     schema_by_identity = {_ai_schema_identity(s): s for s in schema}
                     metric_type_by_id = {
                         identity: {
@@ -1769,6 +1779,7 @@ class AIFilterView(APIView):
                             metric_type_by_id.get(property_id, "system_metric"),
                             search_query=search_query,
                             deadline=grounding_deadline,
+                            hide_simulated=hides_simulated,
                         )
 
                 elif source == "simulation":

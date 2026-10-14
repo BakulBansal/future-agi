@@ -155,6 +155,24 @@ def row_exclusion_sql(*, map_column: str) -> str:
     return f"NOT ({_marked_row_sql(map_column, schema)})"
 
 
+def postgres_span_exclusion_sql() -> str:
+    """The Postgres test that is true for a span row carrying neither mark.
+
+    For ``tracer_observation_span``: the span mark is looked for in
+    ``span_attributes`` and in ``eval_attributes`` (the column a reader falls
+    back to when ``span_attributes`` is empty), the resource mark in
+    ``resource_attributes``, each by the presence of its key. ``COALESCE``
+    turns a null column into "not marked", because ``NOT`` over an unknown
+    would drop the row. Neither key contains ``%``, so the literals are safe
+    beside Django's ``%s`` placeholders.
+    """
+    return (
+        f"NOT (COALESCE(jsonb_exists(span_attributes, '{SIMULATION_MARK_KEY}'), FALSE) "
+        f"OR COALESCE(jsonb_exists(eval_attributes, '{SIMULATION_MARK_KEY}'), FALSE) "
+        f"OR COALESCE(jsonb_exists(resource_attributes, '{RESOURCE_MARK_KEY}'), FALSE))"
+    )
+
+
 def _marked_trace_ids_sql() -> str:
     # The table's sorting key is the identity ReplacingMergeTree collapses on, so
     # grouping by it keeps one row per live span. It is read from span_reader,

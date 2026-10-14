@@ -429,6 +429,7 @@ class AIFilterViewContractTests(unittest.TestCase):
                 "_resolve_project_ids",
                 return_value=["00000000-0000-4000-8000-000000000001"],
             ),
+            mock.patch.object(ai_filter, "holding_projects", return_value=frozenset()),
             mock.patch.object(
                 ai_filter,
                 "_run_smart_agent",

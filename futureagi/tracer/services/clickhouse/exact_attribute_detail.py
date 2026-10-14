@@ -292,6 +292,30 @@ ORDER BY
 """
 
 
+# The span's winning version decides whether it is hidden, like its deletion:
+# a marked span is read as deleted, so it adds nothing to a count, a value or a
+# statistic, and an older unmarked version of it never takes its place.
+_WINNING_DELETION_STATE = "attribute_source.is_deleted,\n"
+
+
+def _detail_sql(*, hide_simulated: bool) -> str:
+    if not hide_simulated:
+        return EXACT_ATTRIBUTE_DETAIL_SQL
+    # Imported at call time: the visibility module reaches the model layer.
+    from tracer.services.simulation_visibility import row_exclusion_sql
+
+    if EXACT_ATTRIBUTE_DETAIL_SQL.count(_WINNING_DELETION_STATE) != 1:
+        raise RuntimeError(
+            "The attribute detail statement has no single deletion state to "
+            "carry the simulated-trace rule."
+        )
+    unmarked = row_exclusion_sql(map_column="attrs_string")
+    return EXACT_ATTRIBUTE_DETAIL_SQL.replace(
+        _WINNING_DELETION_STATE,
+        f"if({unmarked}, attribute_source.is_deleted, 1),\n",
+    )
+
+
 def _utc(value: datetime) -> datetime:
     if value.tzinfo is None:
         return value.replace(tzinfo=UTC)
@@ -317,8 +341,13 @@ def read_exact_attribute_detail(
     executor: V2AttributeQueryExecutor | None = None,
     window_end: datetime | None = None,
     horizon_days: int = EXACT_ATTRIBUTE_DETAIL_HORIZON_DAYS,
+    hide_simulated: bool = False,
 ) -> dict[str, Any]:
-    """Compute one complete exact detail payload in one ClickHouse statement."""
+    """Compute one complete exact detail payload in one ClickHouse statement.
+
+    ``hide_simulated`` leaves the spans of marked traces out of every count,
+    value and statistic.
+    """
 
     started = monotonic()
     key = validate_attribute_key(attribute_key)
@@ -326,7 +355,7 @@ def read_exact_attribute_detail(
     start = end - timedelta(days=max(1, min(int(horizon_days), 365)))
     query_executor = executor or V2AttributeQueryExecutor()
     page = query_executor.execute(
-        EXACT_ATTRIBUTE_DETAIL_SQL,
+        _detail_sql(hide_simulated=hide_simulated),
         {
             "project_id": str(project_id),
             "attribute_key": key,

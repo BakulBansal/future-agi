@@ -3,6 +3,7 @@ Conftest for tracer app tests.
 Provides fixtures specific to tracer models and test data.
 """
 
+import importlib.util
 import json
 import uuid
 from datetime import timedelta
@@ -84,6 +85,10 @@ def pytest_configure(config):
 # test_holding_decision_fixture.py fails when a module imports either function
 # and is missing from these two tuples.
 _ONE_PROJECT_DECISION_SITES = (
+    "ai_tools.tools.tracing.create_custom_eval_config.project_hides_simulated",
+    "ai_tools.tools.tracing.get_project_eval_attributes.project_hides_simulated",
+    "ee.agenthub.cluster_rca.agent.project_hides_simulated",
+    "ee.agenthub.cluster_rca.context_builder.project_hides_simulated",
     "model_hub.services.bulk_selection.project_hides_simulated",
     "tracer.selectors.eval_tasks.row_resolver.project_hides_simulated",
     "tracer.services.clickhouse.query_builders.monitor_metrics.hide_simulated",
@@ -92,14 +97,33 @@ _ONE_PROJECT_DECISION_SITES = (
     "tracer.views.charts.project_hides_simulated",
     "tracer.views.observation_span.project_hides_simulated",
     "tracer.views.project.project_hides_simulated",
+    "tracer.views.span_attributes.project_hides_simulated",
     "tracer.views.trace.project_hides_simulated",
 )
 _PROJECT_SCOPE_DECISION_SITES = (
+    "model_hub.views.ai_filter.holding_projects",
     "tracer.services.clickhouse.query_builders.monitor_metrics.holding_projects",
+    "tracer.services.dashboard_metrics_catalog.holding_projects",
     "tracer.views.dashboard.holding_projects",
     "tracer.views.observation_span.holding_projects",
+    "tracer.views.span_attributes.holding_projects",
     "tracer.views.trace.holding_projects",
 )
+
+
+def _site_is_importable(site):
+    """Whether the module a ``module.name`` patch target lives in can be imported.
+
+    The ``ee`` modules are absent from a build without ee, and patching them by
+    dotted path would raise ImportError in every test without a database.
+    """
+    module = site.rpartition(".")[0]
+    if not module.startswith("ee."):
+        return True
+    try:
+        return importlib.util.find_spec(module) is not None
+    except ImportError:
+        return False
 
 
 def _project_holds_nothing(project_id):
@@ -149,9 +173,11 @@ def projects_hold_nothing_without_database(request, monkeypatch):
     if _has_database_access(request):
         return
     for site in _ONE_PROJECT_DECISION_SITES:
-        monkeypatch.setattr(site, _project_holds_nothing)
+        if _site_is_importable(site):
+            monkeypatch.setattr(site, _project_holds_nothing)
     for site in _PROJECT_SCOPE_DECISION_SITES:
-        monkeypatch.setattr(site, _projects_hold_nothing)
+        if _site_is_importable(site):
+            monkeypatch.setattr(site, _projects_hold_nothing)
 
 
 @pytest.fixture

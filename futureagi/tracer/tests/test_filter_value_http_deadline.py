@@ -303,7 +303,14 @@ def test_system_filter_value_cursor_receives_view_owned_deadline(monkeypatch):
     request_deadline.remaining_ms.assert_called_once_with(
         dashboard_view.ATTRIBUTE_PROPERTY_PICKER_WALL_TIMEOUT_MS
     )
-    assert events == ["deadline", "pg_budget", "project_scope", "selector"]
+    # The holding decision is one more Postgres read inside the same wrapper.
+    assert events == [
+        "deadline",
+        "pg_budget",
+        "project_scope",
+        "pg_budget",
+        "selector",
+    ]
 
 
 @pytest.mark.parametrize("source", ["traces", "sessions"])
@@ -633,6 +640,7 @@ def test_legacy_session_search_stays_raw_and_keeps_sample_metadata(monkeypatch):
         limit=20,
         lookback_days=dashboard_view.DashboardViewSet.FILTER_VALUES_DEFAULT_LOOKBACK_DAYS,
         deadline=request_deadline,
+        hide_simulated=False,
     )
     resolve_session_fields.assert_called_once_with(
         [session_id],

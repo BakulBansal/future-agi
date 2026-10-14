@@ -225,6 +225,15 @@ def _read_property_catalog_value_page(request, query_params, *, deadline):
         raise _PropertyCatalogValueRequestError(str(exc)) from exc
     except (DatabaseError, MetricsCatalogUnavailable) as exc:
         raise PropertyCatalogValueUnavailable("scope_unavailable") from exc
+    # The collector's observed values know nothing of simulated traces, so a
+    # holding scope is answered by the span readers that leave them out; a
+    # scope that does not hold keeps this catalog.
+    try:
+        holds_simulated = _filter_values_hide_simulated(deadline, projects)
+    except DatabaseError as exc:
+        raise PropertyCatalogValueUnavailable("scope_unavailable") from exc
+    if holds_simulated:
+        raise PropertyCatalogValueNotReady("simulated_traces")
     scope = cursor_scope_for_request(request, project_ids=projects)
     scope.update(
         agent_definition_id="", dataset_id="", workspace_scope=not raw_projects
@@ -447,6 +456,13 @@ def _run_filter_value_pg_read(deadline, read):
         read_only=True,
     ):
         return read()
+
+
+def _filter_values_hide_simulated(deadline, project_ids):
+    """The holding decision, read the way the picker's other Postgres reads are."""
+    return _run_filter_value_pg_read(
+        deadline, lambda: _scope_holds_simulated(project_ids)
+    )
 
 
 def _session_overlay_filter_value_ids(
@@ -2881,9 +2897,14 @@ class DashboardViewSet(BaseModelViewSetMixin, ModelViewSet):
         # Attribute inventory is served by CH25/V2, whose configuration is
         # independent from the legacy ClickHouse feature gate.
         analytics = AnalyticsQueryService()
+        # One decision for the whole request, like the other readers of a
+        # project list: any holding project hides marked traces for all.
+        hides_simulated = _scope_holds_simulated(project_ids)
         for pid in project_ids:
             try:
-                keys = analytics.get_span_attribute_keys_ch(pid)
+                keys = analytics.get_span_attribute_keys_ch(
+                    pid, hide_simulated=hides_simulated
+                )
             except Exception as exc:
                 logger.warning(
                     "dashboard_span_attribute_discovery_failed",
@@ -3924,6 +3945,12 @@ class DashboardViewSet(BaseModelViewSetMixin, ModelViewSet):
                             seen_value_contains=seen_state.contains,
                             seen_value_count=seen_state.seen_count,
                             deadline=filter_value_deadline,
+                            # This batch's own projects decide: a walk crosses
+                            # batches, and a position or seen digest is a plain
+                            # value that stays valid under either answer.
+                            hide_simulated=_filter_values_hide_simulated(
+                                filter_value_deadline, project_ids
+                            ),
                         )
                         appended_digests = (
                             page_read.appended_value_digests
@@ -4065,6 +4092,16 @@ class DashboardViewSet(BaseModelViewSetMixin, ModelViewSet):
                             }
                         )
 
+                    # Decided once for this request. A hiding walk is signed
+                    # apart from a non-hiding one, so a continuation never
+                    # resumes under the other rule; a project that does not
+                    # hold keeps the query, and so its cursors, as they were.
+                    hides_simulated = _filter_values_hide_simulated(
+                        filter_value_deadline, project_ids
+                    )
+                    if hides_simulated:
+                        cursor_query = {**cursor_query, "hide_simulated": True}
+
                     selector = None
                     if cursor_token:
                         cursor_state, cursor_window_mode = decode_native_list_cursor(
@@ -4163,6 +4200,7 @@ class DashboardViewSet(BaseModelViewSetMixin, ModelViewSet):
                         seen_value_contains=seen_state.contains,
                         seen_value_count=seen_state.seen_count,
                         deadline=filter_value_deadline,
+                        hide_simulated=hides_simulated,
                     )
                     next_cursor = None
                     if page_read.has_more:
@@ -4289,6 +4327,9 @@ class DashboardViewSet(BaseModelViewSetMixin, ModelViewSet):
                             )
                         ),
                         deadline=filter_value_deadline,
+                        hide_simulated=_filter_values_hide_simulated(
+                            filter_value_deadline, project_ids
+                        ),
                     )
                     values = list(value_read.values)
                 except Exception as exc:
@@ -4872,6 +4913,12 @@ class DashboardViewSet(BaseModelViewSetMixin, ModelViewSet):
                                 wall_timeout_ms=filter_value_deadline.remaining_ms(
                                     ATTRIBUTE_PROPERTY_PICKER_WALL_TIMEOUT_MS
                                 ),
+                                # This batch's own projects decide: a walk
+                                # crosses batches, and its position and seen
+                                # digests stay valid under either answer.
+                                hide_simulated=_filter_values_hide_simulated(
+                                    filter_value_deadline, project_ids
+                                ),
                             )
                             page_read = selector.read_value_cursor_page(
                                 project_ids,
@@ -4969,6 +5016,15 @@ class DashboardViewSet(BaseModelViewSetMixin, ModelViewSet):
                             "search": search,
                             "attribute_type": attribute_type,
                         }
+                        # Decided once for this request and signed into the
+                        # query only when set, so a hiding walk never resumes
+                        # under the other rule and a project that does not hold
+                        # keeps its cursors as they were.
+                        hides_simulated = _filter_values_hide_simulated(
+                            filter_value_deadline, project_ids
+                        )
+                        if hides_simulated:
+                            cursor_query["hide_simulated"] = True
 
                         selector = None
                         if cursor_token:
@@ -5065,6 +5121,7 @@ class DashboardViewSet(BaseModelViewSetMixin, ModelViewSet):
                                         ATTRIBUTE_PROPERTY_PICKER_WALL_TIMEOUT_MS
                                     )
                                 ),
+                                hide_simulated=hides_simulated,
                             )
                             window_end = datetime.now(UTC)
                             retained_start = selector.retained_window_start(
@@ -5119,6 +5176,7 @@ class DashboardViewSet(BaseModelViewSetMixin, ModelViewSet):
                                 wall_timeout_ms=filter_value_deadline.remaining_ms(
                                     ATTRIBUTE_PROPERTY_PICKER_WALL_TIMEOUT_MS
                                 ),
+                                hide_simulated=hides_simulated,
                             )
                         page_read = selector.read_value_cursor_page(
                             project_ids,
@@ -5231,6 +5289,9 @@ class DashboardViewSet(BaseModelViewSetMixin, ModelViewSet):
                         now=datetime.now(UTC),
                         wall_timeout_ms=filter_value_deadline.remaining_ms(
                             ATTRIBUTE_PROPERTY_PICKER_WALL_TIMEOUT_MS
+                        ),
+                        hide_simulated=_filter_values_hide_simulated(
+                            filter_value_deadline, project_ids
                         ),
                     )
                     read = selector.read_values(
