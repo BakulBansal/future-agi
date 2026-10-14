@@ -976,3 +976,24 @@ def test_delete_keeps_flag_written_after_get_object(
     updates = [sql for sql in seen if sql.startswith('UPDATE "tracer_observability_')]
     assert updates
     assert all('"metadata"' not in sql and '"enabled"' not in sql for sql in updates)
+
+
+@pytest.mark.parametrize("word", ["", "grpc", "TRACEAI"])
+def test_source_agent_with_an_unknown_instrumentation_word_is_refused(
+    organization, workspace, user, word
+):
+    # Only the two named instrumenters admit a code agent; any other word fails closed.
+    agent = _agent(organization, workspace, provider=None)
+    summary = make_summary(
+        agent_definition_id=agent.id,
+        kind="source",
+        provider="",
+        instrumentation=word,
+        missing=("credential", "provider_agent_id"),
+    )
+    before = _created()
+    with seams(summary):
+        with pytest.raises(switch.ObservabilityRefused) as raised:
+            _turn(agent, True, user, organization, workspace)
+    assert raised.value.missing == (switch.PREREQUISITES["instrumentation"],)
+    assert _created() == before
