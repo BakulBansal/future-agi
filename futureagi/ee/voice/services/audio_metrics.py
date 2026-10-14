@@ -24,7 +24,7 @@ def analyze_audio(audio_bytes: bytes) -> AudioMetrics:
     """
     try:
         waveform, sample_rate = librosa.load(BytesIO(audio_bytes), sr=None, mono=True)
-    except (ValueError, RuntimeError, EOFError, OSError) as exc:
+    except Exception as exc:  # decoding backends raise format-specific exceptions
         raise ValueError("Unable to decode audio bytes") from exc
 
     samples = np.asarray(waveform, dtype=np.float64)
@@ -36,7 +36,7 @@ def analyze_audio(audio_bytes: bytes) -> AudioMetrics:
     pitch = None
     try:
         frame_length = 2048
-        if samples.size >= frame_length:
+        if samples.size >= frame_length and sample_rate > 2 * librosa.note_to_hz("C2"):
             f0, voiced, _ = librosa.pyin(
                 samples, sr=sample_rate, fmin=librosa.note_to_hz("C2"),
                 fmax=min(librosa.note_to_hz("C7"), sample_rate * 0.45),
