@@ -226,7 +226,10 @@ import {
   useSessionsGridStore,
 } from "../SessionsView/ReplaySessions/store";
 import { REPLAY_MODULES } from "../SessionsView/ReplaySessions/configurations";
-import { REPLAY_TYPES } from "../SessionsView/ReplaySessions/constants";
+import {
+  REPLAY_ACTION_ID,
+  REPLAY_TYPES,
+} from "../SessionsView/ReplaySessions/constants";
 import { withoutReplayForRestrictedOrgs } from "../SessionsView/ReplaySessions/replayAccess";
 import { useRestrictSimulateToEnvironments } from "src/hooks/useRestrictSimulateToEnvironments";
 import { dateFilterEqual, filtersContentEqual } from "../saved-view-utils";
@@ -4185,7 +4188,7 @@ const LLMTracingView = ({ mode = "project", userIdForUserMode = null }) => {
                   return withoutReplayForRestrictedOrgs(
                     [
                       {
-                        id: "replay",
+                        id: REPLAY_ACTION_ID,
                         label: "Replay Calls",
                         icon: "mdi:play-outline",
                       },
@@ -4295,7 +4298,7 @@ const LLMTracingView = ({ mode = "project", userIdForUserMode = null }) => {
                     setQueueAnchorEl(anchor);
                   } else if (actionId === "dataset") {
                     setOpenAddDataset(true);
-                  } else if (actionId === "replay") {
+                  } else if (actionId === REPLAY_ACTION_ID) {
                     // Mirror the standalone "Replay Calls" button flow
                     if (openReplaySessionDrawer[REPLAY_MODULES.TRACES]) {
                       setIsReplayDrawerCollapsed(REPLAY_MODULES.TRACES, false);
