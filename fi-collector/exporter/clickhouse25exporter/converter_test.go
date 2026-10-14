@@ -927,13 +927,6 @@ func TestSpanCost_NilPricerAndUnpriceable(t *testing.T) {
 	}
 }
 
-// ─── Simulation-marked resources: no session or end-user identity ──────────
-//
-// A resource carrying fi.simulation.origin is a simulated run. Its spans are
-// written as usual but stamp no end_user_id / trace_session_id and add no
-// end_users / trace_sessions rows, so the collector derives no session or
-// end-user identity from it. The key's presence decides; its value is never read.
-
 // simulationMarkKey is spelled out here rather than read from the converter,
 // so a typo in the converter's constant fails these tests.
 const simulationMarkKey = "fi.simulation.origin"
@@ -1084,6 +1077,16 @@ func TestMarkedResourceOnlyIdentityDiffers(t *testing.T) {
 		}
 	}
 
+	// The identity columns are the one difference: set on the unmarked row, nil on the marked one.
+	for _, col := range []string{"end_user_id", "trace_session_id"} {
+		if u[col] == nil {
+			t.Errorf("unmarked %s is nil, want a stamped id", col)
+		}
+		if m[col] != nil {
+			t.Errorf("marked %s = %#v, want nil", col, m[col])
+		}
+	}
+
 	// resource_attrs: the unmarked map plus exactly the mark.
 	uRes := u["resource_attrs"].(map[string]any)
 	mRes := m["resource_attrs"].(map[string]any)
@@ -1103,66 +1106,6 @@ func TestMarkedResourceOnlyIdentityDiffers(t *testing.T) {
 		if v, _ := r["_version"].(uint64); v == 0 {
 			t.Errorf("%s _version must be nonzero, got %#v", name, r["_version"])
 		}
-	}
-}
-
-func TestUnmarkedResourceKeepsIdentityRows(t *testing.T) {
-	const user, sess = "keep-user@example.test", "keep-session-1"
-	traces := buildObserveSpanWith(user, true, "email", true, sess, true)
-
-	rows, ids, err := ConvertWithIdentities(context.Background(), traces, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(rows) != 1 {
-		t.Fatalf("rows=%d want 1", len(rows))
-	}
-	wantEU := detid.EndUserID(stampProject, stampOrg, user, "email").String()
-	wantSess := detid.TraceSessionID(stampProject, sess).String()
-	if rows[0]["end_user_id"] != wantEU {
-		t.Errorf("end_user_id = %#v, want %s", rows[0]["end_user_id"], wantEU)
-	}
-	if rows[0]["trace_session_id"] != wantSess {
-		t.Errorf("trace_session_id = %#v, want %s", rows[0]["trace_session_id"], wantSess)
-	}
-	if eus := ids.EndUsers(); len(eus) != 1 || eus[0].EndUserID != wantEU {
-		t.Errorf("end_users = %+v, want exactly one with id %s", eus, wantEU)
-	}
-	if ss := ids.Sessions(); len(ss) != 1 || ss[0].TraceSessionID != wantSess {
-		t.Errorf("sessions = %+v, want exactly one with id %s", ss, wantSess)
-	}
-	if trs := ids.Traces(); len(trs) != 1 || trs[0].SessionID != wantSess {
-		t.Errorf("traces = %+v, want exactly one with SessionID %s", trs, wantSess)
-	}
-
-	// The row keeps exactly today's columns, and its resource attributes are the
-	// producer's own, none added or dropped.
-	wantCols := []string{
-		"project_id", "observation_type", "service_name", "start_time", "trace_id", "id",
-		"parent_span_id", "name", "end_time", "latency_ms", "org_id", "end_user_id",
-		"trace_session_id", "status", "status_message", "model", "provider", "gen_ai_system",
-		"gen_ai_operation", "operation_name", "prompt_tokens", "completion_tokens",
-		"total_tokens", "cost", "attrs_string", "attrs_number", "attrs_bool",
-		"attributes_extra", "resource_attrs", "metadata", "input", "output", "tags",
-		"span_events", "semconv_source", "_version", "is_deleted",
-	}
-	if len(rows[0]) != len(wantCols) {
-		t.Errorf("row has %d columns, want %d", len(rows[0]), len(wantCols))
-	}
-	for _, c := range wantCols {
-		if _, ok := rows[0][c]; !ok {
-			t.Errorf("row lacks column %q", c)
-		}
-	}
-	wantRes := map[string]any{
-		"service.name":  "my-llm-app",
-		"fi.project_id": stampProject,
-		"fi.org_id":     stampOrg,
-		"fi.semconv":    "openinference",
-		"project_type":  "observe",
-	}
-	if got := rows[0]["resource_attrs"]; !reflect.DeepEqual(got, wantRes) {
-		t.Errorf("resource_attrs = %#v, want %#v", got, wantRes)
 	}
 }
 

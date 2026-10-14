@@ -359,7 +359,7 @@ func spanToRow(
 	// external_session_id) so curatedwriter can mirror the end_users /
 	// trace_sessions RMTs keyed by the SAME id. The span columns below read the
 	// ids straight off this identity — no second derivation.
-	var identity spanIdentity // zero value: both columns nil, nothing added to the batch
+	var identity spanIdentity // zero value: both id columns nil, addTo writes no identity rows
 	if _, marked := resourceAttrs[resAttrSimulationOrigin]; !marked {
 		identity = newSpanIdentity(span.Attributes(), projectID, orgID, projectType)
 	}
