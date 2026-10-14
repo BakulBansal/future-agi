@@ -172,7 +172,7 @@ from tracer.services.exact_aggregation_cache import (
     read_or_schedule_exact_snapshot,
 )
 from tracer.services.postgres_read_policy import application_postgres_reads
-from tracer.services.simulation_visibility import holding_projects
+from tracer.services.simulation_visibility import MarkedLookupFailed, holding_projects
 from tracer.utils.helper import get_annotation_labels_by_project
 from tracer.utils.property_registry import (
     names_a_stored_definition,
@@ -2202,6 +2202,7 @@ def _bind_dashboard_annotation_completeness(
     *,
     deadline,
     allow_metadata_read,
+    hide_simulated=False,
 ):
     """Bind authoritative per-project label sets into the snapshot identity."""
 
@@ -2231,6 +2232,7 @@ def _bind_dashboard_annotation_completeness(
         lambda: get_annotation_labels_by_project(
             list(project_ids),
             organization=workspace.organization,
+            hide_simulated=hide_simulated,
         ),
     )
     normalized = {
@@ -6301,8 +6303,14 @@ class DashboardWidgetViewSet(BaseModelViewSetMixin, ModelViewSet):
                 workspace,
                 deadline=read_deadline,
                 allow_metadata_read=not _exact_worker,
+                hide_simulated=hide_simulated,
             )
-        except (AnnotationScoreReadUnavailable, DatabaseError, ReadDeadlineExceeded):
+        except (
+            AnnotationScoreReadUnavailable,
+            DatabaseError,
+            MarkedLookupFailed,
+            ReadDeadlineExceeded,
+        ):
             return self._gm.custom_error_response(
                 status.HTTP_503_SERVICE_UNAVAILABLE,
                 "Dashboard annotation metadata is temporarily unavailable. Please retry.",

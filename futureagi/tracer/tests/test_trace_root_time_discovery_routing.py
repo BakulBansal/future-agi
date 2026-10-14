@@ -34,7 +34,9 @@ def _setup(monkeypatch):
         view_module.CustomEvalConfig.objects, "filter", lambda **_kwargs: metadata
     )
     monkeypatch.setattr(
-        view_module, "get_annotation_labels_for_project", lambda *_args: []
+        view_module,
+        "get_annotation_labels_for_project",
+        lambda *_args, **_kwargs: [],
     )
     request = SimpleNamespace(
         query_params={},

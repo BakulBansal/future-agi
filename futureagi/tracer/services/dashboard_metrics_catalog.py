@@ -115,6 +115,21 @@ def _catalog_scope_holds_simulated(deadline: ReadDeadline, project_ids) -> bool:
     )
 
 
+def _used_label_ids(label_source, project_id, hides_simulated: bool) -> list:
+    """The labels a project has scores for, as the catalog lists them.
+
+    A holding project leaves out a label whose scores are all on marked traces;
+    if which traces are marked cannot be answered the catalog read fails rather
+    than guess.
+    """
+    from tracer.utils.helper import _label_ids_with_an_unmarked_score
+
+    label_ids = list(label_source.label_ids_for_project(project_id))
+    if hides_simulated:
+        label_ids = _label_ids_with_an_unmarked_score(project_id, label_ids)
+    return label_ids
+
+
 def _can_use_metrics_catalog_cache() -> bool:
     """Only use the non-blocking, process-local cache on this request path.
 
@@ -1021,9 +1036,15 @@ def build_metrics_catalog(
 
     # Decided here, on the request's thread, because the worker below must not
     # open a second database connection. A caller that already decided (to key
-    # its cache) hands the answer in so the request reads it once.
+    # its cache) hands the answer in so the request reads it once. The eval
+    # usage read below needs the same answer, so a request that only lists
+    # evals asks too, and so does one that lists the labels the scope has used.
+    wants_eval_usage = want_eval_metrics and filter_by_project and not per_eval_config
+    wants_label_usage = want_annotation_metrics and filter_by_project
     hides_simulated = False
-    if want_custom_attributes and project_ids:
+    if (
+        want_custom_attributes or wants_eval_usage or wants_label_usage
+    ) and project_ids:
         hides_simulated = (
             _catalog_scope_holds_simulated(deadline, project_ids)
             if _hides_simulated is None
@@ -1072,6 +1093,10 @@ def build_metrics_catalog(
                 from model_hub.models.evals_metric import EvalTemplate
 
                 used_template_ids = []
+                # Configs whose only eval rows are on marked traces. The
+                # fallback below lists every configured eval, so a holding
+                # scope has to take these out of it.
+                marked_only_config_ids = []
                 if filter_by_project and not per_eval_config:
                     candidate_config_ids = _run_metrics_catalog_pg_read(
                         deadline,
@@ -1094,9 +1119,29 @@ def build_metrics_catalog(
                                     METRICS_CATALOG_EVAL_USAGE_QUERY_TIMEOUT_MS
                                 ),
                                 window_days=METRICS_CATALOG_EVAL_USAGE_LOOKBACK_DAYS,
+                                hide_simulated=hides_simulated,
+                                project_ids=project_ids,
                             )
+                            if hides_simulated:
+                                with_any_rows = analytics.get_eval_config_ids_for_candidates_ch(
+                                    [str(value) for value in candidate_config_ids],
+                                    timeout_ms=deadline.remaining_ms(
+                                        METRICS_CATALOG_EVAL_USAGE_QUERY_TIMEOUT_MS
+                                    ),
+                                    window_days=METRICS_CATALOG_EVAL_USAGE_LOOKBACK_DAYS,
+                                )
+                                marked_only_config_ids = sorted(
+                                    set(with_any_rows) - set(used_template_ids)
+                                )
                             deadline.remaining_ms(floor_ms=1)
                         except Exception as exc:
+                            if hides_simulated:
+                                # The fallback would list a config whose only
+                                # data is simulated, so a holding scope cannot
+                                # fall back: it fails like any unreadable family.
+                                if isinstance(exc, ReadDeadlineExceeded):
+                                    raise
+                                raise MetricsCatalogUnavailable("eval_metrics") from exc
                             logger.warning(
                                 "dashboard_metrics_catalog_optimization_fallback",
                                 optimization="eval_usage",
@@ -1107,15 +1152,19 @@ def build_metrics_catalog(
 
                 if not per_eval_config:
                     if not used_template_ids and filter_by_project:
+                        configured = CustomEvalConfig.objects.filter(
+                            project_id__in=project_ids,
+                            deleted=False,
+                        )
+                        if marked_only_config_ids:
+                            configured = configured.exclude(
+                                id__in=marked_only_config_ids
+                            )
                         used_template_ids = _run_metrics_catalog_pg_read(
                             deadline,
                             "eval_metrics",
                             lambda: list(
-                                CustomEvalConfig.objects.filter(
-                                    project_id__in=project_ids,
-                                    deleted=False,
-                                )
-                                .order_by("eval_template_id")
+                                configured.order_by("eval_template_id")
                                 .values_list("eval_template_id", flat=True)
                                 .distinct()
                             ),
@@ -1208,8 +1257,8 @@ def build_metrics_catalog(
                             _run_metrics_catalog_pg_read(
                                 deadline,
                                 "annotation_metrics",
-                                lambda project_id=project_id: list(
-                                    label_source.label_ids_for_project(project_id)
+                                lambda project_id=project_id: _used_label_ids(
+                                    label_source, project_id, hides_simulated
                                 ),
                             )
                         )
@@ -2095,7 +2144,12 @@ def build_metrics_catalog_page(
 
     # Category 2: label definitions. Project usage is expressed as an EXISTS
     # subquery against authoritative Score.project instead of materializing a
-    # label-id set for every requested project.
+    # label-id set for every requested project. A scope that holds marked
+    # traces cannot be filtered that way: whether a score sits on a marked
+    # trace is only known from ClickHouse, so that scope (and only that scope)
+    # materializes the ids of the labels that have an unmarked score and counts
+    # and pages over them, which keeps total and page rows on one set.
+    hides_simulated = None
     if want_annotations:
         from model_hub.models.develop_annotations import AnnotationsLabels
 
@@ -2104,15 +2158,34 @@ def build_metrics_catalog_page(
             Q(workspace__isnull=True) | Q(workspace=workspace),
         )
         if filter_by_project:
-            from model_hub.models.score import Score
-
-            matching_score = Score.no_workspace_objects.filter(
-                AnnotationLabelScoresProjectPG._trace_span_scope(),
-                tracer_project_id__in=project_ids,
-                label_id=OuterRef("pk"),
+            hides_simulated = bool(project_ids) and _catalog_scope_holds_simulated(
+                deadline, project_ids
             )
+            if hides_simulated:
+                label_source = AnnotationLabelScoresProjectPG()
+                used_label_ids: set = set()
+                for project_id in project_ids:
+                    used_label_ids.update(
+                        _run_metrics_catalog_pg_read(
+                            deadline,
+                            "annotation_metrics",
+                            lambda project_id=project_id: _used_label_ids(
+                                label_source, project_id, True
+                            ),
+                        )
+                    )
+                label_in_scope = Q(id__in=used_label_ids)
+            else:
+                from model_hub.models.score import Score
+
+                matching_score = Score.no_workspace_objects.filter(
+                    AnnotationLabelScoresProjectPG._trace_span_scope(),
+                    tracer_project_id__in=project_ids,
+                    label_id=OuterRef("pk"),
+                )
+                label_in_scope = Exists(matching_score)
             annotation_queryset = annotation_queryset.filter(
-                Q(project_id__in=project_ids) | Exists(matching_score)
+                Q(project_id__in=project_ids) | label_in_scope
             )
         annotation_queryset = _catalog_search_and_order(
             annotation_queryset,
@@ -2140,6 +2213,7 @@ def build_metrics_catalog_page(
             source="traces",
             deadline=deadline,
             _resolved_project_scope=(project_ids, filter_by_project),
+            _hides_simulated=hides_simulated,
         )
         if search:
             folded_search = search.casefold()
@@ -2236,21 +2310,38 @@ def get_cached_metrics_catalog(
             logger.warning("metrics_catalog_cache_get_failed", exc_info=True)
     if metrics is None:
         deadline.remaining_ms(floor_ms=1)
-        # Only a catalog that lists attribute keys depends on whether a project
-        # holds marked traces, and only a request that missed the cache needs
-        # the answer. A catalog cached under the plain key was built while its
-        # projects did not hold, so it carries no key of a marked trace, except
-        # when a request that decided "not holding" just before a project's first
+        # Only a catalog that lists attribute keys or reads eval or label usage
+        # depends on whether a project holds marked traces, and only a request
+        # that missed the cache needs the answer. A catalog cached under the
+        # plain key was built while its projects did not hold, so it carries no
+        # key, eval or label whose only data is a marked trace, except when a
+        # request that decided "not holding" just before a project's first
         # marked export read ClickHouse after that export became visible: that
         # entry can be served for up to the 60-second cache window. One built for
         # a holding scope lives under its own key, never the plain one.
         resolved_scope = None
         hides_simulated = None
-        if (
+        wants_attribute_keys = (
             include_custom_attributes
             and str(category or "") in ("", "custom_attribute")
             and str(source or "") in ("", "traces")
-        ):
+        )
+        # The eval usage read runs only for an explicit project scope, and only
+        # when the catalog is not one entry per eval config.
+        wants_eval_usage = (
+            bool(pids_key)
+            and not per_eval_config
+            and str(category or "") in ("", "eval_metric")
+            and str(source or "") in ("", "all")
+        )
+        # The label list reads the labels the scope has scored, again for an
+        # explicit scope only.
+        wants_label_usage = (
+            bool(pids_key)
+            and str(category or "") in ("", "annotation_metric")
+            and str(source or "") in ("", "traces", "datasets", "both")
+        )
+        if wants_attribute_keys or wants_eval_usage or wants_label_usage:
             resolved_scope = _resolve_metrics_catalog_project_scope(
                 workspace,
                 project_ids_param,

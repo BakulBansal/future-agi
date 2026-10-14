@@ -1,3 +1,4 @@
+import hashlib
 import json
 from collections.abc import MutableMapping
 from dataclasses import asdict, dataclass
@@ -5,11 +6,13 @@ from datetime import date, datetime, timedelta
 from typing import Any, TypedDict
 
 import pandas as pd
+from django.core.cache import cache as django_cache
 from rest_framework import serializers
 
 from model_hub.models.choices import AnnotationTypeChoices, DataTypeChoices
 from model_hub.models.develop_annotations import AnnotationsLabels
 from tracer.models.custom_eval_config import CustomEvalConfig, EvalOutputType
+from tracer.services.simulation_visibility import holding_projects
 from tracer.utils.constants import (
     LIST_OPS,
     NO_VALUE_OPS,
@@ -683,7 +686,192 @@ def validate_sort_params_helper(value):
     return value
 
 
-def get_annotation_labels_for_project(project_id, organization=None, project_ids=None):
+# A label found only through scores is checked against the marked traces in
+# batches of this many scores; a label whose scores are all on marked traces is
+# only known after every one of them was read, so the walk is capped and fails
+# the request rather than guessing past the cap.
+_MARKED_SCORE_BATCH = 1000
+_MARKED_SCORE_MAX_BATCHES = 100
+
+
+def _trace_ids_of_spans(project_id, span_ids) -> dict[str, str]:
+    """The trace of each given span that has a live row in the project.
+
+    A score on a span carries no trace id of its own, so which trace it belongs
+    to is only known from the span. A span with no live row is left out.
+    """
+    from tracer.services.simulation_visibility import (
+        MARKED_LOOKUP_TIMEOUT_MS,
+        MarkedLookupFailed,
+    )
+
+    ids = tuple(dict.fromkeys(str(span_id) for span_id in span_ids if span_id))
+    if not ids:
+        return {}
+    from tracer.services.clickhouse.v2.query_service import V2AnalyticsQueryService
+
+    try:
+        result = V2AnalyticsQueryService().execute_ch_query(
+            "SELECT id, argMax(trace_id, _version) AS trace_id FROM spans"
+            " PREWHERE project_id = toUUID(%(project_id)s) AND id IN %(span_ids)s"
+            " GROUP BY id HAVING argMax(is_deleted, _version) = 0",
+            {"project_id": str(project_id), "span_ids": ids},
+            server_execution_cap_ms=MARKED_LOOKUP_TIMEOUT_MS,
+        )
+    except Exception as exc:
+        raise MarkedLookupFailed(
+            f"Could not tell which traces the scored spans of project {project_id} "
+            "belong to: the ClickHouse read failed or ran longer than "
+            f"{MARKED_LOOKUP_TIMEOUT_MS} ms. No answer was guessed; ask again."
+        ) from exc
+    return {str(row["id"]): str(row["trace_id"]) for row in result.data}
+
+
+# A list page reads the labels of a holding project on every load, and the walk
+# below costs a read of scores per batch, so its answer is kept for a short time.
+_MARKED_LABELS_CACHE_SECONDS = 120
+
+
+def _label_ids_with_an_unmarked_score(
+    project_id, label_ids, *, holding=None
+) -> list[str]:
+    """The given labels that have a score on a trace that is not marked.
+
+    A project that does not hold has no marked trace, so its labels come back
+    as given and nothing is read: a scope that holds through one project must
+    not make its other projects pay for the walk. ``holding`` names the
+    projects already known to hold; when it is not given the flag is read.
+    The answer of a holding project is kept for a short time, under a key that
+    names the project, the labels asked about and the hiding decision.
+    """
+    ids = [str(label_id) for label_id in label_ids]
+    if not ids:
+        return []
+    if holding is None:
+        holding = holding_projects((str(project_id),))
+    if str(project_id).lower() not in {str(held).lower() for held in holding}:
+        return ids
+    cache_key = (
+        f"annotation_labels_unmarked:{project_id}:"
+        + hashlib.sha256(",".join(sorted(set(ids))).encode()).hexdigest()
+        + ":hide_simulated"
+    )
+    kept = django_cache.get(cache_key)
+    if kept is None:
+        kept = _walk_for_labels_with_an_unmarked_score(project_id, ids)
+        django_cache.set(cache_key, kept, timeout=_MARKED_LABELS_CACHE_SECONDS)
+    kept_ids = set(kept)
+    return [label_id for label_id in ids if label_id in kept_ids]
+
+
+def _label_ids_scored_off_trace_and_span(
+    project_id, label_ids=None, *, on_a_session=False
+) -> set[str]:
+    """Labels that have a score of the project that sits on no trace and no span.
+
+    Such a score (on a session, say) cannot belong to a marked trace, so its
+    label stays without any ClickHouse lookup. ``label_ids`` narrows the read
+    to the labels being decided; ``on_a_session`` keeps only scores that name a
+    session, which is what the property picker has always counted.
+    """
+    from model_hub.models.score import Score
+    from tracer.services.annotation_label_source import _materialize_score_rows
+
+    scores = Score.no_workspace_objects.filter(
+        tracer_project_id=project_id,
+        trace_id__isnull=True,
+        observation_span_id__isnull=True,
+    )
+    if on_a_session:
+        scores = scores.filter(trace_session_id__isnull=False)
+    if label_ids is not None:
+        scores = scores.filter(label_id__in={str(label_id) for label_id in label_ids})
+    rows = _materialize_score_rows(
+        scores.order_by().values_list("label_id", flat=True).distinct()
+    )
+    return {str(label_id) for label_id in rows if label_id}
+
+
+def _walk_for_labels_with_an_unmarked_score(project_id, label_ids) -> list[str]:
+    """Read the scores of a holding project's labels until each is decided.
+
+    A score whose trace cannot be found (a span with no live row, or a score
+    with no trace at all) cannot be shown to belong to a marked trace, so it
+    counts as unmarked, like an eval row with no trace id. Scores are read in
+    keyset batches over the labels still undecided, so a label that has an
+    unmarked score stops being read as soon as one turns up.
+    """
+    from model_hub.models.score import Score
+    from tracer.services.annotation_label_source import (
+        AnnotationLabelScoresProjectPG,
+        _materialize_score_rows,
+    )
+    from tracer.services.simulation_visibility import (
+        MarkedLookupFailed,
+        marked_trace_ids,
+    )
+
+    undecided = {str(label_id) for label_id in label_ids}
+    # A label with a score off every trace and span is decided here, before any
+    # lookup of marked traces; the walk below reads only trace and span scores.
+    kept: set[str] = _label_ids_scored_off_trace_and_span(project_id, undecided)
+    undecided -= kept
+    scope = AnnotationLabelScoresProjectPG._trace_span_scope()
+    after_id = None
+    for _ in range(_MARKED_SCORE_MAX_BATCHES):
+        if not undecided:
+            break
+        scores = Score.no_workspace_objects.filter(
+            scope,
+            tracer_project_id=project_id,
+            label_id__in=undecided,
+        )
+        if after_id is not None:
+            scores = scores.filter(id__gt=after_id)
+        rows = _materialize_score_rows(
+            scores.order_by("id").values_list(
+                "id", "label_id", "trace_id", "observation_span_id"
+            )[:_MARKED_SCORE_BATCH]
+        )
+        if not rows:
+            break
+        after_id = rows[-1][0]
+        trace_of_span = _trace_ids_of_spans(
+            project_id,
+            [span_id for _, _, trace_id, span_id in rows if trace_id is None],
+        )
+        score_trace = [
+            (
+                str(label_id),
+                str(trace_id) if trace_id is not None else trace_of_span.get(span_id),
+            )
+            for _, label_id, trace_id, span_id in rows
+        ]
+        marked = marked_trace_ids(
+            project_id=str(project_id),
+            trace_ids=[trace_id for _, trace_id in score_trace if trace_id],
+        )
+        for label_id, trace_id in score_trace:
+            if trace_id is None or trace_id not in marked:
+                kept.add(label_id)
+        undecided -= kept
+        if len(rows) < _MARKED_SCORE_BATCH:
+            break
+    else:
+        if undecided:
+            raise MarkedLookupFailed(
+                "Could not tell whether the annotation labels of project "
+                f"{project_id} have scores on traces that are not simulated: "
+                f"{_MARKED_SCORE_MAX_BATCHES * _MARKED_SCORE_BATCH} scores were "
+                "read and none of the labels still in question had a score on "
+                "a trace that is not simulated. No answer was guessed."
+            )
+    return [str(label_id) for label_id in label_ids if str(label_id) in kept]
+
+
+def get_annotation_labels_for_project(
+    project_id, organization=None, project_ids=None, *, hide_simulated=False
+):
     """Find annotation labels that have at least one Score in a project.
 
     Labels may not have a direct ``project`` FK set (e.g. org-wide centralized
@@ -695,6 +883,12 @@ def get_annotation_labels_for_project(project_id, organization=None, project_ids
     The score→project lookup is pinned to the direct-write-safe project source.
     It scopes on ``Score.tracer_project_id`` and never joins the removed legacy
     Postgres trace/span tables, regardless of rollout routing flags.
+
+    With ``hide_simulated`` a label found only through scores is kept only if
+    one of its scores is on a trace that is not marked. A label attached to the
+    project directly stays whatever its scores are. If which traces are marked
+    cannot be answered, ``MarkedLookupFailed`` propagates: a label list that
+    guessed would offer a label whose only data is simulated.
     """
     from django.db.models import Q
 
@@ -703,11 +897,19 @@ def get_annotation_labels_for_project(project_id, organization=None, project_ids
     source = AnnotationLabelScoresProjectPG()
     if project_ids is not None:
         score_label_ids = set()
+        holding = holding_projects(project_ids) if hide_simulated else frozenset()
         for pid in project_ids:
-            score_label_ids.update(source.label_ids_for_project(pid))
+            found = source.label_ids_for_project(pid)
+            if hide_simulated:
+                found = _label_ids_with_an_unmarked_score(pid, found, holding=holding)
+            score_label_ids.update(found)
         owner_q = Q(project_id__in=project_ids)
     else:
         score_label_ids = source.label_ids_for_project(project_id)
+        if hide_simulated:
+            score_label_ids = _label_ids_with_an_unmarked_score(
+                project_id, score_label_ids, holding=(str(project_id),)
+            )
         owner_q = Q(project_id=project_id)
 
     return AnnotationsLabels.objects.filter(
@@ -717,7 +919,7 @@ def get_annotation_labels_for_project(project_id, organization=None, project_ids
 
 
 def get_annotation_labels_by_project(
-    project_ids: list[str], organization=None
+    project_ids: list[str], organization=None, *, hide_simulated=False
 ) -> dict[str, list[AnnotationsLabels]]:
     """Resolve annotation labels independently for each authorized project.
 
@@ -727,6 +929,10 @@ def get_annotation_labels_by_project(
     project required every label.  The Score relation is fetched once for the
     finite authorized project list; label metadata is fetched once and remains
     organization-scoped when the caller supplies the request organization.
+
+    With ``hide_simulated`` each project's score labels are narrowed exactly as
+    ``get_annotation_labels_for_project`` narrows them; labels owned by a
+    project stay. ``MarkedLookupFailed`` propagates for the same reason.
     """
 
     from django.db.models import Q
@@ -743,6 +949,14 @@ def get_annotation_labels_by_project(
     score_label_ids = AnnotationLabelScoresProjectPG().label_ids_by_project(
         list(normalized)
     )
+    if hide_simulated:
+        holding = holding_projects(list(score_label_ids))
+        score_label_ids = {
+            project_id: _label_ids_with_an_unmarked_score(
+                project_id, label_ids, holding=holding
+            )
+            for project_id, label_ids in score_label_ids.items()
+        }
     referenced_ids = {
         label_id for values in score_label_ids.values() for label_id in values
     }

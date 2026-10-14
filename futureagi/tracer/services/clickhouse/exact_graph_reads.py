@@ -95,6 +95,7 @@ from tracer.services.clickhouse.v2.query_builders.user_time_series import (
     latest_physical_span_rows_sql,
 )
 from tracer.services.postgres_read_policy import application_postgres_reads
+from tracer.services.simulation_visibility import MarkedLookupFailed
 from tracer.utils.helper import get_annotation_labels_for_project
 
 logger = structlog.get_logger(__name__)
@@ -382,9 +383,21 @@ def _effective_graph_interval(
     return interval
 
 
+def _hide_simulated_kwargs(hide_simulated: bool) -> dict[str, bool]:
+    """The keyword a hiding read adds to a label lookup.
+
+    Present only when true, so a project that does not hold makes the very call
+    it makes today.
+    """
+
+    return {"hide_simulated": True} if hide_simulated else {}
+
+
 def _annotation_label_ids_for_filters(
     project_id: str,
     filters: list[dict[str, Any]],
+    *,
+    hide_simulated: bool = False,
 ) -> tuple[str, ...] | None:
     """Resolve the authoritative label set only for completeness filters.
 
@@ -392,6 +405,9 @@ def _annotation_label_ids_for_filters(
     tracing surface.  Falling back to mere Score existence makes exact graphs
     disagree with trace/span/task lists.  Metadata outages must also fail the
     refresh instead of publishing a plausible but false empty result.
+
+    A hiding read measures completeness against the labels its list shows, so
+    a label whose only scores are on simulated traces is not required of a row.
     """
 
     needs_completeness = any(
@@ -406,11 +422,13 @@ def _annotation_label_ids_for_filters(
         return tuple(
             sorted(
                 str(label.id)
-                for label in get_annotation_labels_for_project(project_id)
+                for label in get_annotation_labels_for_project(
+                    project_id, **_hide_simulated_kwargs(hide_simulated)
+                )
                 if getattr(label, "id", None)
             )
         )
-    except (AnnotationScoreReadUnavailable, DatabaseError):
+    except (AnnotationScoreReadUnavailable, DatabaseError, MarkedLookupFailed):
         raise ExactGraphReadError(
             "Annotation metadata is temporarily unavailable. Retry."
         ) from None
@@ -1926,7 +1944,9 @@ def read_exact_system_graph(
             started=started,
         )
 
-    annotation_label_ids = _annotation_label_ids_for_filters(project_id, filters)
+    annotation_label_ids = _annotation_label_ids_for_filters(
+        project_id, filters, **_hide_simulated_kwargs(hide_simulated)
+    )
     builder = TimeSeriesQueryBuilder(
         project_id=str(project_id),
         filters=filters,
@@ -2039,7 +2059,9 @@ def read_exact_agent_graph(
     builder = AgentGraphQueryBuilderV2(
         project_id=str(project_id),
         filters=list(filters or []),
-        annotation_label_ids=_annotation_label_ids_for_filters(project_id, filters),
+        annotation_label_ids=_annotation_label_ids_for_filters(
+            project_id, filters, **_hide_simulated_kwargs(hide_simulated)
+        ),
         hide_simulated=hide_simulated,
     )
     if builder.empty_window:
@@ -2121,7 +2143,9 @@ def read_exact_all_system_metrics(
         observe_type="span",
         start_date=start_date,
         end_date=end_date,
-        annotation_label_ids=_annotation_label_ids_for_filters(project_id, filters),
+        annotation_label_ids=_annotation_label_ids_for_filters(
+            project_id, filters, **_hide_simulated_kwargs(hide_simulated)
+        ),
         hide_simulated=hide_simulated,
     )
     query, params = builder.build()
@@ -2376,7 +2400,9 @@ def read_exact_eval_graph(
         user_trace_membership_sql=user_membership_sql,
         user_trace_membership_params=user_membership_params,
         annotation_label_ids=(
-            _annotation_label_ids_for_filters(project_id, filters)
+            _annotation_label_ids_for_filters(
+                project_id, filters, **_hide_simulated_kwargs(hide_simulated)
+            )
             if aggregation_context == "trace" and not empty
             else ()
         ),
@@ -2466,7 +2492,9 @@ def _compile_membership_filter(
         project_id=project_id,
         observe_type=observe_type,
         annotation_label_ids=(
-            _annotation_label_ids_for_filters(project_id, filters)
+            _annotation_label_ids_for_filters(
+                project_id, filters, **_hide_simulated_kwargs(hide_simulated)
+            )
             if annotation_label_ids is None
             else annotation_label_ids
         ),
@@ -2695,7 +2723,9 @@ def read_exact_annotation_graph(
         span_predicate = f"trace_id IN ({user_span_sql})"
         span_params = user_span_params
     else:
-        annotation_label_ids = _annotation_label_ids_for_filters(project_id, filters)
+        annotation_label_ids = _annotation_label_ids_for_filters(
+            project_id, filters, **_hide_simulated_kwargs(hide_simulated)
+        )
         trace_predicate, trace_params = _compile_membership_filter(
             project_id=project_id,
             filters=filters,

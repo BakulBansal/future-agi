@@ -801,13 +801,15 @@ def resolve_filtered_trace_ids(
     if not _project_matches_workspace(project, workspace):
         return ResolveResult(ids=[], total_matching=0, truncated=False)
 
-    annotation_labels = get_annotation_labels_for_project(project.id, organization)
+    # One read for the request, shared by the label list and by the voice and
+    # trace resolvers.
+    hide_simulated = project_hides_simulated(str(project.id))
+    annotation_labels = get_annotation_labels_for_project(
+        project.id, organization, hide_simulated=hide_simulated
+    )
     annotation_label_ids = [str(lbl.id) for lbl in annotation_labels]
     if deadline is not None:
         deadline.remaining_ms(floor_ms=1)
-
-    # One read for the request, shared by the voice and trace resolvers.
-    hide_simulated = project_hides_simulated(str(project.id))
 
     # The CH list builders default to a now-30d window when the payload sends no
     # time bound (a dashboard-perf default in parse_time_range), which would
@@ -1057,7 +1059,10 @@ def resolve_filtered_span_ids(
     if not _project_matches_workspace(project, workspace):
         return ResolveResult(ids=[], total_matching=0, truncated=False)
 
-    annotation_labels = get_annotation_labels_for_project(project.id, organization)
+    hide_simulated = project_hides_simulated(str(project.id))
+    annotation_labels = get_annotation_labels_for_project(
+        project.id, organization, hide_simulated=hide_simulated
+    )
     annotation_label_ids = [str(lbl.id) for lbl in annotation_labels]
     if deadline is not None:
         deadline.remaining_ms(floor_ms=1)
@@ -1070,7 +1075,7 @@ def resolve_filtered_span_ids(
         annotation_label_ids=annotation_label_ids,
         cursor=cursor,
         resumable=resumable,
-        hide_simulated=project_hides_simulated(str(project.id)),
+        hide_simulated=hide_simulated,
         **_optional_deadline_kwargs(deadline),
     )
 

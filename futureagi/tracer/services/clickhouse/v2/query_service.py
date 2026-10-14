@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import threading
+from collections.abc import Sequence
 
 from django.conf import settings
 
@@ -83,6 +84,8 @@ class V2AnalyticsQueryService(AnalyticsQueryService):
         timeout_ms: int = 5000,
         window_days: int | None = 30,
         candidate_config_ids: list[str] | None = None,
+        *,
+        hide_simulated: bool = False,
     ) -> list[str]:
         return super().get_eval_config_ids_with_data_ch(
             project_id,
@@ -90,6 +93,7 @@ class V2AnalyticsQueryService(AnalyticsQueryService):
             window_days=window_days,
             candidate_config_ids=candidate_config_ids,
             eval_logger_table=self._configured_eval_logger_table(),
+            hide_simulated=hide_simulated,
         )
 
     def get_eval_config_ids_for_traces_ch(
@@ -110,12 +114,17 @@ class V2AnalyticsQueryService(AnalyticsQueryService):
         candidate_config_ids: list[str],
         timeout_ms: int = 5000,
         window_days: int | None = 30,
+        *,
+        hide_simulated: bool = False,
+        project_ids: Sequence[str] | None = None,
     ) -> list[str]:
         return super().get_eval_config_ids_for_candidates_ch(
             candidate_config_ids,
             timeout_ms=timeout_ms,
             window_days=window_days,
             eval_logger_table=self._configured_eval_logger_table(),
+            hide_simulated=hide_simulated,
+            project_ids=project_ids,
         )
 
     def get_children_eval_metrics_ch(

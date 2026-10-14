@@ -34,6 +34,7 @@ from tracer.services.clickhouse.eval_logger_table import eval_logger_source
 from tracer.services.clickhouse.exact_graph_reads import (
     ExactGraphReadError,
     _annotation_label_ids_for_filters,
+    _hide_simulated_kwargs,
     read_exact_all_system_metrics,
     read_exact_annotation_graph,
     read_exact_eval_graph,
@@ -1560,7 +1561,9 @@ def _fetch_direct_raw_system_metric_graph(
         observe_type=observe_type,
         start_date=start_date,
         end_date=end_date,
-        annotation_label_ids=_annotation_label_ids_for_filters(project_id, filters),
+        annotation_label_ids=_annotation_label_ids_for_filters(
+            project_id, filters, **_hide_simulated_kwargs(hide_simulated)
+        ),
         raw_trace_candidate_predicate=(
             seed_candidate.predicate if seed_candidate is not None else ""
         ),

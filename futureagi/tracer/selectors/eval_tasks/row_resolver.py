@@ -31,6 +31,9 @@ from tracer.services.clickhouse.read_budget import (
 from tracer.services.clickhouse.v2 import get_reader
 from tracer.services.eval_tasks.cursor_policy import CONTINUOUS_MIN_PROOF_WINDOW
 from tracer.services.simulation_visibility import (
+    MarkedLookupFailed,
+)
+from tracer.services.simulation_visibility import (
     hide_simulated as project_hides_simulated,
 )
 from tracer.utils.filter_operators import split_comma_joined_uuid_members
@@ -150,16 +153,29 @@ class EvalTaskSelectionRejected(EvalTaskReadBudgetExceeded):
     """Deterministic task/filter contract rejection that retries cannot fix."""
 
 
+def _hide_simulated_kwargs(hide_simulated: bool) -> dict[str, bool]:
+    """The keyword a hiding task adds to a label lookup.
+
+    Present only when true, so a project that does not hold makes the very call
+    it makes today.
+    """
+
+    return {"hide_simulated": True} if hide_simulated else {}
+
+
 def _annotation_label_ids_for_filters(
     project_id: str,
     ui_filters: list[dict[str, Any]],
+    *,
+    hide_simulated: bool = False,
 ) -> tuple[str, ...]:
     """Return project labels required by annotation-completeness filters.
 
     All public tracing surfaces define ``has_annotation=false`` as "missing at
     least one configured label". Without the label ids the shared compiler
     falls back to "has no Score", which would make eval-task membership differ
-    from the list the user filtered.
+    from the list the user filtered. A task that hides marked traces measures
+    completeness against the labels that list shows.
     """
 
     needs_completeness = any(
@@ -178,10 +194,12 @@ def _annotation_label_ids_for_filters(
     try:
         return tuple(
             str(label.id)
-            for label in get_annotation_labels_for_project(project_id)
+            for label in get_annotation_labels_for_project(
+                project_id, **_hide_simulated_kwargs(hide_simulated)
+            )
             if getattr(label, "id", None)
         )
-    except (AnnotationScoreReadUnavailable, DatabaseError):
+    except (AnnotationScoreReadUnavailable, DatabaseError, MarkedLookupFailed):
         raise EvalTaskReadBudgetExceeded(_SAFE_ANNOTATION_METADATA_MESSAGE) from None
 
 
@@ -833,7 +851,9 @@ def _resolve_continuous_rows(
             "bounded_internal_scan": True,
         }
         annotation_label_ids = _annotation_label_ids_for_filters(
-            str(task.project_id), ui_filters
+            str(task.project_id),
+            ui_filters,
+            **_hide_simulated_kwargs(hide_simulated),
         )
         # Continuous reconciliation classifies finite identity batches.
         # Resolve annotation completeness once for the operation and preserve
@@ -1072,7 +1092,7 @@ def _resolve_bounded_historical_span_ids(
         bounded_trace_root=True,
     )
     annotation_label_ids = _annotation_label_ids_for_filters(
-        str(project_id), ui_filters
+        str(project_id), ui_filters, **_hide_simulated_kwargs(hide_simulated)
     )
     eval_config_ids = _eval_config_ids_for_filters(str(project_id), ui_filters)
     eval_filter_metadata = _eval_filter_metadata_for_filters(

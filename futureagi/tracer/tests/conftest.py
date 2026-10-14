@@ -103,7 +103,9 @@ _ONE_PROJECT_DECISION_SITES = (
 _PROJECT_SCOPE_DECISION_SITES = (
     "model_hub.views.ai_filter.holding_projects",
     "tracer.services.clickhouse.query_builders.monitor_metrics.holding_projects",
+    "tracer.services.clickhouse.v2.property_catalog.source_adapters.holding_projects",
     "tracer.services.dashboard_metrics_catalog.holding_projects",
+    "tracer.utils.helper.holding_projects",
     "tracer.views.dashboard.holding_projects",
     "tracer.views.observation_span.holding_projects",
     "tracer.views.span_attributes.holding_projects",
