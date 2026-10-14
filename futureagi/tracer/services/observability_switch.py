@@ -11,10 +11,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
-from uuid import UUID
 
 import structlog
 
+from simulate.services import agent_setup
 from tfc.utils.api_errors import build_error_envelope
 from tracer.models.observability_provider import (
     ObservabilityProvider,
@@ -73,60 +73,17 @@ class ObservabilityProjectError(Exception):
     pass
 
 
-# Mirrors the stored-agent summary field for field so the real one can replace it.
-@dataclass(frozen=True)
-class _AgentSummary:
-    agent_definition_id: UUID
-    agent_version_id: UUID | None
-    agent_stored: bool
-    setup_stale: bool
-    provider: str
-    provider_agent_id: str
-    credential_id: UUID | None
-    key_present: bool
-    type: str
-    kind: str | None
-    unit_ids: tuple[str, ...]
-    instrumentation: str
-    setup_hash: str | None
-    provider_info_complete: bool
-    missing: tuple[str, ...]
-
-
-class AgentNotFound(Exception):
-    pass
+# Callers catch the reader's own error; the switch passes it through unchanged.
+AgentNotFound = agent_setup.AgentNotFound
 
 
 class ProviderListNotPublished(Exception):
     pass
 
 
-def _agent_summary(agent_definition_id) -> _AgentSummary:
-    # Reads the agent through one seam so the stored-agent summary can replace
-    # this stand-in without touching the switch.
-    from simulate.models import AgentDefinition
-
-    try:
-        agent = AgentDefinition.no_workspace_objects.get(id=agent_definition_id)
-    except AgentDefinition.DoesNotExist:
-        raise AgentNotFound("agent definition not found") from None
-    return _AgentSummary(
-        agent_definition_id=agent.id,
-        agent_version_id=None,
-        agent_stored=False,
-        setup_stale=False,
-        provider=agent.provider or "",
-        provider_agent_id=agent.assistant_id or "",
-        credential_id=None,
-        key_present=bool(agent.api_key),
-        type=agent.agent_type or "",
-        kind=None,
-        unit_ids=(),
-        instrumentation="none",
-        setup_hash=None,
-        provider_info_complete=True,
-        missing=(),
-    )
+def _agent_summary(agent_definition_id) -> agent_setup.AgentSummary:
+    # The one place the switch reads an agent, so tests can stand a summary in.
+    return agent_setup.agent_summary(agent_definition_id)
 
 
 def _read_provider_list():

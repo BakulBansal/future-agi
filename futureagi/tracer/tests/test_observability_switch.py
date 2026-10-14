@@ -23,6 +23,8 @@ from structlog.testing import capture_logs
 import tracer.services.observability_switch as switch
 from model_hub.models.ai_model import AIModel
 from simulate.models import AgentDefinition
+from simulate.services import agent_setup
+from simulate.tests.test_agent_setup_service import source_agent
 from tfc.utils.api_errors import build_error_envelope
 from tfc.utils.general_methods import GeneralMethods
 from tracer.models.observability_provider import (
@@ -263,7 +265,7 @@ def make_summary(**overrides):
     values.update(overrides)
     if "provider_info_complete" not in overrides:
         values["provider_info_complete"] = not values["missing"]
-    return switch._AgentSummary(**values)
+    return agent_setup.AgentSummary(**values)
 
 
 @contextmanager
@@ -339,8 +341,10 @@ def _events(logs, prefix="observability_switch"):
 
 
 def test_names_and_signatures_are_the_contract_ones():
-    assert [f.name for f in dataclasses.fields(switch._AgentSummary)] == SUMMARY_FIELDS
-    assert switch._AgentSummary.__dataclass_params__.frozen
+    assert [
+        f.name for f in dataclasses.fields(agent_setup.AgentSummary)
+    ] == SUMMARY_FIELDS
+    assert agent_setup.AgentSummary.__dataclass_params__.frozen
     assert [f.name for f in dataclasses.fields(switch.MissingPrerequisite)] == [
         "code",
         "field",
@@ -388,46 +392,71 @@ def test_prerequisites_are_the_contract_words():
     assert refused.missing == (switch.PREREQUISITES["credential"],)
 
 
-def test_stand_in_summary_reads_the_definition(organization, workspace):
+def _stored_code_agent(organization, workspace, **agent_overrides):
     agent = _agent(
         organization,
         workspace,
-        provider="retell",
-        assistant_id="assistant-9",
+        provider=None,
+        assistant_id=None,
+        api_key=None,
         agent_type=AgentDefinition.AgentTypeChoices.TEXT,
     )
-    assert switch._agent_summary(agent.id) == switch._AgentSummary(
-        agent_definition_id=agent.id,
-        agent_version_id=None,
-        agent_stored=False,
-        setup_stale=False,
-        provider="retell",
-        provider_agent_id="assistant-9",
-        credential_id=None,
-        key_present=True,
-        type="text",
-        kind=None,
-        unit_ids=(),
-        instrumentation="none",
-        setup_hash=None,
-        provider_info_complete=True,
-        missing=(),
+    version = agent.create_version(
+        description="", commit_message="first", status="active"
     )
+    stored = agent_setup.store_agent(
+        agent_version_id=version.id,
+        agent=source_agent(**agent_overrides),
+        sdk_version="0.2.3",
+    )
+    assert stored == "stored"
+    return agent
 
-    bare = _agent(
-        organization, workspace, provider=None, assistant_id=None, api_key=None
-    )
-    summary = switch._agent_summary(bare.id)
-    assert (summary.provider, summary.provider_agent_id, summary.key_present) == (
-        "",
-        "",
-        False,
-    )
 
+def test_summary_comes_from_the_stored_agent_reader(organization, workspace):
+    # Nothing stored: the reader answers today's agent, no kind and no instrumenter.
+    plain = _agent(
+        organization, workspace, provider="retell", assistant_id="assistant-9"
+    )
+    summary = switch._agent_summary(plain.id)
+    assert (
+        summary.agent_definition_id,
+        summary.kind,
+        summary.instrumentation,
+        summary.provider,
+        summary.provider_agent_id,
+    ) == (plain.id, None, "none", "retell", "assistant-9")
+
+    stored = switch._agent_summary(_stored_code_agent(organization, workspace).id)
+    assert (stored.kind, stored.instrumentation) == ("source", "traceai")
+
+    assert switch.AgentNotFound is agent_setup.AgentNotFound
     with pytest.raises(switch.AgentNotFound, match="^agent definition not found$"):
         switch._agent_summary(uuid.uuid4())
     with pytest.raises(switch.ProviderListNotPublished):
         switch._read_provider_list()
+
+
+@pytest.mark.parametrize("instrumentation", ["traceai", "opentelemetry"])
+def test_stored_code_agent_with_an_instrumenter_is_admitted(
+    organization, workspace, user, instrumentation
+):
+    agent = _stored_code_agent(organization, workspace, instrumentation=instrumentation)
+    row = _turn(agent, True, user, organization, workspace)
+    assert isinstance(row, ObservabilityProvider)
+    assert row.provider == "others"
+    assert switch.agent_is_source(agent)
+
+
+def test_stored_code_agent_without_an_instrumenter_is_refused(
+    organization, workspace, user
+):
+    agent = _stored_code_agent(organization, workspace, instrumentation="none")
+    before = _created()
+    with pytest.raises(switch.ObservabilityRefused) as raised:
+        _turn(agent, True, user, organization, workspace)
+    assert raised.value.missing == (switch.PREREQUISITES["instrumentation"],)
+    assert _created() == before
 
 
 def test_agent_is_source_asks_the_summary(organization, workspace):
