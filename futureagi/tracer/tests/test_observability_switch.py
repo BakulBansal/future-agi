@@ -879,7 +879,9 @@ def test_switch_saves_only_enabled_when_turning_off(organization, workspace, use
     assert _stored(row) == ({"assistant_id": "a1", HOLDING_FLAG: True}, False)
 
 
-def test_stand_in_keeps_todays_rule(auth_client, organization, workspace):
+def test_agent_with_nothing_stored_keeps_todays_rule(
+    auth_client, organization, workspace
+):
     # Neither read is replaced: a vapi agent with no key is turned on through the
     # version view exactly as before, and the switch says it did not check.
     agent = _agent(organization, workspace, api_key=None, assistant_id=None)
