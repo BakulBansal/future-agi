@@ -36,9 +36,9 @@ def analyze_audio(audio_bytes: bytes) -> AudioMetrics:
     pitch = None
     try:
         frame_length = 2048
-        if samples.size >= frame_length and sample_rate > 2 * librosa.note_to_hz("C2"):
+        if (\n            samples.size >= frame_length\n            and sample_rate > 2 * librosa.note_to_hz("C2")\n        ):
             f0, voiced, _ = librosa.pyin(
-                samples, sr=sample_rate, fmin=librosa.note_to_hz("C2"),
+                samples,\n                sr=sample_rate,\n                fmin=librosa.note_to_hz("C2"),
                 fmax=min(librosa.note_to_hz("C7"), sample_rate * 0.45),
                 frame_length=frame_length,
             )
