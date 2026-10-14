@@ -7,6 +7,7 @@ import uuid
 from collections.abc import Mapping
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
+from time import monotonic
 
 import structlog
 from django.conf import settings
@@ -40,6 +41,14 @@ from tracer.models.trace_scan import TraceScanConfig
 from tracer.queries.grouping import groupable_findings
 from tracer.queries.trace_scanner import is_trace_sampled
 from tracer.services.grouping_features import enqueue_grouping_features
+from tracer.services.simulation_visibility import (
+    MARKED_LOOKUP_TIMEOUT_MS,
+    MarkedLookupFailed,
+    marked_trace_ids,
+)
+from tracer.services.simulation_visibility import (
+    hide_simulated as project_hides_simulated,
+)
 from tracer.services.trace_investigation_billing import charge_trace_investigation
 
 logger = structlog.get_logger(__name__)
@@ -87,6 +96,13 @@ _RETRYABLE_FAILURES = frozenset(
         "unreported",
     }
 )
+# Due jobs of one holding project decided per claim cycle. A job past this page
+# is not claimed in that cycle, so the bound caps one ClickHouse read and never
+# lets a marked trace through.
+INVESTIGATION_MARK_SCAN = 200
+# Mark-lookup time of one claim call in total: the call is an HTTP request, and
+# slow lookups for many holding projects must not hold it open.
+INVESTIGATION_MARK_BUDGET_MS = 4000
 # Spans of one trace start within this long of its root's end, on either side.
 # The worker reads again without the window when the result shows a gap.
 _EVIDENCE_WINDOW = timedelta(hours=24)
@@ -496,6 +512,93 @@ def _claim_payload(attempt: TraceInvestigationAttempt, token: str) -> dict[str, 
     return claim
 
 
+def _due_trace_page(
+    project_id: uuid.UUID, now: datetime
+) -> list[tuple[uuid.UUID, str]]:
+    """The head of a project's due queue, in the order the claim lock takes it."""
+    return [
+        (job_id, str(trace_id))
+        for job_id, trace_id in TraceInvestigationJob.no_workspace_objects.filter(
+            project_id=project_id,
+            state=TraceInvestigationJobState.WAITING,
+            not_before__lte=now,
+            # A job with no trace has nothing to look up and is never claimable
+            # by the trace loop of a holding project.
+            trace_id__isnull=False,
+        )
+        .order_by("not_before", "created_at", "id")
+        .values_list("id", "trace_id")[:INVESTIGATION_MARK_SCAN]
+    ]
+
+
+def _ask_marks(
+    project_id: uuid.UUID, trace_ids: list[str], *, timeout_ms: int
+) -> frozenset[str]:
+    try:
+        return marked_trace_ids(
+            project_id=str(project_id), trace_ids=trace_ids, timeout_ms=timeout_ms
+        )
+    except MarkedLookupFailed:
+        raise
+    except Exception as error:
+        # An error the lookup did not type must skip this project only. Left to
+        # propagate it fails the call, the project keeps its place at the head of
+        # the rotation, and every later call fails the same way.
+        raise MarkedLookupFailed(
+            "The mark lookup raised an unexpected error, so the project is"
+            " skipped this cycle."
+        ) from error
+
+
+def _lookup_marks(
+    project_id: uuid.UUID, trace_ids: list[str], *, timeout_ms: int
+) -> frozenset[str] | None:
+    """Marked ids among `trace_ids`, or None when the lookup gave no answer."""
+    try:
+        return _ask_marks(project_id, trace_ids, timeout_ms=timeout_ms)
+    except MarkedLookupFailed as error:
+        # No counter and no backoff: the next cycle tries again, and this event
+        # repeating every cycle is the alarm.
+        logger.warning(
+            "trace_investigation_mark_lookup_failed",
+            project_id=str(project_id),
+            # A failure is wrapped, so the cause says what actually went wrong.
+            error_type=type(error.__cause__ or error).__name__,
+        )
+        return None
+
+
+def _cancel_marked_jobs(
+    project_id: uuid.UUID,
+    page: list[tuple[uuid.UUID, str]],
+    marked: frozenset[str],
+) -> None:
+    marked_jobs = [
+        (job_id, trace_id) for job_id, trace_id in page if trace_id in marked
+    ]
+    if not marked_jobs:
+        return
+    # The page was read without a lock, so a job may have been claimed or
+    # settled since; only jobs still waiting are cancelled.
+    TraceInvestigationJob.no_workspace_objects.filter(
+        id__in=[job_id for job_id, _ in marked_jobs],
+        state=TraceInvestigationJobState.WAITING,
+    ).update(state=TraceInvestigationJobState.CANCELLED, updated_at=timezone.now())
+    for job_id, trace_id in marked_jobs:
+        logger.info(
+            "trace_investigation_skipped_simulated",
+            job_id=str(job_id),
+            project_id=str(project_id),
+            trace_id=trace_id,
+        )
+
+
+def _move_rotation(config_ids: list[uuid.UUID], now: datetime) -> None:
+    TraceScanConfig.no_workspace_objects.filter(id__in=config_ids).update(
+        omega_last_claimed_at=now
+    )
+
+
 def claim_due_investigations(
     *, worker_id: str, engine_version: str, limit: int
 ) -> dict[str, object]:
@@ -538,9 +641,43 @@ def claim_due_investigations(
         .values_list("id", flat=True)[: min(limit * 2, 100)]
     )
     claims = []
+    mark_budget_ms = float(INVESTIGATION_MARK_BUDGET_MS)
+    budget_skipped_config_ids = []
     for config_id in candidate_ids:
         if len(claims) >= trace_claim_limit:
             break
+        # Marks are decided before this candidate's locks are taken: the lookup
+        # reads ClickHouse, and a lock held across it would stall the project's
+        # notifications and every other claimer for as long as the read takes.
+        project_id = (
+            TraceScanConfig.no_workspace_objects.filter(id=config_id)
+            .values_list("project_id", flat=True)
+            .first()
+        )
+        if project_id is None:
+            continue
+        claimable_trace_ids = None
+        if project_hides_simulated(str(project_id)):
+            # Under a millisecond left counts as spent, so no lookup is ever
+            # handed a zero timeout, which ClickHouse reads as no limit.
+            if mark_budget_ms < 1:
+                budget_skipped_config_ids.append(config_id)
+                continue
+            page = _due_trace_page(project_id, now)
+            marked = frozenset()
+            if page:
+                started = monotonic()
+                marked = _lookup_marks(
+                    project_id,
+                    [trace_id for _, trace_id in page],
+                    timeout_ms=min(MARKED_LOOKUP_TIMEOUT_MS, int(mark_budget_ms)),
+                )
+                mark_budget_ms -= (monotonic() - started) * 1000
+            if marked is None:
+                _move_rotation([config_id], now)
+                continue
+            _cancel_marked_jobs(project_id, page, marked)
+            claimable_trace_ids = {trace_id for _, trace_id in page} - marked
         with transaction.atomic():
             config = (
                 TraceScanConfig.no_workspace_objects.select_for_update(skip_locked=True)
@@ -571,6 +708,16 @@ def claim_due_investigations(
                 or config.sampling_rate <= 0
                 or config.scan_version != engine_version
             ):
+                continue
+            if claimable_trace_ids is not None and (
+                job.trace_id is None or str(job.trace_id) not in claimable_trace_ids
+            ):
+                # Claim only a job whose own trace was looked up this cycle and
+                # found unmarked. One past the page, one that arrived after the
+                # lookup and one with no trace (left to the simulation loop below)
+                # wait, and the rotation moves on.
+                config.omega_last_claimed_at = now
+                config.save(update_fields=["omega_last_claimed_at"])
                 continue
             if not is_trace_sampled(str(job.trace_id), config.sampling_rate):
                 # A rate reduction must not leave an excluded head-of-queue job
@@ -608,6 +755,13 @@ def claim_due_investigations(
             config.omega_last_claimed_at = now
             config.save(update_fields=["omega_last_claimed_at"])
             claims.append(_claim_payload(attempt, token))
+    if mark_budget_ms < 1:
+        if budget_skipped_config_ids:
+            _move_rotation(budget_skipped_config_ids, now)
+        logger.warning(
+            "trace_investigation_mark_budget_spent",
+            skipped_count=len(budget_skipped_config_ids),
+        )
     simulation_jobs = list(
         TraceInvestigationJob.no_workspace_objects.filter(
             workload_type=InvestigationWorkload.SIMULATION_TEST_EXECUTION,
