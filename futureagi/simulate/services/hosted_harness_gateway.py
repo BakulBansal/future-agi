@@ -17,6 +17,7 @@ import uuid
 import zlib
 from collections.abc import Callable, Iterable, Mapping
 from contextlib import contextmanager, nullcontext
+from dataclasses import dataclass, field
 from datetime import timedelta
 from pathlib import Path
 from typing import Any
@@ -224,6 +225,19 @@ def _noise_catalogue_setting() -> str:
     return configured or _background_noise_catalogue()
 
 
+def _sandbox_collector_url() -> str:
+    """The collector address a sandbox can reach, as configured; empty when none is."""
+    return str(
+        os.environ.get("ALK_HOSTED_FI_BASE_URL")
+        # The harness callback URL is already required to be sandbox-reachable. It is a
+        # safer fallback than FI_BASE_URL, which commonly names an internal Compose/K8s
+        # service (for example ``http://backend:80``) that cannot resolve from E2B.
+        or os.environ.get("HARNESS_PUBLIC_BASE_URL")
+        or os.environ.get("FI_BASE_URL")
+        or ""
+    ).strip()
+
+
 def _platform_simulator_material() -> tuple[dict[str, str], bytes | None]:
     """Return control-process-only simulator config and optional Vertex ADC bytes.
 
@@ -360,15 +374,7 @@ def _platform_simulator_material() -> tuple[dict[str, str], bytes | None]:
         values["ALK_BACKGROUND_NOISE_CATALOG"] = catalogue
     # The sandbox resolves nothing on our network, so the guest's collector is configured
     # separately and only falls back to ours when they are the same host.
-    collector = str(
-        os.environ.get("ALK_HOSTED_FI_BASE_URL")
-        # The harness callback URL is already required to be sandbox-reachable. It is a
-        # safer fallback than FI_BASE_URL, which commonly names an internal Compose/K8s
-        # service (for example ``http://backend:80``) that cannot resolve from E2B.
-        or os.environ.get("HARNESS_PUBLIC_BASE_URL")
-        or os.environ.get("FI_BASE_URL")
-        or ""
-    ).strip()
+    collector = _sandbox_collector_url()
     if collector:
         values["FI_BASE_URL"] = collector
     if project:
@@ -1015,6 +1021,385 @@ def attach_platform_simulator_secret_refs(
     agent["secret_refs"] = refs
     dispatched["agent"] = agent
     return dispatched
+
+
+# The decision whether a run exports to the agent's observability project is made once, at
+# launch, and shipped in job.json; the sandbox repeats none of it. It never fails a launch.
+_EXPORT_SNAPSHOTS_SETTING = "ALK_HOSTED_OBSERVABILITY_EXPORT_SNAPSHOTS"
+_EXPORT_SECRET_PURPOSE = "observability_export"
+_OTEL_EXPORT_NAMES = frozenset(
+    {
+        "OTEL_EXPORTER_OTLP_ENDPOINT",
+        "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT",
+        "OTEL_EXPORTER_OTLP_HEADERS",
+        "OTEL_EXPORTER_OTLP_TRACES_HEADERS",
+    }
+)
+_TRACEAI_KEY_NAMES = frozenset({"FI_API_KEY", "FI_SECRET_KEY"})
+_TRACES_HEADERS_ALIAS = "OTEL_EXPORTER_OTLP_TRACES_HEADERS"
+# Refusals that fire on every unbound launch or every launch from an unlisted snapshot.
+_QUIET_EXPORT_REASONS = frozenset({"not_bound", "snapshot_unsupported"})
+_MARK_NAME = re.compile(r"(OTEL_|FI_SIMULATION_|FI_BASE_URL$)[A-Z0-9_]*")
+# Credentials ride as sandbox secrets; a document that named them would put them in job.json.
+_MARK_FORBIDDEN_NAMES = frozenset(
+    {"OTEL_EXPORTER_OTLP_HEADERS", _TRACES_HEADERS_ALIAS, *_TRACEAI_KEY_NAMES}
+)
+_MARK_MAX_ENTRIES = 10
+_MARK_MAX_VALUE_LENGTH = 2048
+
+
+class _ExportRefused(Exception):
+    """The export is decided off; ``reason`` is the word the log line carries."""
+
+    def __init__(self, reason: str) -> None:
+        super().__init__(reason)
+        self.reason = reason
+
+
+@dataclass(frozen=True)
+class _ExportPlan:
+    """What the launch writes once the guard has finished; the default writes nothing."""
+
+    project_name: str | None = None
+    collector_url: str | None = None
+    export: str | None = None
+    instrumentation: str | None = None
+    # Not in the repr: a plan caught in a traceback or a frame dump must not print keys.
+    secrets: tuple[tuple[str, str], ...] = field(default=(), repr=False)
+    egress_domains: frozenset[str] | None = None
+    redaction_values: tuple[str, ...] = field(default=(), repr=False)
+
+
+def _bound_agent_definition(job: HostedHarnessJob, payload: Mapping[str, Any]):
+    from django.core.exceptions import ValidationError
+
+    from simulate.models import AgentDefinition
+
+    metadata = payload.get("metadata")
+    agent_id = (
+        metadata.get("agent_definition_id") if isinstance(metadata, Mapping) else None
+    )
+    if not agent_id:
+        run_test = job.run_test
+        agent_id = run_test.agent_definition_id if run_test is not None else None
+    if not agent_id:
+        raise _ExportRefused("not_bound")
+    try:
+        # The id may have come from the request, so it must belong to this job's tenant.
+        agent = AgentDefinition.no_workspace_objects.filter(
+            id=agent_id,
+            organization=job.organization,
+            workspace=job.workspace,
+            deleted=False,
+        ).first()
+    except (ValueError, ValidationError):
+        agent = None
+    if agent is None:
+        raise _ExportRefused("not_bound")
+    return agent
+
+
+def _effective_key_workspace(key) -> str | None:
+    """The workspace the collector files a key's spans under: its own, else the default."""
+    if key.workspace_id:
+        return str(key.workspace_id)
+    from accounts.models.workspace import Workspace
+
+    defaults = list(
+        Workspace.no_workspace_objects.filter(
+            organization_id=key.organization_id, is_default=True, is_active=True
+        ).values_list("id", flat=True)[:2]
+    )
+    # The collector refuses an organisation that has no single default workspace.
+    return str(defaults[0]) if len(defaults) == 1 else None
+
+
+def _customer_export_mode(
+    job: HostedHarnessJob, project, resolved: Mapping[str, str]
+) -> str:
+    from accounts.models.user import OrgApiKey
+
+    api_key = resolved.get("FI_API_KEY")
+    secret_key = resolved.get("FI_SECRET_KEY")
+    key = None
+    if api_key and secret_key:
+        # Both halves, because the collector matches the pair: a wrong secret must not pass.
+        key = OrgApiKey.no_workspace_objects.filter(
+            organization_id=job.organization_id,
+            api_key=api_key,
+            secret_key=secret_key,
+            enabled=True,
+        ).first()
+    if key is None or _effective_key_workspace(key) != str(project.workspace_id):
+        raise _ExportRefused("customer_key_other_workspace")
+    return "customer_keys"
+
+
+def _decide_observability_export(
+    job: HostedHarnessJob,
+    payload: Mapping[str, Any],
+    secrets_map: Mapping[str, str],
+    *,
+    selected_snapshot: str,
+    allowed_domains: Iterable[str],
+    max_egress_domains: int | None,
+) -> _ExportPlan:
+    listed = {
+        name.strip()
+        for name in os.environ.get(_EXPORT_SNAPSHOTS_SETTING, "").split(",")
+        if name.strip()
+    }
+    if selected_snapshot not in listed:
+        raise _ExportRefused("snapshot_unsupported")
+
+    agent = _bound_agent_definition(job, payload)
+
+    provider = agent.observability_provider
+    if provider is None or provider.deleted or not provider.enabled:
+        raise _ExportRefused("observability_off")
+    project = provider.project
+    # A deleted project would be re-created by the collector under its name, not holding.
+    if project.deleted or project.organization_id != job.organization_id:
+        raise _ExportRefused("observability_off")
+    if project.workspace_id is None:
+        raise _ExportRefused("no_workspace")
+    from simulate.services.agent_setup import agent_summary
+
+    summary = agent_summary(agent.id)
+    if summary.kind != "source":
+        raise _ExportRefused("not_source")
+    from tracer.models.project import Project
+
+    # The collector resolves a name without its type, so a same-named project of another
+    # type could capture the traces.
+    if (
+        Project.no_workspace_objects.filter(
+            organization_id=project.organization_id,
+            workspace_id=project.workspace_id,
+            name=project.name,
+        )
+        .exclude(id=project.id)
+        .exists()
+    ):
+        raise _ExportRefused("name_ambiguous")
+
+    # Trailing slashes are cut so the traces path is never appended to a double slash.
+    collector_url = _sandbox_collector_url().rstrip("/")
+    try:
+        parsed = urlparse(collector_url)
+    except ValueError:
+        parsed = None
+    # The traces path is appended to this address, so it needs a scheme as well as a host.
+    host = (parsed.hostname or "").lower().rstrip(".") if parsed else ""
+    if not host or parsed.scheme not in {"http", "https"}:
+        raise _ExportRefused("no_collector")
+    # The address is written into job.json, so it must not carry a credential.
+    if parsed.username or parsed.password:
+        raise _ExportRefused("no_collector")
+    # A sandbox must not reach a private host just because the operator's base URL names one.
+    try:
+        _validate_egress_host(host)
+    except HostedHarnessError:
+        raise _ExportRefused("no_collector") from None
+
+    refs = (payload.get("agent") or {}).get("secret_refs") or {}
+    declared = {
+        str(alias).upper()
+        for alias, ref in refs.items()
+        if isinstance(ref, Mapping) and ref.get("purpose") == "target_provider"
+    }
+    resolved = {str(alias).upper(): value for alias, value in secrets_map.items()}
+    instrumentation = summary.instrumentation
+    if instrumentation == "opentelemetry":
+        if declared & _OTEL_EXPORT_NAMES:
+            raise _ExportRefused("customer_configuration")
+        mode = "our_keys"
+    elif instrumentation == "traceai":
+        if declared & (_OTEL_EXPORT_NAMES | {"FI_BASE_URL"}):
+            raise _ExportRefused("customer_configuration")
+        keys_declared = declared & _TRACEAI_KEY_NAMES
+        if len(keys_declared) == 1:
+            # A half pair exports nothing, and an alias of ours would overwrite theirs.
+            raise _ExportRefused("customer_configuration")
+        mode = (
+            _customer_export_mode(job, project, resolved)
+            if keys_declared
+            else "our_keys"
+        )
+    else:
+        raise _ExportRefused("not_instrumented")
+
+    secrets: tuple[tuple[str, str], ...] = ()
+    redaction: tuple[str, ...] = ()
+    if mode == "our_keys":
+        from tracer.services.collector_ingest import resolve_export_credentials
+
+        try:
+            credentials = resolve_export_credentials(
+                str(job.organization_id), str(project.workspace_id)
+            )
+        except Exception:  # noqa: BLE001 - the reason word is all the log may carry
+            raise _ExportRefused("no_key") from None
+        if credentials is None or not (credentials.api_key and credentials.secret_key):
+            raise _ExportRefused("no_key")
+        if not credentials.enabled:
+            raise _ExportRefused("key_disabled")
+        pairs = [
+            (
+                _TRACES_HEADERS_ALIAS,
+                f"X-Api-Key={credentials.api_key},X-Secret-Key={credentials.secret_key}",
+            )
+        ]
+        if instrumentation == "traceai":
+            pairs.append(("FI_API_KEY", credentials.api_key))
+            pairs.append(("FI_SECRET_KEY", credentials.secret_key))
+        secrets = tuple(pairs)
+        redaction = (credentials.api_key, credentials.secret_key)
+
+    # Tested before the holding is recorded, so a refused export never marks the project
+    # as holding; the key, created on first use, may remain.
+    egress_domains = _normalize_egress_domains({*allowed_domains, host})
+    if max_egress_domains is not None and len(egress_domains) > max_egress_domains:
+        raise _ExportRefused("egress_cap")
+
+    from tracer.services.simulation_visibility import HoldingNotRecorded, record_holding
+
+    try:
+        # Marked traces never go to a project that cannot hide them.
+        record_holding(str(project.id))
+    except HoldingNotRecorded:
+        raise _ExportRefused("not_holding") from None
+
+    return _ExportPlan(
+        project_name=project.name,
+        collector_url=collector_url,
+        export=mode,
+        instrumentation=instrumentation,
+        secrets=secrets,
+        egress_domains=frozenset(egress_domains),
+        redaction_values=redaction,
+    )
+
+
+def _plan_observability_export(
+    job: HostedHarnessJob,
+    payload: Mapping[str, Any],
+    secrets_map: Mapping[str, str],
+    *,
+    selected_snapshot: str,
+    allowed_domains: Iterable[str],
+    max_egress_domains: int | None,
+) -> _ExportPlan:
+    """Decide the export without writing anything; any failure means no export."""
+    try:
+        return _decide_observability_export(
+            job,
+            payload,
+            secrets_map,
+            selected_snapshot=selected_snapshot,
+            allowed_domains=allowed_domains,
+            max_egress_domains=max_egress_domains,
+        )
+    except _ExportRefused as refusal:
+        reason = refusal.reason
+        quiet = reason in _QUIET_EXPORT_REASONS
+    except Exception as exc:  # noqa: BLE001 - an export never fails a launch
+        reason = type(exc).__name__
+        quiet = False
+    log = structlog_logger.info if quiet else structlog_logger.warning
+    log("observability_export_unavailable", job_id=str(job.id), reason=reason)
+    return _ExportPlan()
+
+
+def _mark_is_acceptable(mark: Any) -> bool:
+    if not isinstance(mark, dict) or len(mark) > _MARK_MAX_ENTRIES:
+        return False
+    for name, value in mark.items():
+        if not isinstance(name, str) or not isinstance(value, str):
+            return False
+        if name in _MARK_FORBIDDEN_NAMES or not _MARK_NAME.fullmatch(name):
+            return False
+        if len(value) > _MARK_MAX_VALUE_LENGTH:
+            return False
+        if not (value.isascii() and value.isprintable()):
+            return False
+    return True
+
+
+def _simulation_mark(
+    job: Any, plan: _ExportPlan | None = None
+) -> tuple[dict[str, str], bool]:
+    """The environment dictionary for this run, and whether it may be used.
+
+    Unusable means an empty dictionary and ``False``; the launch goes on unmarked.
+    """
+    plan = plan or _ExportPlan()
+    try:
+        from tracer.services.simulation_mark import customer_code_environment
+
+        mark = customer_code_environment(
+            organization_id=str(job.organization_id),
+            job_id=str(job.id),
+            run_id=str(job.run_id),
+            run_test_id=None if job.run_test_id is None else str(job.run_test_id),
+            test_execution_id=(
+                None if job.test_execution_id is None else str(job.test_execution_id)
+            ),
+            project_name=plan.project_name,
+            collector_url=plan.collector_url,
+            export=plan.export,
+            instrumentation=plan.instrumentation,
+        )
+    except Exception:  # noqa: BLE001 - the mark never fails a launch
+        structlog_logger.warning(
+            "simulation_mark_unavailable", job_id=str(job.id), reason="raised"
+        )
+        return {}, False
+    if not _mark_is_acceptable(mark):
+        structlog_logger.warning(
+            "simulation_mark_unavailable", job_id=str(job.id), reason="invalid"
+        )
+        return {}, False
+    return mark, True
+
+
+def _with_simulation_mark(
+    payload: Mapping[str, Any], mark: Mapping[str, str]
+) -> dict[str, Any]:
+    """A copy of the document that carries the mark, replacing any value already there."""
+    document = dict(payload)
+    metadata = dict(document.get("metadata") or {})
+    metadata["customer_code_environment"] = dict(mark)
+    document["metadata"] = metadata
+    return document
+
+
+def attach_observability_export_secret_refs(
+    payload: dict[str, Any], aliases: Iterable[str]
+) -> dict[str, Any]:
+    """Add value-free refs for the export's aliases to the ephemeral job document only."""
+    dispatched = dict(payload)
+    agent = dict(dispatched.get("agent") or {})
+    refs = dict(agent.get("secret_refs") or {})
+    for alias in aliases:
+        refs[alias] = {
+            "manager": "platform-config",
+            "key": alias,
+            "purpose": _EXPORT_SECRET_PURPOSE,
+        }
+    agent["secret_refs"] = refs
+    dispatched["agent"] = agent
+    return dispatched
+
+
+def _ingest_key_values(organization_id: Any) -> tuple[str, ...]:
+    """Every enabled ingest key's two values, read and never created."""
+    from accounts.models.user import OrgApiKey
+
+    rows = OrgApiKey.no_workspace_objects.filter(
+        organization_id=organization_id, type="ingest", enabled=True
+    ).values_list("api_key", "secret_key")
+    return tuple(value for row in rows for value in row if value)
 
 
 _MAX_EGRESS_DOMAINS = 20
@@ -1691,6 +2076,8 @@ class HostedHarnessGateway:
         _validate_resolved_egress_domains(
             allowed_domains, max_domains=self.client.max_egress_domains
         )
+        # Authoring is never bound to an agent, so it gets the mark and no export.
+        simulation_mark, _accepted = _simulation_mark(job)
         authoring_env = {
             **{
                 name: value
@@ -1734,7 +2121,11 @@ class HostedHarnessGateway:
             )
             sandbox.fs.upload_file(source_archive, "/work/source.tar.gz")
             sandbox.fs.upload_file(
-                json.dumps(payload, sort_keys=True, separators=(",", ":")).encode(),
+                json.dumps(
+                    _with_simulation_mark(payload, simulation_mark),
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ).encode(),
                 "/work/job.json",
             )
             if simulator_vertex_credentials is not None:
@@ -1933,9 +2324,18 @@ class HostedHarnessGateway:
             if authoring_archive is None
             else ({}, "")
         )
-        dispatch_payload = prepare_dispatch_payload(
-            payload, secrets_map, simulator_secrets=simulator_env, job=job
-        )
+        from simulate.services.harness_capacity import configured_capacity
+
+        # The export decision needs the selected snapshot, so capacity comes first.
+        try:
+            capacity = configured_capacity(payload)
+        except ValueError as exc:
+            raise HostedHarnessError(
+                "sandbox_capacity_unavailable",
+                str(exc),
+                status_code=503,
+            ) from exc
+        selected_snapshot = capacity.snapshot_name or self.client.runtime_name
         platform_host = _hostname_from_url(endpoint_base_url)
         allowed_domains = _resolved_egress_domains(
             payload,
@@ -1950,17 +2350,33 @@ class HostedHarnessGateway:
         _validate_resolved_egress_domains(
             allowed_domains, max_domains=self.client.max_egress_domains
         )
-        from simulate.services.harness_capacity import configured_capacity
-
-        try:
-            capacity = configured_capacity(payload)
-        except ValueError as exc:
-            raise HostedHarnessError(
-                "sandbox_capacity_unavailable",
-                str(exc),
-                status_code=503,
-            ) from exc
-        selected_snapshot = capacity.snapshot_name or self.client.runtime_name
+        # Decided before the attempt is registered or a sandbox exists, and applied in one
+        # step below, so a failure anywhere in it leaves the secrets, the egress list and
+        # the document exactly as they were.
+        export_plan = _plan_observability_export(
+            job,
+            payload,
+            secrets_map,
+            selected_snapshot=selected_snapshot,
+            allowed_domains=allowed_domains,
+            max_egress_domains=self.client.max_egress_domains,
+        )
+        simulation_mark, mark_accepted = _simulation_mark(job, export_plan)
+        if not mark_accepted:
+            # A guest must never get our key without the dictionary that says what to do
+            # with it.
+            export_plan = _ExportPlan()
+        secrets_map = {**secrets_map, **dict(export_plan.secrets)}
+        if export_plan.egress_domains is not None:
+            allowed_domains = set(export_plan.egress_domains)
+        dispatch_payload = prepare_dispatch_payload(
+            payload, secrets_map, simulator_secrets=simulator_env, job=job
+        )
+        if export_plan.secrets:
+            dispatch_payload = attach_observability_export_secret_refs(
+                dispatch_payload, [alias for alias, _value in export_plan.secrets]
+            )
+        dispatch_payload = _with_simulation_mark(dispatch_payload, simulation_mark)
         registered_snapshot_digest = (
             capacity.snapshot_digest or self.client.runtime_digest
         )
@@ -1995,9 +2411,18 @@ class HostedHarnessGateway:
             attempt.id,
             redaction_values(
                 {**secrets_map, **simulator_env},
-                extra=(simulator_vertex_credentials.decode("utf-8", errors="replace"),)
-                if simulator_vertex_credentials
-                else (),
+                extra=(
+                    *(
+                        (
+                            simulator_vertex_credentials.decode(
+                                "utf-8", errors="replace"
+                            ),
+                        )
+                        if simulator_vertex_credentials
+                        else ()
+                    ),
+                    *export_plan.redaction_values,
+                ),
             ),
         )
         # Record provenance digests on the attempt.
@@ -2625,6 +3050,8 @@ class HostedHarnessGateway:
         _validate_resolved_egress_domains(
             allowed_domains, max_domains=self.client.max_egress_domains
         )
+        # A chat sandbox is never bound to an agent, so it gets the mark and no export.
+        simulation_mark, _accepted = _simulation_mark(job)
         ttl_seconds = _chat_idle_seconds()
         launch_spec = SandboxLaunchSpec(
             cpu_units=2,
@@ -2658,7 +3085,11 @@ class HostedHarnessGateway:
             sandbox.fs.upload_file(source_archive, "/work/source.tar.gz")
             sandbox.fs.upload_file(workspace_archive, "/work/conversation.tar.gz")
             sandbox.fs.upload_file(
-                json.dumps(job.payload, sort_keys=True, separators=(",", ":")).encode(),
+                json.dumps(
+                    _with_simulation_mark(job.payload, simulation_mark),
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ).encode(),
                 "/work/job.json",
             )
             sandbox.fs.upload_file(
@@ -2771,7 +3202,10 @@ class HostedHarnessGateway:
                 simulator_secrets = resolve_platform_simulator_secrets()
                 secret_values = cache_attempt_redaction_values(
                     attempt.id,
-                    redaction_values({**target_secrets, **simulator_secrets}),
+                    redaction_values(
+                        {**target_secrets, **simulator_secrets},
+                        extra=_ingest_key_values(attempt.job.organization_id),
+                    ),
                 )
             except Exception as exc:  # noqa: BLE001 - unsafe logs must not be persisted
                 attempt.diagnostics_error = f"redaction:{type(exc).__name__}"

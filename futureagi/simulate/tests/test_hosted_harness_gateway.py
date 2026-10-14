@@ -5,13 +5,16 @@ import hashlib
 import io
 import json
 import os
+import sys
 import tarfile
 import tempfile
 import tracemalloc
+import uuid
 import zlib
 from contextlib import nullcontext
 from datetime import timedelta
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
+from typing import NamedTuple
 from unittest.mock import patch
 from urllib.parse import urlparse
 
@@ -29,6 +32,7 @@ from simulate.services.hosted_harness import (
     register_attempt,
     request_cancellation,
 )
+from simulate.services.hosted_harness_diagnostics import cached_attempt_redaction_values
 from simulate.services.hosted_harness_gateway import (
     _ADJUSTMENTS_PATH,
     _SIMULATOR_SECRETS_PATH,
@@ -2876,3 +2880,1259 @@ def test_platform_simulator_prefers_public_callback_for_hosted_observability(
     values, _credentials = _platform_simulator_material()
 
     assert values["FI_BASE_URL"] == "https://platform.example.test"
+
+
+# ---------------------------------------------------------------------------
+# Observability export decided at launch
+# ---------------------------------------------------------------------------
+
+_GATEWAY = "simulate.services.hosted_harness_gateway"
+_EXPORT_SNAPSHOT = "alk-hosted-v1"
+_COLLECTOR = "https://collector.example.com"
+_EXPORT_API_KEY = "export-api-key-0001"
+_EXPORT_SECRET_KEY = "export-secret-key-0001"
+_LEAK_SENTINEL = "LEAK-SENTINEL-DO-NOT-LOG"
+_TRACES_HEADERS = "OTEL_EXPORTER_OTLP_TRACES_HEADERS"
+
+
+class _ExportCredentials(NamedTuple):
+    api_key: str
+    secret_key: str
+    enabled: bool
+
+
+class _Logs:
+    """Stands in for the module's structlog logger and keeps what it was told."""
+
+    def __init__(self):
+        self.records = []
+
+    def __getattr__(self, level):
+        def log(event, *args, **kwargs):
+            self.records.append((level, event, kwargs))
+
+        return log
+
+    def events(self, name):
+        return [(level, kw) for level, event, kw in self.records if event == name]
+
+    def text(self):
+        return repr(self.records)
+
+
+class _OrderedDaytona(_Daytona):
+    """A sandbox client that writes sandbox creation and every upload into one list."""
+
+    def __init__(self, events):
+        super().__init__()
+        self.events = events
+        stored = self.sandbox.fs.upload_file
+
+        def upload(content, path):
+            events.append(("upload", path))
+            stored(content, path)
+
+        self.sandbox.fs.upload_file = upload
+
+    def create(self, params, **kwargs):
+        self.events.append(("create", None))
+        return super().create(params, **kwargs)
+
+
+class _StopAfterJobJson(Exception):
+    pass
+
+
+class _StoppingFilesystem(_Filesystem):
+    """Keeps the uploads, then ends the call once the job document is in."""
+
+    def upload_file(self, content, path):
+        super().upload_file(content, path)
+        if path == "/work/job.json":
+            raise _StopAfterJobJson
+
+
+def _mark_text(mark):
+    return mark.get("OTEL_RESOURCE_ATTRIBUTES", "")
+
+
+class _ExportWorld:
+    """A launchable job and every collaborator the export decision reads, at its seam.
+
+    The database holds the agent, its observability row, the project and the job. The
+    two producers owned by other tickets (the agent summary and the key resolver) and the
+    holding write are stand-ins that record how they were called.
+    """
+
+    def __init__(
+        self,
+        organization,
+        workspace,
+        user,
+        settings,
+        monkeypatch,
+        *,
+        tag="a",
+        bind="metadata",
+        instrumentation="opentelemetry",
+        kind="source",
+        declared=None,
+        provider="enabled",
+        project="live",
+        snapshot_setting=_EXPORT_SNAPSHOT,
+        collector=_COLLECTOR,
+        credentials="ok",
+        summary_raises=False,
+        holding="ok",
+        cap_at_baseline=False,
+        base_domains=("ingest.example.com",),
+        customer_domains=("agent.example.com",),
+        stale_mark=None,
+        library_missing=(),
+    ):
+        from model_hub.models.ai_model import AIModel
+        from simulate.models import AgentDefinition, RunTest
+        from tracer.models.observability_provider import (
+            ObservabilityProvider,
+            ProviderChoices,
+        )
+        from tracer.models.project import Project
+
+        self.organization = organization
+        self.workspace = workspace
+        self.declared = dict(declared or {})
+        self.events = []
+        self.holding_calls = []
+        self.summary_calls = []
+        self.credential_calls = []
+        self.logs = _Logs()
+        self.collector = collector
+
+        project_workspace = None if project == "no_workspace" else workspace
+        project_organization = organization
+        if project == "other_org":
+            from accounts.models.organization import Organization
+
+            project_organization = Organization.objects.create(name="Project owner org")
+        self.project = Project.no_workspace_objects.create(
+            name=f"Support Bot {tag}",
+            organization=project_organization,
+            workspace=project_workspace,
+            model_type=AIModel.ModelTypes.GENERATIVE_LLM,
+            trace_type="observe",
+        )
+        if project == "no_workspace":
+            # A save hook gives every project a workspace, so a legacy row without one can only be
+            # made by an update that skips the hook.
+            Project.no_workspace_objects.filter(id=self.project.id).update(workspace=None)
+            self.project.refresh_from_db()
+        if project == "deleted":
+            self.project.deleted = True
+            self.project.save()
+        if project == "ambiguous":
+            Project.no_workspace_objects.create(
+                name=self.project.name,
+                organization=organization,
+                workspace=workspace,
+                model_type=AIModel.ModelTypes.GENERATIVE_LLM,
+                trace_type="experiment",
+            )
+        self.provider = None
+        if provider != "missing":
+            self.provider = ObservabilityProvider.no_workspace_objects.create(
+                project=self.project,
+                provider=ProviderChoices.OTHERS,
+                organization=organization,
+                workspace=workspace,
+                enabled=provider in {"enabled", "deleted"},
+            )
+            if provider == "deleted":
+                self.provider.deleted = True
+                self.provider.save()
+        self.agent = AgentDefinition.no_workspace_objects.create(
+            agent_name=f"Code agent {tag}",
+            agent_type=AgentDefinition.AgentTypeChoices.TEXT,
+            inbound=True,
+            description="A code agent",
+            organization=organization,
+            workspace=workspace,
+            languages=["en"],
+            observability_provider=self.provider,
+        )
+
+        payload = _payload()
+        payload["source"] = {
+            "kind": "remote",
+            "endpoint": "https://agent.example.com",
+            "visibility": "public",
+        }
+        payload["security"]["allowed_egress_domains"] = list(customer_domains)
+        payload["agent"]["secret_refs"] = {
+            alias: {
+                "manager": "platform-vault",
+                "key": f"vault-{alias}",
+                "purpose": "target_provider",
+            }
+            for alias in self.declared
+        }
+        if stale_mark is not None:
+            payload["metadata"]["customer_code_environment"] = dict(stale_mark)
+        bound_id = {
+            "metadata": str(self.agent.id),
+            "bad_id": "not-a-uuid",
+            "other_org": None,
+            "deleted": None,
+        }.get(bind)
+        if bind == "other_org":
+            from accounts.models.organization import Organization
+
+            stranger = AgentDefinition.no_workspace_objects.create(
+                agent_name="Other tenant",
+                agent_type=AgentDefinition.AgentTypeChoices.TEXT,
+                inbound=True,
+                description="x",
+                organization=Organization.objects.create(name="Other tenant org"),
+                languages=["en"],
+            )
+            bound_id = str(stranger.id)
+        if bind == "deleted":
+            self.agent.deleted = True
+            self.agent.save()
+            bound_id = str(self.agent.id)
+        if bound_id:
+            payload["metadata"]["agent_definition_id"] = bound_id
+        self.job, _ = create_hosted_job(
+            organization,
+            payload,
+            idempotency_key=f"export-{tag}-{uuid.uuid4().hex[:8]}",
+            workspace=workspace,
+        )
+        if bind == "run_test":
+            run_test = RunTest.objects.create(
+                name=f"Bound run {tag}",
+                organization=organization,
+                agent_definition=self.agent,
+            )
+            self.job.run_test = run_test
+            self.job.save(update_fields=["run_test"])
+
+        self.client = _OrderedDaytona(self.events)
+        self.gateway = object.__new__(HostedHarnessGateway)
+        self.gateway.client = self.client
+        self.gateway.snapshot = _EXPORT_SNAPSHOT
+        self.gateway.snapshot_digest = "sha256:good"
+        self.client.runtime_digest = "sha256:good"
+        settings.ALK_HOSTED_BASE_EGRESS_DOMAINS = list(base_domains)
+        settings.ALK_HOSTED_AUTHORING_MAX_DURATION_SECONDS = 3600
+        settings.ALK_HOSTED_SANDBOX_TTL_SECONDS = 7200
+
+        for name in (
+            "ALK_HOSTED_FI_BASE_URL",
+            "HARNESS_PUBLIC_BASE_URL",
+            "FI_BASE_URL",
+        ):
+            monkeypatch.delenv(name, raising=False)
+        if collector is not None:
+            monkeypatch.setenv("ALK_HOSTED_FI_BASE_URL", collector)
+        if snapshot_setting:
+            monkeypatch.setenv(
+                "ALK_HOSTED_OBSERVABILITY_EXPORT_SNAPSHOTS", snapshot_setting
+            )
+        else:
+            monkeypatch.delenv(
+                "ALK_HOSTED_OBSERVABILITY_EXPORT_SNAPSHOTS", raising=False
+            )
+        monkeypatch.setattr(f"{_GATEWAY}.structlog_logger", self.logs)
+        monkeypatch.setattr(
+            f"{_GATEWAY}.PlatformSecretResolver.resolve",
+            lambda _self, _job: dict(self.declared),
+        )
+
+        summary_module = ModuleType("simulate.services.agent_setup")
+
+        def agent_summary(agent_definition_id, *, agent_version_id=None):
+            self.summary_calls.append(agent_definition_id)
+            if summary_raises:
+                raise RuntimeError(_LEAK_SENTINEL)
+            return SimpleNamespace(kind=kind, instrumentation=instrumentation)
+
+        summary_module.agent_summary = agent_summary
+        monkeypatch.setitem(
+            sys.modules, "simulate.services.agent_setup", summary_module
+        )
+
+        ingest_module = ModuleType("tracer.services.collector_ingest")
+        ingest_module.ExportCredentials = _ExportCredentials
+
+        def resolve_export_credentials(organization_id, workspace_id):
+            self.events.append(("key", None))
+            self.credential_calls.append((organization_id, workspace_id))
+            if credentials == "raises":
+                raise RuntimeError(_LEAK_SENTINEL)
+            if credentials == "none":
+                return None
+            return _ExportCredentials(
+                _EXPORT_API_KEY, _EXPORT_SECRET_KEY, credentials != "disabled"
+            )
+
+        ingest_module.resolve_export_credentials = resolve_export_credentials
+        monkeypatch.setitem(
+            sys.modules, "tracer.services.collector_ingest", ingest_module
+        )
+
+        def record_holding(project_id):
+            from tracer.services.simulation_visibility import HoldingNotRecorded
+
+            self.events.append(("holding", None))
+            self.holding_calls.append(project_id)
+            if holding == "not_holding":
+                raise HoldingNotRecorded("no row")
+            if holding == "raises":
+                raise RuntimeError(_LEAK_SENTINEL)
+
+        monkeypatch.setattr(
+            "tracer.services.simulation_visibility.record_holding", record_holding
+        )
+        for module in library_missing:
+            monkeypatch.setitem(sys.modules, module, None)
+
+        self.simulator_values = {
+            "ALK_HARNESS": "vertex-gemini",
+            "GOOGLE_APPLICATION_CREDENTIALS": _SIMULATOR_VERTEX_CREDENTIALS_PATH,
+            "GOOGLE_CLOUD_PROJECT": "platform-simulator-project",
+            "GOOGLE_CLOUD_LOCATION": "global",
+        }
+        monkeypatch.setattr(
+            f"{_GATEWAY}._platform_simulator_material",
+            lambda: (
+                dict(self.simulator_values),
+                b'{"project_id":"platform-simulator-project"}',
+            ),
+        )
+        if cap_at_baseline:
+            self.client.max_egress_domains = len(self.baseline_domains())
+
+    def baseline_domains(self):
+        return _resolved_egress_domains(
+            self.job.payload,
+            dict(self.declared),
+            self.simulator_values,
+            "platform.example.com",
+        )
+
+    def launch(self):
+        self.attempt = self.gateway.launch(
+            self.job, endpoint_base_url="https://platform.example.com"
+        )
+        return self
+
+    @property
+    def uploads(self):
+        return self.client.sandbox.fs.uploads
+
+    @property
+    def job_json(self):
+        return json.loads(self.uploads["/work/job.json"])
+
+    @property
+    def mark(self):
+        return self.job_json["metadata"]["customer_code_environment"]
+
+    @property
+    def secrets(self):
+        return json.loads(self.uploads["/run/futureagi/secrets.json"])
+
+    @property
+    def refs(self):
+        return self.job_json["agent"]["secret_refs"]
+
+    @property
+    def domains(self):
+        return set(self.client.params.allowed_domains)
+
+    def export_log(self):
+        return self.logs.events("observability_export_unavailable")
+
+
+def _assert_launched_without_export(world, declared_secrets=None):
+    """The run was made, marked, and given nothing of the export."""
+    assert world.attempt.state == HostedHarnessAttempt.State.RUNNING
+    mark = world.mark
+    assert set(mark) == {"OTEL_RESOURCE_ATTRIBUTES"}
+    assert "fi.simulation.origin=simulation" in _mark_text(mark)
+    assert "project_name" not in _mark_text(mark)
+    assert world.secrets == (declared_secrets or {})
+    assert not any(
+        ref.get("purpose") == "observability_export" for ref in world.refs.values()
+    )
+    assert "collector.example.com" not in world.domains
+    assert _EXPORT_API_KEY.encode() not in world.uploads["/work/job.json"]
+    assert _LEAK_SENTINEL not in world.logs.text()
+
+
+def _customer_traceai_secrets(organization, workspace, user, case):
+    """The resolved FI_API_KEY and FI_SECRET_KEY a customer declared, for one case."""
+    from accounts.models.organization import Organization
+    from accounts.models.user import OrgApiKey
+    from accounts.models.workspace import Workspace
+
+    key_organization = organization
+    key_workspace = workspace
+    if case == "other_workspace":
+        key_workspace = Workspace.no_workspace_objects.create(
+            name="Other workspace",
+            organization=organization,
+            created_by=user,
+            is_active=True,
+        )
+    if case == "other_org":
+        key_organization = Organization.objects.create(name="Key owner org")
+        key_workspace = None
+    if case == "unknown":
+        return {"FI_API_KEY": "unknown-api-key", "FI_SECRET_KEY": "unknown-secret"}
+    if case == "workspace_less":
+        key_workspace = None
+    key = OrgApiKey.no_workspace_objects.create(
+        organization=key_organization,
+        workspace=key_workspace,
+        name=f"customer {case}",
+        type="user",
+        enabled=case != "disabled",
+    )
+    secret = "wrong-secret" if case == "bad_secret" else key.secret_key
+    return {"FI_API_KEY": key.api_key, "FI_SECRET_KEY": secret}
+
+
+@pytest.mark.django_db
+def test_all_three_job_uploads_carry_the_mark_and_the_row_does_not(
+    organization, workspace, user, settings, monkeypatch
+):
+    from tracer.services.simulation_mark import customer_code_environment
+
+    stale = {"OTEL_STALE_VALUE": "from the row"}
+    world = _ExportWorld(
+        organization,
+        workspace,
+        user,
+        settings,
+        monkeypatch,
+        bind="run_test",
+        stale_mark=stale,
+    ).launch()
+    job = world.job
+    expected = customer_code_environment(
+        organization_id=str(job.organization_id),
+        job_id=str(job.id),
+        run_id=str(job.run_id),
+        run_test_id=str(job.run_test_id),
+        test_execution_id=None,
+        project_name=world.project.name,
+        collector_url=_COLLECTOR,
+        export="our_keys",
+        instrumentation="opentelemetry",
+    )
+    # The launch's document carries exactly the function's dictionary, in place of the
+    # value the stored request had.
+    assert world.mark == expected
+    assert world.mark != stale
+    # The object the launch was handed first, then the stored row.
+    for read_back in (False, True):
+        if read_back:
+            job.refresh_from_db()
+        assert job.payload["metadata"]["customer_code_environment"] == stale
+        assert "fi.simulation" not in json.dumps(job.payload)
+
+    # Authoring and chat are never bound: the mark, and no export, no log line.
+    for upload_document in (_authoring_document, _chat_document):
+        logs = _Logs()
+        monkeypatch.setattr(f"{_GATEWAY}.structlog_logger", logs)
+        document, source_job = upload_document(monkeypatch)
+        mark = document["metadata"]["customer_code_environment"]
+        assert mark == customer_code_environment(
+            organization_id=str(source_job.organization_id),
+            job_id=str(source_job.id),
+            run_id=str(source_job.run_id),
+            run_test_id=None,
+            test_execution_id=None,
+        )
+        assert set(mark) == {"OTEL_RESOURCE_ATTRIBUTES"}
+        assert "project_name" not in mark["OTEL_RESOURCE_ATTRIBUTES"]
+        assert "fi.simulation.origin=simulation" in mark["OTEL_RESOURCE_ATTRIBUTES"]
+        assert logs.events("observability_export_unavailable") == []
+        assert logs.events("simulation_mark_unavailable") == []
+        assert source_job.payload["metadata"]["customer_code_environment"] == stale
+
+
+def _unbound_job():
+    payload = _payload()
+    payload["source"] = {
+        "kind": "remote",
+        "endpoint": "https://agent.example.com",
+        "visibility": "public",
+    }
+    payload["metadata"] = {
+        "customer_code_environment": {"OTEL_STALE_VALUE": "from the row"}
+    }
+    return SimpleNamespace(
+        id=uuid.uuid4(),
+        organization_id=uuid.uuid4(),
+        run_id=uuid.uuid4(),
+        run_test_id=None,
+        test_execution_id=None,
+        payload=payload,
+    )
+
+
+def _authoring_document(monkeypatch, events=None):
+    job = _unbound_job()
+    client = _Daytona() if events is None else _OrderedDaytona(events)
+    client.sandbox.fs = _StoppingFilesystem()
+    gateway = object.__new__(HostedHarnessGateway)
+    gateway.client = client
+    monkeypatch.setattr(f"{_GATEWAY}._mark_stage", lambda *_: None)
+    monkeypatch.setattr(
+        f"{_GATEWAY}.HostedSourceAcquirer.acquire", lambda *_: (b"source", None)
+    )
+    monkeypatch.setattr(
+        f"{_GATEWAY}._provider_import_authoring_material", lambda *_: ({}, "")
+    )
+    monkeypatch.setattr(f"{_GATEWAY}._platform_simulator_material", lambda: ({}, None))
+    with pytest.raises(_StopAfterJobJson):
+        gateway.author(job)
+    return json.loads(client.sandbox.fs.uploads["/work/job.json"]), job
+
+
+def _chat_document(monkeypatch, events=None):
+    job = _unbound_job()
+    client = _Daytona() if events is None else _OrderedDaytona(events)
+    client.sandbox.fs = _StoppingFilesystem()
+    gateway = object.__new__(HostedHarnessGateway)
+    gateway.client = client
+    monkeypatch.setattr(f"{_GATEWAY}.load_workspace_archive", lambda _c: None)
+    monkeypatch.setattr(f"{_GATEWAY}._authoring_archive_for", lambda _j: None)
+    monkeypatch.setattr(
+        f"{_GATEWAY}.HostedSourceAcquirer.acquire", lambda *_: (b"source", None)
+    )
+    monkeypatch.setattr(
+        f"{_GATEWAY}.issue_conversation_capability",
+        lambda *_a, **_k: SimpleNamespace(document={"conversation": "x"}),
+    )
+    monkeypatch.setattr(f"{_GATEWAY}._platform_simulator_material", lambda: ({}, None))
+    with pytest.raises(_StopAfterJobJson):
+        gateway._start_chat_sandbox(
+            job,
+            conversation=SimpleNamespace(id=uuid.uuid4(), job_id=job.id),
+            endpoint_base_url="https://platform.example.com",
+        )
+    return json.loads(client.sandbox.fs.uploads["/work/job.json"]), job
+
+
+def test_authoring_and_chat_documents_carry_the_mark_even_when_the_function_fails(
+    monkeypatch,
+):
+    # The upload of these two is the only place the mark can be lost, so a failing
+    # function must give them an empty dictionary rather than stop the call.
+    def explode(**_kwargs):
+        raise RuntimeError(_LEAK_SENTINEL)
+
+    monkeypatch.setattr(
+        "tracer.services.simulation_mark.customer_code_environment", explode
+    )
+    for upload_document in (_authoring_document, _chat_document):
+        logs = _Logs()
+        monkeypatch.setattr(f"{_GATEWAY}.structlog_logger", logs)
+        document, job = upload_document(monkeypatch)
+        assert document["metadata"]["customer_code_environment"] == {}
+        assert logs.events("simulation_mark_unavailable") == [
+            ("warning", {"job_id": str(job.id), "reason": "raised"})
+        ]
+        assert _LEAK_SENTINEL not in logs.text()
+
+
+@pytest.mark.django_db
+def test_export_environment_and_keys_for_a_bound_source_agent_with_observability_on(
+    organization, workspace, user, settings, monkeypatch
+):
+    cases = [
+        # (tag, how the run is bound, the word, the keys the customer declared)
+        ("otel", "metadata", "opentelemetry", None),
+        ("traceai", "run_test", "traceai", None),
+        ("mine", "metadata", "traceai", "same_workspace"),
+        ("default", "run_test", "traceai", "workspace_less"),
+    ]
+    for tag, bind, word, customer_keys in cases:
+        declared = (
+            _customer_traceai_secrets(organization, workspace, user, customer_keys)
+            if customer_keys
+            else {}
+        )
+        world = _ExportWorld(
+            organization,
+            workspace,
+            user,
+            settings,
+            monkeypatch,
+            tag=tag,
+            bind=bind,
+            instrumentation=word,
+            declared=declared,
+        ).launch()
+        mark = world.mark
+        attributes = _mark_text(mark)
+        assert f"project_name={world.project.name.replace(' ', '%20')}" in attributes
+        assert "fi.simulation.origin=simulation" in attributes
+        assert "OTEL_EXPORTER_OTLP_PROTOCOL" not in mark
+        assert world.export_log() == []
+        # The document and the stored request: the refs and the dictionary are on the
+        # sandbox's copy only.
+        # Checked on the object the launch was handed, then on the stored row: a shared
+        # nested dictionary would otherwise be written to without ever being saved.
+        for read_back in (False, True):
+            if read_back:
+                world.job.refresh_from_db()
+            assert "customer_code_environment" not in world.job.payload["metadata"]
+            stored_refs = world.job.payload["agent"]["secret_refs"]
+            assert not any(
+                r["purpose"] == "observability_export" for r in stored_refs.values()
+            )
+            assert set(stored_refs) == set(declared)
+        assert world.domains >= {"collector.example.com"}
+        assert world.holding_calls == [str(world.project.id)]
+        assert world.summary_calls == [world.agent.id]
+
+        if customer_keys:
+            # Their keys do the work: the dictionary and the hook, no alias, no ref.
+            assert world.credential_calls == []
+            assert mark["FI_SIMULATION_EXPORT"] == "customer_keys"
+            assert set(mark) == {"OTEL_RESOURCE_ATTRIBUTES", "FI_SIMULATION_EXPORT"}
+            assert world.secrets == declared
+            assert set(world.refs) == set(declared)
+            assert not any(
+                r["purpose"] == "observability_export" for r in world.refs.values()
+            )
+            continue
+
+        assert world.credential_calls == [
+            (str(organization.id), str(world.project.workspace_id))
+        ]
+        assert mark["FI_SIMULATION_EXPORT"] == "our_keys"
+        assert mark["OTEL_EXPORTER_OTLP_TRACES_ENDPOINT"] == f"{_COLLECTOR}/v1/traces"
+        header = f"X-Api-Key={_EXPORT_API_KEY},X-Secret-Key={_EXPORT_SECRET_KEY}"
+        if word == "opentelemetry":
+            assert set(mark) == {
+                "OTEL_RESOURCE_ATTRIBUTES",
+                "FI_SIMULATION_EXPORT",
+                "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT",
+            }
+            # Only traceAI reads the FI_ names, so an OpenTelemetry process gets none.
+            assert world.secrets == {_TRACES_HEADERS: header}
+            aliases = {_TRACES_HEADERS}
+        else:
+            assert mark["FI_BASE_URL"] == _COLLECTOR
+            assert set(mark) == {
+                "OTEL_RESOURCE_ATTRIBUTES",
+                "FI_SIMULATION_EXPORT",
+                "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT",
+                "FI_BASE_URL",
+            }
+            assert world.secrets == {
+                _TRACES_HEADERS: header,
+                "FI_API_KEY": _EXPORT_API_KEY,
+                "FI_SECRET_KEY": _EXPORT_SECRET_KEY,
+            }
+            aliases = {_TRACES_HEADERS, "FI_API_KEY", "FI_SECRET_KEY"}
+        assert {
+            alias: ref
+            for alias, ref in world.refs.items()
+            if ref["purpose"] == "observability_export"
+        } == {
+            alias: {
+                "manager": "platform-config",
+                "key": alias,
+                "purpose": "observability_export",
+            }
+            for alias in aliases
+        }
+        # A key value never rides in the document, a log line, or an exception message.
+        document = world.uploads["/work/job.json"]
+        assert _EXPORT_API_KEY.encode() not in document
+        assert _EXPORT_SECRET_KEY.encode() not in document
+        assert _EXPORT_API_KEY not in world.logs.text()
+        # The launch-time redaction set holds each value, not only the composite header.
+        redacted = cached_attempt_redaction_values(world.attempt.id)
+        assert {_EXPORT_API_KEY, _EXPORT_SECRET_KEY, header} <= set(redacted)
+
+
+@pytest.mark.django_db
+def test_the_holding_is_recorded_once_after_the_key_and_before_the_sandbox_exists(
+    organization, workspace, user, settings, monkeypatch
+):
+    world = _ExportWorld(
+        organization, workspace, user, settings, monkeypatch, tag="order"
+    ).launch()
+    names = [name for name, _ in world.events]
+    assert names.count("holding") == 1
+    assert names.count("key") == 1
+    assert names.index("key") < names.index("holding")
+    # Before the sandbox is created, so before the first upload (and the attempt row).
+    assert names.index("holding") < names.index("create")
+    assert names.index("holding") < names.index("upload")
+
+
+@pytest.mark.django_db
+def test_the_customer_keys_mode_records_the_holding_without_a_key(
+    organization, workspace, user, settings, monkeypatch
+):
+    declared = _customer_traceai_secrets(
+        organization, workspace, user, "same_workspace"
+    )
+    world = _ExportWorld(
+        organization,
+        workspace,
+        user,
+        settings,
+        monkeypatch,
+        tag="theirs",
+        instrumentation="traceai",
+        declared=declared,
+    ).launch()
+    assert world.holding_calls == [str(world.project.id)]
+    assert [name for name, _ in world.events if name == "key"] == []
+
+
+@pytest.mark.django_db
+def test_a_trailing_slash_on_the_collector_never_doubles_the_traces_path(
+    organization, workspace, user, settings, monkeypatch
+):
+    for tag, slashes in (("slash1", "/"), ("slash2", "//")):
+        world = _ExportWorld(
+            organization,
+            workspace,
+            user,
+            settings,
+            monkeypatch,
+            tag=tag,
+            instrumentation="traceai",
+            collector=f"{_COLLECTOR}{slashes}",
+        ).launch()
+        assert (
+            world.mark["OTEL_EXPORTER_OTLP_TRACES_ENDPOINT"]
+            == f"{_COLLECTOR}/v1/traces"
+        )
+        assert world.mark["FI_BASE_URL"] == _COLLECTOR
+        assert "collector.example.com" in world.domains
+        assert world.export_log() == []
+
+
+# Each refusal: the world's options, the reason word, and the level it is logged at.
+_REFUSALS = {
+    "snapshot_not_listed": (
+        {"snapshot_setting": "some-other-snapshot"},
+        "snapshot_unsupported",
+        "info",
+    ),
+    "snapshot_setting_empty": (
+        {"snapshot_setting": ""},
+        "snapshot_unsupported",
+        "info",
+    ),
+    "unbound": ({"bind": "none"}, "not_bound", "info"),
+    "metadata_id_not_a_uuid": ({"bind": "bad_id"}, "not_bound", "info"),
+    "agent_of_another_organisation": ({"bind": "other_org"}, "not_bound", "info"),
+    "agent_deleted": ({"bind": "deleted"}, "not_bound", "info"),
+    "row_disabled": ({"provider": "disabled"}, "observability_off", "warning"),
+    "no_observability_row": ({"provider": "missing"}, "observability_off", "warning"),
+    "project_deleted": ({"project": "deleted"}, "observability_off", "warning"),
+    "project_without_workspace": (
+        {"project": "no_workspace"},
+        "no_workspace",
+        "warning",
+    ),
+    "same_named_experiment_project": (
+        {"project": "ambiguous"},
+        "name_ambiguous",
+        "warning",
+    ),
+    "hosted_agent": ({"kind": "hosted"}, "not_source", "warning"),
+    "no_collector": ({"collector": None}, "no_collector", "warning"),
+    "collector_without_a_host": (
+        {"collector": "https://:8443"},
+        "no_collector",
+        "warning",
+    ),
+    "collector_without_a_scheme": (
+        {"collector": "collector.example.com"},
+        "no_collector",
+        "warning",
+    ),
+    "otel_declares_traces_endpoint": (
+        {"declared": {"OTEL_EXPORTER_OTLP_TRACES_ENDPOINT": "https://theirs.example"}},
+        "customer_configuration",
+        "warning",
+    ),
+    "provider_row_deleted": ({"provider": "deleted"}, "observability_off", "warning"),
+    "project_of_another_organisation": (
+        {"project": "other_org"},
+        "observability_off",
+        "warning",
+    ),
+    "otel_declares_traces_endpoint_in_lower_case": (
+        {"declared": {"otel_exporter_otlp_traces_endpoint": "https://theirs.example"}},
+        "customer_configuration",
+        "warning",
+    ),
+    "otel_declares_headers": (
+        {"declared": {"OTEL_EXPORTER_OTLP_HEADERS": "x=y"}},
+        "customer_configuration",
+        "warning",
+    ),
+    "traceai_declares_base_url": (
+        {
+            "instrumentation": "traceai",
+            "declared": {"FI_BASE_URL": "https://theirs.example"},
+        },
+        "customer_configuration",
+        "warning",
+    ),
+    "traceai_declares_endpoint": (
+        {
+            "instrumentation": "traceai",
+            "declared": {"OTEL_EXPORTER_OTLP_ENDPOINT": "https://theirs.example"},
+        },
+        "customer_configuration",
+        "warning",
+    ),
+    "traceai_declares_api_key_alone": (
+        {"instrumentation": "traceai", "declared": {"FI_API_KEY": "only-the-key"}},
+        "customer_configuration",
+        "warning",
+    ),
+    "traceai_declares_secret_key_alone": (
+        {
+            "instrumentation": "traceai",
+            "declared": {"FI_SECRET_KEY": "only-the-secret"},
+        },
+        "customer_configuration",
+        "warning",
+    ),
+    "not_instrumented": ({"instrumentation": "none"}, "not_instrumented", "warning"),
+    "export_key_disabled": ({"credentials": "disabled"}, "key_disabled", "warning"),
+    "key_resolver_raises": ({"credentials": "raises"}, "no_key", "warning"),
+    "key_resolver_answers_nothing": ({"credentials": "none"}, "no_key", "warning"),
+    "summary_raises": ({"summary_raises": True}, "RuntimeError", "warning"),
+    "holding_not_recorded": ({"holding": "not_holding"}, "not_holding", "warning"),
+    "holding_raises": ({"holding": "raises"}, "RuntimeError", "warning"),
+    "egress_cap": ({"cap_at_baseline": True}, "egress_cap", "warning"),
+    "summary_module_missing": (
+        {"library_missing": ("simulate.services.agent_setup",)},
+        "ModuleNotFoundError",
+        "warning",
+    ),
+    "key_module_missing": (
+        {"library_missing": ("tracer.services.collector_ingest",)},
+        "ModuleNotFoundError",
+        "warning",
+    ),
+}
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize("case", sorted(_REFUSALS))
+def test_a_refused_export_leaves_the_mark_and_launches(
+    case, organization, workspace, user, settings, monkeypatch
+):
+    options, reason, level = _REFUSALS[case]
+    world = _ExportWorld(
+        organization, workspace, user, settings, monkeypatch, tag=case[:12], **options
+    ).launch()
+    assert world.export_log() == [
+        (level, {"job_id": str(world.job.id), "reason": reason})
+    ]
+    # The customer's own secrets reach the sandbox untouched, and nothing of ours does.
+    _assert_launched_without_export(world, declared_secrets=world.declared)
+    assert set(world.refs) == set(world.declared)
+    if case not in {"holding_not_recorded", "holding_raises"}:
+        # A refusal before the holding step must not have written the flag.
+        assert world.holding_calls == []
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize(
+    "collector",
+    [
+        "http://localhost:8000",
+        "http://host.docker.internal:8000",
+        "http://10.0.0.3:8000",
+        "https://s3cret-user:s3cret-pass@collector.example.com",
+    ],
+)
+def test_an_unsafe_collector_address_is_refused_before_a_key_is_resolved(
+    collector, organization, workspace, user, settings, monkeypatch
+):
+    world = _ExportWorld(
+        organization,
+        workspace,
+        user,
+        settings,
+        monkeypatch,
+        tag="unsafe",
+        instrumentation="traceai",
+        collector=collector,
+    ).launch()
+    assert world.export_log() == [
+        ("warning", {"job_id": str(world.job.id), "reason": "no_collector"})
+    ]
+    # Nothing is read or written for a run that cannot export.
+    assert world.credential_calls == []
+    assert world.holding_calls == []
+    _assert_launched_without_export(world)
+    assert urlparse(collector).hostname not in world.domains
+    assert b"s3cret" not in world.uploads["/work/job.json"]
+    assert "s3cret" not in world.logs.text()
+
+
+@pytest.mark.django_db
+def test_an_opentelemetry_agent_that_declares_traceai_key_names_still_gets_our_keys(
+    organization, workspace, user, settings, monkeypatch
+):
+    declared = {"FI_API_KEY": "their-api-key", "FI_SECRET_KEY": "their-secret-key"}
+    world = _ExportWorld(
+        organization,
+        workspace,
+        user,
+        settings,
+        monkeypatch,
+        tag="otelfi",
+        instrumentation="opentelemetry",
+        declared=declared,
+    ).launch()
+    assert world.export_log() == []
+    assert world.mark["FI_SIMULATION_EXPORT"] == "our_keys"
+    header = f"X-Api-Key={_EXPORT_API_KEY},X-Secret-Key={_EXPORT_SECRET_KEY}"
+    # Their two names stay theirs; only the header is ours, and no FI_ alias is made.
+    assert world.secrets == {**declared, _TRACES_HEADERS: header}
+    assert {
+        alias
+        for alias, ref in world.refs.items()
+        if ref["purpose"] == "observability_export"
+    } == {_TRACES_HEADERS}
+    assert all(world.refs[alias]["purpose"] == "target_provider" for alias in declared)
+
+
+def test_the_export_plan_does_not_print_its_keys():
+    from simulate.services.hosted_harness_gateway import _ExportPlan
+
+    header = f"X-Api-Key={_EXPORT_API_KEY},X-Secret-Key={_EXPORT_SECRET_KEY}"
+    plan = _ExportPlan(
+        project_name="Support Bot",
+        collector_url=_COLLECTOR,
+        export="our_keys",
+        instrumentation="traceai",
+        secrets=((_TRACES_HEADERS, header), ("FI_API_KEY", _EXPORT_API_KEY)),
+        redaction_values=(_EXPORT_API_KEY, _EXPORT_SECRET_KEY, header),
+    )
+    text = repr(plan)
+    assert _EXPORT_API_KEY not in text
+    assert _EXPORT_SECRET_KEY not in text
+
+
+def test_authoring_and_chat_marks_are_computed_before_the_sandbox_is_created(
+    monkeypatch,
+):
+    events = []
+    monkeypatch.setattr(
+        "tracer.services.simulation_mark.customer_code_environment",
+        lambda **_kwargs: events.append(("mark", None)) or {},
+    )
+    for upload_document in (_authoring_document, _chat_document):
+        events.clear()
+        upload_document(monkeypatch, events)
+        names = [name for name, _ in events]
+        assert names.count("mark") == 1
+        assert names.index("mark") < names.index("create")
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize(
+    "case",
+    [
+        "other_workspace",
+        "other_org",
+        "unknown",
+        "bad_secret",
+        "disabled",
+    ],
+)
+def test_declared_traceai_keys_that_do_not_belong_to_the_project_workspace_are_not_used(
+    case, organization, workspace, user, settings, monkeypatch
+):
+    declared = _customer_traceai_secrets(organization, workspace, user, case)
+    world = _ExportWorld(
+        organization,
+        workspace,
+        user,
+        settings,
+        monkeypatch,
+        tag=case,
+        instrumentation="traceai",
+        declared=declared,
+    ).launch()
+    assert world.export_log() == [
+        (
+            "warning",
+            {"job_id": str(world.job.id), "reason": "customer_key_other_workspace"},
+        )
+    ]
+    # The pair is looked up whole, so a right key with a wrong secret is not a match, and
+    # none of these runs takes the organisation's own key either.
+    assert world.credential_calls == []
+    assert world.holding_calls == []
+    _assert_launched_without_export(world, declared_secrets=declared)
+
+
+@pytest.mark.django_db
+def test_a_failure_after_the_key_leaves_no_alias_ref_or_host(
+    organization, workspace, user, settings, monkeypatch
+):
+    world = _ExportWorld(
+        organization,
+        workspace,
+        user,
+        settings,
+        monkeypatch,
+        tag="halfway",
+        instrumentation="traceai",
+        holding="raises",
+    ).launch()
+    # The key had been read and the aliases built when the holding step raised.
+    assert world.credential_calls
+    assert world.export_log() == [
+        ("warning", {"job_id": str(world.job.id), "reason": "RuntimeError"})
+    ]
+    _assert_launched_without_export(world)
+    assert {"FI_API_KEY", "FI_SECRET_KEY", _TRACES_HEADERS}.isdisjoint(world.secrets)
+    redacted = cached_attempt_redaction_values(world.attempt.id)
+    assert not any(_EXPORT_API_KEY in value for value in redacted)
+
+
+@pytest.mark.django_db
+def test_a_collector_host_already_allowed_adds_nothing_to_the_egress_list(
+    organization, workspace, user, settings, monkeypatch
+):
+    world = _ExportWorld(
+        organization,
+        workspace,
+        user,
+        settings,
+        monkeypatch,
+        tag="listed",
+        base_domains=("ingest.example.com", "collector.example.com"),
+        cap_at_baseline=True,
+    ).launch()
+    # The list was already at the provider's cap, and the host was on it.
+    assert world.export_log() == []
+    assert world.mark["FI_SIMULATION_EXPORT"] == "our_keys"
+    assert len(world.domains) == world.client.max_egress_domains
+
+
+@pytest.mark.django_db
+def test_a_collector_host_past_the_egress_cap_is_dropped_and_the_launch_goes_on(
+    organization, workspace, user, settings, monkeypatch
+):
+    world = _ExportWorld(
+        organization,
+        workspace,
+        user,
+        settings,
+        monkeypatch,
+        tag="cap",
+        cap_at_baseline=True,
+    ).launch()
+    assert world.export_log() == [
+        ("warning", {"job_id": str(world.job.id), "reason": "egress_cap"})
+    ]
+    assert len(world.domains) == world.client.max_egress_domains
+    assert world.holding_calls == []
+    _assert_launched_without_export(world)
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize(
+    "customer_domains, code",
+    [
+        ([f"host{n}.example.com" for n in range(21)], "egress_domain_limit_exceeded"),
+        (["10.0.0.5"], None),
+    ],
+)
+def test_the_customers_own_egress_validation_stays_fail_closed_with_the_export_on(
+    customer_domains, code, organization, workspace, user, settings, monkeypatch
+):
+    world = _ExportWorld(
+        organization,
+        workspace,
+        user,
+        settings,
+        monkeypatch,
+        tag="closed",
+        customer_domains=customer_domains,
+    )
+    with pytest.raises(HostedHarnessError) as raised:
+        world.launch()
+    if code:
+        assert raised.value.code == code
+    # Refused before any decision: no key, no holding, no sandbox.
+    assert world.credential_calls == []
+    assert world.holding_calls == []
+    assert world.events == []
+
+
+_BAD_MARKS = {
+    "raises": (RuntimeError(_LEAK_SENTINEL), "raised"),
+    "not_a_dict": (["OTEL_RESOURCE_ATTRIBUTES"], "invalid"),
+    "none": (None, "invalid"),
+    "otlp_headers": ({"OTEL_EXPORTER_OTLP_HEADERS": "x=y"}, "invalid"),
+    "otlp_traces_headers": ({"OTEL_EXPORTER_OTLP_TRACES_HEADERS": "x=y"}, "invalid"),
+    "fi_api_key": ({"FI_API_KEY": "a-key"}, "invalid"),
+    "fi_secret_key": ({"FI_SECRET_KEY": "a-secret"}, "invalid"),
+    "eleven_entries": ({f"OTEL_NAME_{n}": "v" for n in range(11)}, "invalid"),
+    "foreign_name": ({"HTTP_PROXY": "http://x"}, "invalid"),
+    "lowercase_name": ({"otel_resource_attributes": "x"}, "invalid"),
+    "base_url_with_suffix": ({"FI_BASE_URL_EXTRA": "x"}, "invalid"),
+    "value_not_text": ({"OTEL_RESOURCE_ATTRIBUTES": 1}, "invalid"),
+    "value_too_long": ({"OTEL_RESOURCE_ATTRIBUTES": "a" * 2049}, "invalid"),
+    "value_not_ascii": ({"OTEL_RESOURCE_ATTRIBUTES": "café"}, "invalid"),
+    "value_has_newline": ({"OTEL_RESOURCE_ATTRIBUTES": "a\nb"}, "invalid"),
+}
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize("case", sorted(_BAD_MARKS))
+def test_bad_or_raising_mark_is_logged_and_the_launch_goes_on_unmarked(
+    case, organization, workspace, user, settings, monkeypatch
+):
+    outcome, reason = _BAD_MARKS[case]
+
+    def function(**_kwargs):
+        if isinstance(outcome, Exception):
+            raise outcome
+        return outcome
+
+    world = _ExportWorld(
+        organization,
+        workspace,
+        user,
+        settings,
+        monkeypatch,
+        tag=case[:12],
+        instrumentation="traceai",
+    )
+    monkeypatch.setattr(
+        "tracer.services.simulation_mark.customer_code_environment", function
+    )
+    world.launch()
+    assert world.logs.events("simulation_mark_unavailable") == [
+        ("warning", {"job_id": str(world.job.id), "reason": reason})
+    ]
+    assert world.mark == {}
+    # The key travels with the dictionary that says what to do with it, or not at all.
+    assert world.secrets == {}
+    assert not any(
+        ref.get("purpose") == "observability_export" for ref in world.refs.values()
+    )
+    assert "collector.example.com" not in world.domains
+    assert world.attempt.state == HostedHarnessAttempt.State.RUNNING
+    assert _EXPORT_API_KEY.encode() not in world.uploads["/work/job.json"]
+    assert _LEAK_SENTINEL not in world.logs.text()
+
+
+@pytest.mark.django_db
+def test_an_empty_dictionary_from_the_function_passes_and_is_not_logged(
+    organization, workspace, user, settings, monkeypatch
+):
+    world = _ExportWorld(
+        organization, workspace, user, settings, monkeypatch, tag="empty"
+    )
+    monkeypatch.setattr(
+        "tracer.services.simulation_mark.customer_code_environment",
+        lambda **_kwargs: {},
+    )
+    world.launch()
+    assert world.logs.events("simulation_mark_unavailable") == []
+    assert world.mark == {}
+    # An empty dictionary is a valid answer, so the decision it came with stands.
+    assert _TRACES_HEADERS in world.secrets
+
+
+@pytest.mark.parametrize(
+    "mark, accepted",
+    [
+        ({}, True),
+        ({"OTEL_RESOURCE_ATTRIBUTES": "a=b"}, True),
+        (
+            {"FI_SIMULATION_EXPORT": "our_keys", "FI_BASE_URL": "https://x.example"},
+            True,
+        ),
+        ({f"OTEL_NAME_{n}": "v" for n in range(10)}, True),
+        ({f"OTEL_NAME_{n}": "v" for n in range(11)}, False),
+        ({"OTEL_X": "a" * 2048}, True),
+        ({"OTEL_X": "a" * 2049}, False),
+        ({"FI_BASE_URLX": "x"}, False),
+        ({"FI_API_KEY": "x"}, False),
+        ({"FI_SECRET_KEY": "x"}, False),
+        ({"OTEL_EXPORTER_OTLP_HEADERS": "x"}, False),
+        ({"OTEL_EXPORTER_OTLP_TRACES_HEADERS": "x"}, False),
+        ({"OTEL_X": b"bytes"}, False),
+        ({1: "x"}, False),
+        ("OTEL_X=1", False),
+    ],
+)
+def test_the_mark_check_accepts_only_the_documented_shape(mark, accepted):
+    from simulate.services.hosted_harness_gateway import _mark_is_acceptable
+
+    assert _mark_is_acceptable(mark) is accepted
+
+
+@pytest.mark.django_db
+def test_diagnostics_redaction_fallback_holds_every_enabled_ingest_key(
+    organization, workspace, user, monkeypatch
+):
+    from accounts.models.user import OrgApiKey
+    from simulate.services.hosted_harness_diagnostics import (
+        forget_attempt_redaction_values,
+    )
+
+    job, _ = create_hosted_job(
+        organization, _payload(), idempotency_key=f"redact-{uuid.uuid4().hex[:8]}"
+    )
+    attempt = register_attempt(
+        job.id, endpoint_base_url="https://platform.example"
+    ).attempt
+    forget_attempt_redaction_values(attempt.id)
+    ingest = OrgApiKey.no_workspace_objects.create(
+        organization=organization, workspace=workspace, name="ingest", type="ingest"
+    )
+    switched_off = OrgApiKey.no_workspace_objects.create(
+        organization=organization,
+        workspace=None,
+        name="ingest off",
+        type="ingest",
+        enabled=False,
+    )
+    ordinary = OrgApiKey.no_workspace_objects.create(
+        organization=organization, workspace=workspace, name="ordinary", type="user"
+    )
+    before = OrgApiKey.no_workspace_objects.filter(type="ingest").count()
+    seen = {}
+
+    def poll(_attempt, _sandbox, **kwargs):
+        seen.update(kwargs)
+
+    monkeypatch.setattr(f"{_GATEWAY}.poll_sandbox_diagnostics", poll)
+    HostedHarnessGateway._capture_diagnostics(attempt, object(), final=True)
+
+    values = set(seen["secret_values"])
+    assert {ingest.api_key, ingest.secret_key} <= values
+    assert not {switched_off.api_key, switched_off.secret_key} & values
+    assert not {ordinary.api_key, ordinary.secret_key} & values
+    # Read, never created.
+    assert OrgApiKey.no_workspace_objects.filter(type="ingest").count() == before
