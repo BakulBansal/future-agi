@@ -311,7 +311,12 @@ class OrgApiKey(BaseModel):
     type = models.CharField(
         max_length=50,
         default="system",
-        choices=[("system", "System"), ("user", "User"), ("mcp", "MCP")],
+        choices=[
+            ("system", "System"),
+            ("user", "User"),
+            ("mcp", "MCP"),
+            ("ingest", "Ingest"),
+        ],
     )
     enabled = models.BooleanField(default=True)
     user = models.ForeignKey(
@@ -336,7 +341,15 @@ class OrgApiKey(BaseModel):
                 condition=models.Q(type="system", deleted=False),
                 name="unique_system_api_key_per_org_not_deleted",
                 violation_error_message="Only one system API key is allowed per organization.",
-            )
+            ),
+            # Every agent of a workspace exports through one shared ingest key,
+            # so concurrent first launches must converge on a single row.
+            models.UniqueConstraint(
+                fields=["organization", "workspace"],
+                condition=models.Q(type="ingest", deleted=False),
+                name="unique_ingest_api_key_per_org_workspace_not_deleted",
+                violation_error_message="Only one ingest API key is allowed per organization and workspace.",
+            ),
         ]
 
     def __str__(self):

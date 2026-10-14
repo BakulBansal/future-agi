@@ -7,7 +7,7 @@ exports through it. Resolves the org's system ingest key and ships OTLP spans.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, NamedTuple
 
 import structlog
 
@@ -15,6 +15,15 @@ logger = structlog.get_logger(__name__)
 
 # Per-org system key reused to authenticate span emission to the collector.
 _INGEST_KEY_NAME = "system_org_key"
+
+# Shown on the keys page, so an operator can tell the export key from their own.
+_EXPORT_KEY_NAME = "simulation_export_key"
+
+
+class ExportCredentials(NamedTuple):
+    api_key: str
+    secret_key: str
+    enabled: bool
 
 
 def resolve_ingest_credentials(
@@ -52,6 +61,33 @@ def resolve_ingest_credentials(
     if key is None:
         return None
     return key.api_key, key.secret_key
+
+
+def resolve_export_credentials(
+    organization_id: str, workspace_id: str
+) -> ExportCredentials | None:
+    """Resolve the write-only key a simulated run's own process exports with.
+
+    The process runs untrusted customer code, so it gets the workspace's
+    ``ingest`` key, which the API refuses, never the system key. The collector
+    files spans under the key's workspace, which is why one is required.
+    """
+    if not organization_id or not workspace_id:
+        return None
+    from accounts.models.user import OrgApiKey
+
+    # ``enabled`` stays out of the lookup: an operator who disabled the key has
+    # stopped the export, and re-creating or re-enabling it would undo that.
+    # Two first launches in one workspace race on the unique constraint;
+    # ``get_or_create`` itself re-reads the winner's row when its insert loses.
+    key, _ = OrgApiKey.no_workspace_objects.get_or_create(
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        type="ingest",
+        deleted=False,
+        defaults={"name": _EXPORT_KEY_NAME, "user": None},
+    )
+    return ExportCredentials(key.api_key, key.secret_key, key.enabled)
 
 
 def emit_spans_to_collector(
