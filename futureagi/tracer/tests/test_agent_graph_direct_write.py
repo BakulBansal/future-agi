@@ -93,6 +93,7 @@ def test_agent_graph_http_path_schedules_exact_snapshot_without_sync_ch(monkeypa
         project_id=PROJECT_ID,
         filters=[FINAL_STATUS_FILTER],
         refresh=True,
+        hide_simulated=False,
     )
 
 

@@ -774,6 +774,7 @@ READER_OF = {
 }
 
 
+@pytest.mark.real_holding_decision
 @pytest.mark.parametrize("namespace", list(READER_OF))
 @pytest.mark.parametrize(
     ("identity_says", "project_holds"),
