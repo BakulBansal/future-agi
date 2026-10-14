@@ -2,8 +2,11 @@ package server
 
 import (
 	"context"
+	"encoding/hex"
 	"testing"
+	"time"
 
+	chexp "github.com/future-agi/future-agi/fi-collector/exporter/clickhouse25exporter"
 	"github.com/future-agi/future-agi/fi-collector/pkg/auth"
 	"go.opentelemetry.io/collector/pdata/pcommon"
 	"go.opentelemetry.io/collector/pdata/ptrace"
@@ -158,5 +161,103 @@ func TestDistinctTraceIDsMultiple(t *testing.T) {
 	}
 	if got := len(distinctTraceIDs(traces)); got != 3 {
 		t.Errorf("got %d distinct ids, want 3", got)
+	}
+}
+
+const usageTestOrg = "33333333-3333-4333-8333-333333333333"
+
+// recordedIngestion is one EmitIngestion call as recordingUsageEmitter saw it.
+type recordedIngestion struct {
+	orgID        string
+	numTraces    int
+	numSpans     int
+	payloadBytes int64
+	dedupKey     string
+}
+
+// recordingUsageEmitter captures the arguments of every EmitIngestion call.
+type recordingUsageEmitter struct{ calls []recordedIngestion }
+
+func (r *recordingUsageEmitter) EmitIngestion(orgID string, numTraces, numSpans int, payloadBytes int64, dedupKey string) {
+	r.calls = append(r.calls, recordedIngestion{orgID, numTraces, numSpans, payloadBytes, dedupKey})
+}
+
+// buildUsagePayload builds one observe resource whose spans carry user.id and
+// session.id. traceOf[i] picks span i's trace; the first span of a trace is its
+// root. marked puts the simulation mark on the resource.
+func buildUsagePayload(marked bool, traceOf []byte) ptrace.Traces {
+	traces := ptrace.NewTraces()
+	rs := traces.ResourceSpans().AppendEmpty()
+	ra := rs.Resource().Attributes()
+	ra.PutStr("service.name", "sim-agent")
+	ra.PutStr("fi.project_id", "44444444-4444-4444-8444-444444444444")
+	ra.PutStr("fi.org_id", usageTestOrg)
+	ra.PutStr("project_type", "observe")
+	if marked {
+		ra.PutStr("fi.simulation.origin", "simulation")
+	}
+	ss := rs.ScopeSpans().AppendEmpty()
+	roots := make(map[byte]pcommon.SpanID)
+	for i, tr := range traceOf {
+		sp := ss.Spans().AppendEmpty()
+		sid := pcommon.SpanID([8]byte{0x51, byte(i + 1)})
+		sp.SetTraceID(pcommon.TraceID([16]byte{0x61, tr}))
+		sp.SetSpanID(sid)
+		if root, ok := roots[tr]; ok {
+			sp.SetParentSpanID(root)
+		} else {
+			roots[tr] = sid
+		}
+		sp.SetName("agent.turn")
+		sp.SetStartTimestamp(pcommon.NewTimestampFromTime(time.Unix(1700000000, 0)))
+		sp.SetEndTimestamp(pcommon.NewTimestampFromTime(time.Unix(1700000001, 0)))
+		sp.Attributes().PutStr("user.id", "usage-user@example.test")
+		sp.Attributes().PutStr("session.id", "usage-session-1")
+	}
+	return traces
+}
+
+// A simulated run's spans are billed exactly as any other: conversion leaves the
+// payload alone and emitUsage counts the same traces, spans, bytes and key.
+func TestEmitUsageCountsMarkedSpansAsToday(t *testing.T) {
+	ctx := auth.WithResolvedContext(context.Background(), &auth.ResolveResult{OrgID: usageTestOrg}, "")
+	single := [16]byte{0x61, 9}
+	cases := []struct {
+		name    string
+		traceOf []byte
+		want    recordedIngestion
+	}{
+		{"two traces three spans", []byte{1, 1, 2}, recordedIngestion{usageTestOrg, 2, 3, 1234, ""}},
+		{"single trace", []byte{9, 9}, recordedIngestion{usageTestOrg, 1, 2, 1234, hex.EncodeToString(single[:])}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := &recordingUsageEmitter{}
+			s := &Server{usage: rec}
+			for _, marked := range []bool{true, false} {
+				traces := buildUsagePayload(marked, tc.traceOf)
+				before := traces.SpanCount()
+				if before != len(tc.traceOf) {
+					t.Fatalf("marked=%v: payload has %d spans, want %d", marked, before, len(tc.traceOf))
+				}
+				if _, _, err := chexp.ConvertWithIdentities(ctx, traces, nil); err != nil {
+					t.Fatalf("marked=%v: convert: %v", marked, err)
+				}
+				if after := traces.SpanCount(); after != before {
+					t.Fatalf("marked=%v: conversion changed the span count %d -> %d", marked, before, after)
+				}
+				s.emitUsage(ctx, traces, 1234)
+			}
+			if len(rec.calls) != 2 {
+				t.Fatalf("EmitIngestion calls=%d want 2", len(rec.calls))
+			}
+			marked, unmarked := rec.calls[0], rec.calls[1]
+			if marked != unmarked {
+				t.Errorf("marked %+v != unmarked %+v", marked, unmarked)
+			}
+			if marked != tc.want {
+				t.Errorf("marked %+v, want %+v", marked, tc.want)
+			}
+		})
 	}
 }
