@@ -40,6 +40,11 @@ from tracer.services.clickhouse.v2.id_remap_sql import (
     remap_left_join,
     resolved_id_expr,
 )
+from tracer.services.simulation_visibility import (
+    hide_simulated,
+    holding_projects,
+    row_exclusion_sql,
+)
 
 logger = structlog.get_logger(__name__)
 
@@ -122,6 +127,7 @@ class MonitorMetricsQueryBuilder(BaseQueryBuilder):
         self._filter_clause = ""
         self._filter_params: dict[str, Any] = {}
         self._translate_filters()
+        self._hides_simulated: bool | None = None
 
     @staticmethod
     def _eval_choice_match_expr(param_name: str = "choice_val") -> str:
@@ -813,11 +819,28 @@ class MonitorMetricsQueryBuilder(BaseQueryBuilder):
     # Internal helpers
     # ------------------------------------------------------------------
 
+    def _hide_simulated(self) -> bool:
+        """Whether this monitor's project (or any project) holds marked traces.
+
+        Decided on first use and kept for this builder, so the value, baseline
+        and series queries of one evaluation agree and cost one read.
+        """
+        if self._hides_simulated is None:
+            if self.project_ids:
+                self._hides_simulated = bool(holding_projects(self.project_ids))
+            elif self.project_id:
+                self._hides_simulated = hide_simulated(str(self.project_id))
+            else:
+                self._hides_simulated = False
+        return self._hides_simulated
+
     def _spans_base_where(self) -> str:
         """Return the base WHERE clause for spans table queries."""
         clause = self.project_where()
         if self._filter_clause:
             clause += f" AND {self._filter_clause}"
+        if self._hide_simulated():
+            clause += f" AND {row_exclusion_sql(map_column='span_attr_str')}"
         return clause
 
     def _eval_rows_source(self, *, include_span_start_time: bool = False) -> str:
@@ -863,6 +886,8 @@ class MonitorMetricsQueryBuilder(BaseQueryBuilder):
     def _bounded_spans_subquery(self, select_cols: str = "id") -> str:
         """Metric-window-bounded spans subquery for eval membership."""
         filter_extra = f" AND {self._filter_clause}" if self._filter_clause else ""
+        if self._hide_simulated():
+            filter_extra += f" AND {row_exclusion_sql(map_column='span_attr_str')}"
         return (
             f"SELECT {select_cols} FROM {SPANS_TABLE} "
             f"WHERE {self.project_filter_sql()} "
