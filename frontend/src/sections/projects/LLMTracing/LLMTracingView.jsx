@@ -698,9 +698,6 @@ const LLMTracingView = ({ mode = "project", userIdForUserMode = null }) => {
     false,
   );
   const [showCompare, setShowCompare] = useUrlState("showCompare", false);
-  const [excludeSimulationCalls, setExcludeSimulationCalls] = useUrlState(
-    "remove_simulation_calls",
-  );
   const [openColumnConfigure, setOpenColumnConfigure] = useState(false);
   const [columnConfigureAnchor, setColumnConfigureAnchor] = useState(null);
   const [openAddDataset, setOpenAddDataset] = useState(false);
@@ -3753,7 +3750,6 @@ const LLMTracingView = ({ mode = "project", userIdForUserMode = null }) => {
                     : endpoints.project.getTraceGraphData()
                 }
                 observeType={traceGraphObserveType}
-                removeSimulationCalls={!!excludeSimulationCalls}
                 onFilterToggle={
                   showCompare
                     ? (e) => handleCompareFilterToggle(e, "primary")
@@ -3792,7 +3788,6 @@ const LLMTracingView = ({ mode = "project", userIdForUserMode = null }) => {
                       : endpoints.project.getTraceGraphData()
                   }
                   observeType={traceGraphObserveType}
-                  removeSimulationCalls={!!excludeSimulationCalls}
                   onFilterToggle={(e) =>
                     handleCompareFilterToggle(e, "compare")
                   }
@@ -4399,10 +4394,6 @@ const LLMTracingView = ({ mode = "project", userIdForUserMode = null }) => {
               }}
               isSimulator={projectSource === PROJECT_SOURCE.SIMULATOR}
               isSpansView={selectedTab === "spans"}
-              excludeSimulationCalls={!!excludeSimulationCalls}
-              onToggleSimulationCalls={() =>
-                setExcludeSimulationCalls(excludeSimulationCalls ? null : true)
-              }
               onAddEvals={handleAddEvals}
             />
             {/* FilterChips moved above graph section */}
@@ -4849,11 +4840,6 @@ const LLMTracingView = ({ mode = "project", userIdForUserMode = null }) => {
                 })()}
                 projectId={observeId}
                 isVoiceCall={projectSource === PROJECT_SOURCE.SIMULATOR}
-                removeSimulationCalls={
-                  projectSource === PROJECT_SOURCE.SIMULATOR
-                    ? !!excludeSimulationCalls
-                    : false
-                }
                 onSuccess={() => {
                   if (filterSelectionMode && selectedTab === "trace") {
                     setFilterSelectionMode(false);
@@ -5209,7 +5195,6 @@ const LLMTracingView = ({ mode = "project", userIdForUserMode = null }) => {
                 showErrors={showErrors}
                 params={{
                   project_id: observeId,
-                  remove_simulation_calls: excludeSimulationCalls,
                   filters: JSON.stringify(
                     toBackendFilters([
                       ...primaryCombinedFilters,
@@ -5254,7 +5239,6 @@ const LLMTracingView = ({ mode = "project", userIdForUserMode = null }) => {
                 hideDrawer
                 params={{
                   project_id: observeId,
-                  remove_simulation_calls: excludeSimulationCalls,
                   filters: JSON.stringify(
                     toBackendFilters([
                       ...compareCombinedFilters,
