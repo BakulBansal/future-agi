@@ -655,6 +655,308 @@ def test_latest_state_statement_is_untouched_for_a_project_that_does_not_hold(
     assert "dashboard_candidate_source.resource_attrs" not in sql
 
 
+# ─── dashboard query builder: eval and annotation metrics ────────────────────
+#
+# These two read a side table (eval rows, scores) whose spans join is a LEFT
+# JOIN, so the base clauses never reach them. A holding project's statement
+# tests the row's own trace id against the marked traces among the traces the
+# statement itself can count. The test is negative, because a row with no
+# trace, or whose trace is not found among the marked ones, must still be
+# counted, and it carries no time bound, because a score or an eval can be made
+# long after its trace. Both metrics are built with a UUID template and an
+# explicit output type, so neither resolves anything through Postgres.
+
+ORGANIZATION_ID = "44444444-4444-4444-8444-444444444444"
+WORKSPACE_ID = "55555555-5555-4555-8555-555555555555"
+EVAL_TEMPLATE = "66666666-6666-4666-8666-666666666666"
+ANNOTATION_LABEL = "77777777-7777-4777-8777-777777777777"
+
+_EVAL_METRIC = {
+    "id": "pass",
+    "name": EVAL_TEMPLATE,
+    "config_id": EVAL_TEMPLATE,
+    "type": "eval_metric",
+    "source": "traces",
+    "aggregation": "pass_rate",
+    "output_type": "PASS_FAIL",
+}
+_ANNOTATION_METRIC = {
+    "id": "stars",
+    "name": ANNOTATION_LABEL,
+    "label_id": ANNOTATION_LABEL,
+    "type": "annotation_metric",
+    "source": "traces",
+    "aggregation": "avg",
+    "output_type": "numeric",
+}
+# The trace each statement tests: the eval row's own, in the canonical form the
+# statement's project scope uses, and a score's, which is its own trace or the
+# trace of the span it is attached to.
+_EVAL_ROW_TRACE = "toString(toUUIDOrZero(e.eval_trace_id))"
+_SCORE_SUBJECT_TRACE = (
+    "if(a.trace_id IS NOT NULL, toString(a.trace_id), annotation_subject_span.trace_id)"
+)
+# What names the traces each statement can count, as the statement writes it.
+_EVAL_CANDIDATES = "usage_span_trace_candidates"
+_ANNOTATION_CANDIDATES = "annotation_subject_candidate"
+
+_SIDE_TABLE_METRICS = [
+    pytest.param(_EVAL_METRIC, _EVAL_ROW_TRACE, _EVAL_CANDIDATES, id="eval_metric"),
+    pytest.param(
+        _ANNOTATION_METRIC,
+        _SCORE_SUBJECT_TRACE,
+        _ANNOTATION_CANDIDATES,
+        id="annotation_metric",
+    ),
+]
+_BUILDERS = [
+    pytest.param(DashboardQueryBuilder, id="legacy_statement"),
+    pytest.param(DashboardQueryBuilderV2, id="v2_statement"),
+]
+
+
+def _side_table_statement(builder_class, metric, *, hide, breakdowns=()):
+    config = _dashboard_config(metric, hide=hide)
+    config["organization_id"] = ORGANIZATION_ID
+    config["workspace_id"] = WORKSPACE_ID
+    config["breakdowns"] = list(breakdowns)
+    builder = builder_class(config)
+    return builder.build_metric_query(builder.metrics[0])
+
+
+def _as_sent(text, builder_class):
+    """Fixed text as the builder writes it, then as the v2 rewriter sends it."""
+    if builder_class is DashboardQueryBuilderV2:
+        return rewrite_v1_sql_to_v2(text)
+    return text
+
+
+def _hidden_clause(sql, trace_expr, builder_class):
+    """The clause the statement carries, cut out of it between its fixed ends."""
+    # The exclusion is ``NOT (<mark>)``; the subquery wants the marked rows, so
+    # it is negated once more, as the project eval chart does.
+    head = _as_sent(
+        f"\n  AND ifNull({trace_expr}, '') NOT IN ("
+        "SELECT trace_id FROM spans "
+        "WHERE project_id IN %(project_ids)s AND _peerdb_is_deleted = 0 "
+        "AND trace_id IN (",
+        builder_class,
+    )
+    tail = _as_sent(f") AND NOT ({EXCLUSION_LEGACY}))", builder_class)
+    assert sql.count(head) == 1
+    start = sql.index(head)
+    end = sql.index(tail, start) + len(tail)
+    return sql[start:end]
+
+
+@pytest.mark.parametrize("builder_class", _BUILDERS)
+@pytest.mark.parametrize(("metric", "trace_expr", "candidates"), _SIDE_TABLE_METRICS)
+def test_side_table_metric_leaves_marked_traces_out_for_a_holding_project(
+    builder_class, metric, trace_expr, candidates
+):
+    sql, params = _side_table_statement(builder_class, metric, hide=True)
+    plain_sql, plain_params = _side_table_statement(builder_class, metric, hide=None)
+
+    clause = _hidden_clause(sql, trace_expr, builder_class)
+    sent_exclusion = _as_sent(EXCLUSION_LEGACY, builder_class)
+    # The mark is read from spans of the request's projects, only for the traces
+    # the statement can count, and the clause rides on a line of its own.
+    assert sql.count(sent_exclusion) == 1
+    assert candidates in clause
+    assert sql.replace(clause, "") == plain_sql
+    # No new placeholder: the clause reuses the statement's own.
+    assert params == plain_params
+    assert _carries_no_mark(plain_sql)
+
+
+@pytest.mark.parametrize("builder_class", _BUILDERS)
+@pytest.mark.parametrize(("metric", "trace_expr", "candidates"), _SIDE_TABLE_METRICS)
+def test_side_table_lookup_has_no_time_bound_and_reads_only_the_candidates(
+    builder_class, metric, trace_expr, candidates
+):
+    sql, _ = _side_table_statement(builder_class, metric, hide=True)
+    clause = _hidden_clause(sql, trace_expr, builder_class)
+
+    # A score or an eval made weeks after its trace still finds the mark: the
+    # lookup is bounded by the traces it is asked about, never by the window.
+    assert "start_time" not in clause
+    assert "INTERVAL" not in clause
+    assert "FINAL" not in clause
+    assert "trace_id IN (SELECT" in clause
+    assert candidates in clause
+    # The statement's window enters only through the candidate set, which is
+    # made of the rows being counted.
+    assert "%(start_date)s" in clause
+
+
+@pytest.mark.parametrize("builder_class", _BUILDERS)
+@pytest.mark.parametrize(("metric", "trace_expr", "candidates"), _SIDE_TABLE_METRICS)
+def test_side_table_clause_is_a_negative_test_that_keeps_rows_without_a_trace(
+    builder_class, metric, trace_expr, candidates
+):
+    sql, _ = _side_table_statement(builder_class, metric, hide=True)
+
+    # A row with an empty trace id is not in the marked set, so it stays; the
+    # same holds for a row whose trace is not found among the marked ones.
+    assert f"ifNull({trace_expr}, '') NOT IN (SELECT trace_id FROM spans" in sql
+    # A positive membership would drop exactly those rows.
+    assert f"ifNull({trace_expr}, '') IN (" not in sql
+    assert not re.search(r"(?<!NOT )IN \(SELECT trace_id FROM spans", sql)
+
+
+def test_eval_row_trace_is_compared_in_the_form_the_project_scope_uses():
+    sql, _ = _side_table_statement(DashboardQueryBuilder, _EVAL_METRIC, hide=True)
+
+    # The scope matches the row's trace as ``toUUIDOrZero(eval_trace_id)``, and
+    # spans hold the canonical string, so an upper-case or dashless id would
+    # never match the raw column and its row would be kept.
+    assert "ifNull(toString(toUUIDOrZero(e.eval_trace_id)), '') NOT IN (" in sql
+    assert "ifNull(e.eval_trace_id, '') NOT IN (" not in sql
+
+
+@pytest.mark.parametrize("builder_class", _BUILDERS)
+@pytest.mark.parametrize(("metric", "trace_expr", "candidates"), _SIDE_TABLE_METRICS)
+def test_side_table_statement_is_untouched_for_a_project_that_does_not_hold(
+    builder_class, metric, trace_expr, candidates
+):
+    undecided = _side_table_statement(builder_class, metric, hide=None)
+    declined = _side_table_statement(builder_class, metric, hide=False)
+    hiding = _side_table_statement(builder_class, metric, hide=True)
+
+    assert undecided == declined
+    sql, params = undecided
+    assert _carries_no_mark(sql)
+    assert "NOT IN (SELECT trace_id FROM spans" not in sql
+    # Nothing follows the last conjunct but the newline it always had, so the
+    # text up to GROUP BY is what it was before the clause existed.
+    assert re.search(r"\S\nGROUP BY time_bucket\nORDER BY time_bucket", sql)
+    assert sql == hiding[0].replace(
+        _hidden_clause(hiding[0], trace_expr, builder_class), ""
+    )
+    assert params == hiding[1]
+
+
+_SPANS_BREAKDOWN = [{"name": "model", "type": "system_metric"}]
+_EVAL_CANDIDATE_TEXT = " ".join(
+    """
+    SELECT toString(trace_id) AS trace_id FROM (
+        SELECT DISTINCT
+            toUUIDOrZero(usage_trace_candidate.eval_trace_id) AS trace_id
+        FROM usage_apicalllog AS usage_trace_candidate
+        PREWHERE usage_trace_candidate.workspace_id = toUUID(%(workspace_id)s)
+          AND usage_trace_candidate.source_id = %(eval_template_id)s
+          AND usage_trace_candidate.created_at >= %(start_date)s
+          AND usage_trace_candidate.created_at < %(end_date)s
+        WHERE usage_trace_candidate.eval_trace_id != ''
+    ) AS usage_span_trace_candidates
+    """.split()
+)
+
+
+@pytest.mark.parametrize("builder_class", _BUILDERS)
+def test_eval_candidate_set_is_the_same_text_with_and_without_a_spans_join(
+    builder_class,
+):
+    # A breakdown on a span column joins the spans table, and that join already
+    # names the eval's traces. The lookup reuses that text; building it for
+    # every statement must not change what the join sends.
+    plain, _ = _side_table_statement(
+        builder_class, _EVAL_METRIC, hide=None, breakdowns=_SPANS_BREAKDOWN
+    )
+    hiding, _ = _side_table_statement(
+        builder_class, _EVAL_METRIC, hide=True, breakdowns=_SPANS_BREAKDOWN
+    )
+
+    flat_plain = " ".join(plain.split())
+    flat_hiding = " ".join(hiding.split())
+    assert _EVAL_CANDIDATE_TEXT in flat_plain
+    assert flat_plain.count(_EVAL_CANDIDATE_TEXT) == 1
+    # The same set bounds the join and the lookup in a holding statement.
+    assert flat_hiding.count(_EVAL_CANDIDATE_TEXT) == 2
+    clause = _hidden_clause(hiding, _EVAL_ROW_TRACE, builder_class)
+    assert hiding.replace(clause, "") == plain
+
+
+def _flat(text):
+    return " ".join(text.split())
+
+
+# What the annotation statement can count, as its lookup names it: the traces of
+# the window's scores, and the traces of the spans those scores are attached to.
+_ANNOTATION_TRACE_BRANCH = _flat(
+    """
+    SELECT toString(trace_id) AS trace_id
+    FROM (
+        SELECT DISTINCT annotation_trace_candidate.trace_id AS trace_id
+        FROM model_hub_score AS annotation_trace_candidate
+        PREWHERE annotation_trace_candidate.organization_id =
+              toUUID(%(annotation_organization_id)s)
+          AND annotation_trace_candidate.label_id = toUUID(%(annotation_label_id)s)
+          AND annotation_trace_candidate.created_at >= %(start_date)s
+          AND annotation_trace_candidate.created_at < %(end_date)s
+        WHERE annotation_trace_candidate.trace_id IS NOT NULL
+    )
+    UNION ALL
+    """
+)
+_ANNOTATION_SPAN_BRANCH = _flat(
+    """
+    SELECT trace_id
+    FROM (
+        SELECT
+            annotation_span_latest.id AS id,
+            tupleElement(annotation_span_latest.latest_state, 1) AS trace_id,
+            tupleElement(annotation_span_latest.latest_state, 2) AS project_id
+        FROM (
+            SELECT annotation_span_scan.id AS id,
+    """
+)
+_ANNOTATION_SPAN_SCAN = _flat(
+    """
+    FROM spans AS annotation_span_scan
+    PREWHERE annotation_span_scan.project_id IN %(project_ids)s
+    WHERE annotation_span_scan.id IN (
+        SELECT DISTINCT annotation_span_candidate.observation_span_id AS id
+        FROM model_hub_score AS annotation_span_candidate
+        PREWHERE annotation_span_candidate.organization_id =
+              toUUID(%(annotation_organization_id)s)
+          AND annotation_span_candidate.label_id = toUUID(%(annotation_label_id)s)
+          AND annotation_span_candidate.created_at >= %(start_date)s
+          AND annotation_span_candidate.created_at < %(end_date)s
+        WHERE annotation_span_candidate.observation_span_id IS NOT NULL
+          AND annotation_span_candidate.observation_span_id != ''
+    )
+    GROUP BY annotation_span_scan.id
+    """
+)
+
+
+@pytest.mark.parametrize("builder_class", _BUILDERS)
+def test_annotation_candidate_set_names_trace_and_span_attached_scores_in_the_window(
+    builder_class,
+):
+    sql, _ = _side_table_statement(builder_class, _ANNOTATION_METRIC, hide=True)
+    clause = _flat(_hidden_clause(sql, _SCORE_SUBJECT_TRACE, builder_class))
+
+    # The lookup is bounded by one set, named in full: the traces of the scores
+    # made in the window (trace-attached), joined by the traces of the spans the
+    # remaining scores point at (span-attached). A subject trace is exactly one
+    # of the two, so dropping either branch lets a marked trace's scores through.
+    assert clause.count(_ANNOTATION_CANDIDATES) == 1
+    assert clause.count(_ANNOTATION_TRACE_BRANCH) == 1
+    # Span-attached branch: it follows the trace branch, reads the spans of the
+    # request's projects, and takes its span ids from the scores of the same
+    # label, organization and window as the statement.
+    assert clause.count(f"{_ANNOTATION_TRACE_BRANCH} {_ANNOTATION_SPAN_BRANCH}") == 1
+    assert clause.count(_ANNOTATION_SPAN_SCAN) == 1
+    assert clause.count("%(start_date)s") == 2
+    assert clause.count("%(end_date)s") == 2
+    # Nothing else in the clause reads the scores or the spans: the lookup, the
+    # span scan, and the two score reads above.
+    assert clause.count("FROM spans ") == 2
+    assert clause.count("FROM model_hub_score AS") == 2
+
+
 # ─── dashboard fast path ─────────────────────────────────────────────────────
 
 

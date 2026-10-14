@@ -1803,6 +1803,32 @@ class DashboardQueryBuilder:
     # Eval metric
     # ------------------------------------------------------------------
 
+    def _marked_traces_hidden_clause(
+        self, trace_expr: str, candidate_trace_ids_sql: str
+    ) -> str:
+        """Leave out the rows of marked traces, and nothing else.
+
+        The eval and annotation statements count rows of a side table, and
+        their spans join is a LEFT JOIN, so only a test on the row's own trace
+        id can keep a marked trace out. It has to be a negative test: a row with
+        no trace id, or whose trace is not found among the marked candidates, is
+        kept, which a positive membership would drop. The lookup reads only the
+        spans of the traces this statement can count, with no time bound: a
+        score or an eval can be made long after its trace, and a mark is only
+        ever added, so any stored version of a span carries it. The clause sits
+        on its own line so a project that does not hold sends the statement it
+        always sent.
+        """
+        if not self.hide_simulated:
+            return ""
+        return (
+            f"\n  AND ifNull({trace_expr}, '') NOT IN ("
+            "SELECT trace_id FROM spans "
+            "WHERE project_id IN %(project_ids)s AND _peerdb_is_deleted = 0 "
+            f"AND trace_id IN ({candidate_trace_ids_sql}) "
+            f"AND NOT ({row_exclusion_sql(map_column='span_attr_str')}))"
+        )
+
     def _build_eval_metric_query(
         self,
         metric: dict,
@@ -2228,6 +2254,24 @@ class DashboardQueryBuilder:
                     else _coerce_filter_value(val, op)
                 )
 
+        # The same candidate set bounds the span-attribute join and the
+        # marked-trace lookup, so it is built whether or not a join is needed.
+        usage_trace_candidates = f"""
+                SELECT DISTINCT
+                    toUUIDOrZero(usage_trace_candidate.eval_trace_id) AS trace_id
+                FROM usage_apicalllog AS usage_trace_candidate
+                PREWHERE {_usage_main_scope.replace("usage_main_scan", "usage_trace_candidate")}
+                  AND usage_trace_candidate.source_id = %(eval_template_id)s
+                  AND usage_trace_candidate.created_at >= %(start_date)s
+                  AND usage_trace_candidate.created_at < %(end_date)s
+                WHERE usage_trace_candidate.eval_trace_id != ''
+            """
+        span_trace_candidates = (
+            "SELECT toString(trace_id) AS trace_id FROM ("
+            f"{usage_trace_candidates}"
+            ") AS usage_span_trace_candidates"
+        )
+
         if need_spans_join:
             spans_joined = self._spans_source(
                 None,
@@ -2242,21 +2286,6 @@ class DashboardQueryBuilder:
             # Reuse the already tenant/template/time-bounded eval candidates;
             # converting their UUID projection back to String matches the
             # physical spans.trace_id type without changing membership.
-            usage_trace_candidates = f"""
-                SELECT DISTINCT
-                    toUUIDOrZero(usage_trace_candidate.eval_trace_id) AS trace_id
-                FROM usage_apicalllog AS usage_trace_candidate
-                PREWHERE {_usage_main_scope.replace("usage_main_scan", "usage_trace_candidate")}
-                  AND usage_trace_candidate.source_id = %(eval_template_id)s
-                  AND usage_trace_candidate.created_at >= %(start_date)s
-                  AND usage_trace_candidate.created_at < %(end_date)s
-                WHERE usage_trace_candidate.eval_trace_id != ''
-            """
-            span_trace_candidates = (
-                "SELECT toString(trace_id) AS trace_id FROM ("
-                f"{usage_trace_candidates}"
-                ") AS usage_span_trace_candidates"
-            )
             bounded_spans_join = f"""(
                 SELECT *
                 FROM {spans_joined}
@@ -2321,12 +2350,16 @@ class DashboardQueryBuilder:
             )
 
         join_str = "\n".join(joins)
+        marked_hidden = self._marked_traces_hidden_clause(
+            f"toString(toUUIDOrZero({_trace_id_expr}))", span_trace_candidates
+        )
 
         query = (
             f"SELECT {', '.join(select_parts)}\n"
             f"FROM {eval_source}\n"
             f"{join_str}\n"
-            f"WHERE {' AND '.join(where_parts)}\n"
+            f"WHERE {' AND '.join(where_parts)}"
+            f"{marked_hidden}\n"
             f"GROUP BY {', '.join(group_parts)}\n"
             f"ORDER BY {', '.join(order_parts)}"
         )
@@ -2787,11 +2820,15 @@ class DashboardQueryBuilder:
             where_parts.extend(membership_clauses)
             params.update(membership_params)
 
+        marked_hidden = self._marked_traces_hidden_clause(
+            annotation_subject_trace_id, annotation_subject_trace_candidates
+        )
         query = (
             f"SELECT {', '.join(select_parts)}\n"
             f"FROM model_hub_score AS a FINAL\n"
             f"{' '.join(join for join in joins if join)}\n"
-            f"WHERE {' AND '.join(where_parts)}\n"
+            f"WHERE {' AND '.join(where_parts)}"
+            f"{marked_hidden}\n"
             f"GROUP BY {', '.join(group_parts)}\n"
             f"ORDER BY {', '.join(order_parts)}"
         )
