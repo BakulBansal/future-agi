@@ -26,6 +26,7 @@ import pytest
 from django.db import DatabaseError
 from django.db.models import Exists, Q
 from rest_framework.test import APIRequestFactory, force_authenticate
+from structlog.testing import capture_logs
 
 import model_hub.services.bulk_selection as bulk_selection_module
 import tracer.selectors.eval_tasks.row_resolver as row_resolver_module
@@ -2815,7 +2816,7 @@ def test_the_label_walk_reads_each_batch_once_and_stops_when_every_label_is_deci
     ]
 
 
-def test_a_label_walk_that_cannot_finish_fails_instead_of_dropping_the_label(
+def test_a_label_walk_that_reaches_its_cap_leaves_the_undecided_label_out(
     monkeypatch,
 ):
     monkeypatch.setattr(helper_module, "_MARKED_SCORE_BATCH", 2)
@@ -2827,32 +2828,57 @@ def test_a_label_walk_that_cannot_finish_fails_instead_of_dropping_the_label(
     ]
     world = _label_world(monkeypatch, scores=scores, labels=["label-long"])
 
-    with pytest.raises(MarkedLookupFailed, match="No answer was guessed"):
-        helper_module.get_annotation_labels_for_project(HOLDING, hide_simulated=True)
+    # The cap is not an error: a list page must not fail on every load for a
+    # label whose verdict it does not need in order to hide anything.
+    helper_module.get_annotation_labels_for_project(HOLDING, hide_simulated=True)
 
-    assert world.label_filters == []
+    assert _offered(world)[1] == set()
 
 
-def test_a_label_walk_that_cannot_finish_does_not_claim_every_score_was_simulated(
-    monkeypatch,
-):
+def test_a_label_walk_that_reaches_its_cap_keeps_the_labels_it_decided(monkeypatch):
     monkeypatch.setattr(helper_module, "_MARKED_SCORE_BATCH", 2)
     monkeypatch.setattr(helper_module, "_MARKED_SCORE_MAX_BATCHES", 1)
     # The first label is decided by an unmarked score inside the batch the walk
-    # read, so the scores it read were not all on simulated traces.
+    # read; only the label still in question is treated as simulated.
     scores = [
         (1, "label-kept", "trace-ok", None),
         (2, "label-long", "trace-m1", None),
         (3, "label-long", "trace-m2", None),
     ]
-    _label_world(monkeypatch, scores=scores, labels=["label-kept", "label-long"])
+    world = _label_world(
+        monkeypatch, scores=scores, labels=["label-kept", "label-long"]
+    )
 
-    with pytest.raises(MarkedLookupFailed) as caught:
+    with capture_logs() as logs:
         helper_module.get_annotation_labels_for_project(HOLDING, hide_simulated=True)
 
-    message = str(caught.value)
-    assert "none of the labels still in question" in message
-    assert "every one was on a simulated trace" not in message
+    assert _offered(world)[1] == {"label-kept"}
+    capped = [
+        entry for entry in logs if entry["event"] == "simulation_label_walk_capped"
+    ]
+    # One line per label left out, naming our own ids and nothing from a score.
+    assert [(e["label_id"], e["project_id"]) for e in capped] == [
+        ("label-long", HOLDING)
+    ]
+    assert set(capped[0]) <= {"event", "log_level", "label_id", "project_id"}
+
+
+def test_a_label_walk_that_reaches_its_cap_keeps_its_answer(monkeypatch, kept_answers):
+    monkeypatch.setattr(helper_module, "_MARKED_SCORE_BATCH", 2)
+    monkeypatch.setattr(helper_module, "_MARKED_SCORE_MAX_BATCHES", 1)
+    scores = [
+        (1, "label-long", "trace-m1", None),
+        (2, "label-long", "trace-m2", None),
+        (3, "label-long", "trace-ok", None),
+    ]
+    _label_world(monkeypatch, scores=scores, labels=["label-long"])
+
+    kept = helper_module._label_ids_with_an_unmarked_score(HOLDING, ["label-long"])
+
+    # An answer that is stable is cached like any other, so the next load does
+    # not walk the scores again.
+    assert kept == []
+    assert list(kept_answers.store.values()) == [[]]
 
 
 def test_a_failed_mark_lookup_fails_the_label_list(monkeypatch):

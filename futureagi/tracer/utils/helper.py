@@ -6,6 +6,7 @@ from datetime import date, datetime, timedelta
 from typing import Any, TypedDict
 
 import pandas as pd
+import structlog
 from django.core.cache import cache as django_cache
 from rest_framework import serializers
 
@@ -20,6 +21,8 @@ from tracer.utils.constants import (
     SPAN_ATTR_ALLOWED_OPS,
 )
 from tracer.utils.filter_operators import FILTER_TYPE_ALLOWED_OPS
+
+logger = structlog.get_logger(__name__)
 
 
 @dataclass
@@ -799,17 +802,16 @@ def _walk_for_labels_with_an_unmarked_score(project_id, label_ids) -> list[str]:
     with no trace at all) cannot be shown to belong to a marked trace, so it
     counts as unmarked, like an eval row with no trace id. Scores are read in
     keyset batches over the labels still undecided, so a label that has an
-    unmarked score stops being read as soon as one turns up.
+    unmarked score stops being read as soon as one turns up. A label still
+    undecided when the reads run out is left out; a failed lookup of marked
+    traces still raises.
     """
     from model_hub.models.score import Score
     from tracer.services.annotation_label_source import (
         AnnotationLabelScoresProjectPG,
         _materialize_score_rows,
     )
-    from tracer.services.simulation_visibility import (
-        MarkedLookupFailed,
-        marked_trace_ids,
-    )
+    from tracer.services.simulation_visibility import marked_trace_ids
 
     undecided = {str(label_id) for label_id in label_ids}
     # A label with a score off every trace and span is decided here, before any
@@ -858,13 +860,15 @@ def _walk_for_labels_with_an_unmarked_score(project_id, label_ids) -> list[str]:
         if len(rows) < _MARKED_SCORE_BATCH:
             break
     else:
-        if undecided:
-            raise MarkedLookupFailed(
-                "Could not tell whether the annotation labels of project "
-                f"{project_id} have scores on traces that are not simulated: "
-                f"{_MARKED_SCORE_MAX_BATCHES * _MARKED_SCORE_BATCH} scores were "
-                "read and none of the labels still in question had a score on "
-                "a trace that is not simulated. No answer was guessed."
+        # Out of reads with labels still undecided: every score read for them
+        # sat on a simulated trace. They are treated as simulated and left out,
+        # which errs toward hiding; raising instead would fail every list page
+        # of the project on every load, because a failure is never cached.
+        for label_id in sorted(undecided):
+            logger.warning(
+                "simulation_label_walk_capped",
+                label_id=label_id,
+                project_id=str(project_id),
             )
     return [str(label_id) for label_id in label_ids if str(label_id) in kept]
 

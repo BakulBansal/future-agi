@@ -489,16 +489,19 @@ def test_voice_request_shape_decisions_answer_the_same_when_hiding(shape):
 
 
 @pytest.mark.unit
-def test_the_trace_plan_compiler_adds_one_root_plan_after_the_request_leaves():
+def test_the_root_hiding_plan_is_the_shared_row_test_and_the_compiler_adds_none():
     filters = [_time_filter(), _attribute_filter("final_status", "Rejected")]
 
-    omitted = compile_trace_filter_plans(filters)
-    false = compile_trace_filter_plans(filters, hide_simulated=False)
-    hidden = compile_trace_filter_plans(filters, hide_simulated=True)
+    # The compiler compiles the request's leaves and nothing else: the list
+    # builders add the hiding plan themselves, after the request plans.
+    assert all(
+        plan.seed_predicate != LEGACY_UNMARKED
+        for plan in compile_trace_filter_plans(filters)
+    )
+    with pytest.raises(TypeError):
+        compile_trace_filter_plans(filters, hide_simulated=True)
 
-    assert false == omitted
-    assert hidden[:-1] == omitted
-    plan = hidden[-1]
+    plan = simulation_hide_plan(scope="root")
     alias = plan.aggregates[0].rsplit(" AS ", 1)[1]
     assert plan.scope == "root"
     assert plan.seed_predicate == LEGACY_UNMARKED

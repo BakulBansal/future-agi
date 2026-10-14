@@ -2109,7 +2109,6 @@ def compile_trace_filter_plans(
     filters: list[dict[str, Any]],
     *,
     filter_builder_cls: type[ClickHouseFilterBuilder] = ClickHouseFilterBuilder,
-    hide_simulated: bool = False,
 ) -> list[LatestFilterPredicate]:
     plans: list[LatestFilterPredicate] = []
     for item in filters:
@@ -2182,10 +2181,6 @@ def compile_trace_filter_plans(
             )
         else:
             raise UnsupportedFilterShapeError(f"unsupported trace filter {key!r}")
-    if hide_simulated:
-        # Last, so every request leaf keeps the index its parameters were named
-        # with; the plan carries no parameter of its own.
-        plans.append(simulation_hide_plan(scope="root"))
     return plans
 
 
