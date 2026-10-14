@@ -317,7 +317,7 @@ const RunTests = lazyWithRetry(
 const SimulateEnvironmentsHome = lazyWithRetry(
   () => import("src/pages/dashboard/simulate/environments/EnvironmentsHome"),
 );
-// Prebuilt templates are "Coming soon"; their routes redirect to the 404 below.
+// Prebuilt templates are "Coming soon": uncomment with their routes below.
 // const SimulatePrebuiltEnvironments = lazyWithRetry(
 //   () =>
 //     import("src/pages/dashboard/simulate/environments/PrebuiltEnvironments"),
@@ -1354,8 +1354,19 @@ export const dashboardRoutes = (
           path: "environments",
           element: <SimulateEnvironmentsHome />,
         },
-        // Prebuilt templates are "Coming soon": blocked until they ship. The
-        // paths stay registered so "templates" is not read as an :envId.
+        // Prebuilt templates are "Coming soon": blocked until they ship. When
+        // they do, uncomment these two routes (and their lazy imports above)
+        // and delete the two /404 routes below them.
+        // {
+        //   path: "environments/templates",
+        //   element: <SimulatePrebuiltEnvironments />,
+        // },
+        // {
+        //   path: "environments/templates/:templateId",
+        //   element: <SimulateUseTemplate />,
+        // },
+        // Until then the paths stay registered, going to the 404, so
+        // "templates" is not read as an :envId.
         {
           path: "environments/templates",
           element: <Navigate to="/404" replace />,
