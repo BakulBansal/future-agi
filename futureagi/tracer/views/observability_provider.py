@@ -2,12 +2,16 @@ import math
 
 import structlog
 from django.db import transaction
+from django.utils import timezone
+from rest_framework import status
 from rest_framework.decorators import action
 from rest_framework.exceptions import ValidationError
 from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
 from rest_framework.viewsets import ModelViewSet
 
 from accounts.utils import get_request_organization
+from simulate.models import AgentDefinition
 from simulate.services.agent_definition import (
     is_masked,
     resolve_stored_api_key,
@@ -29,6 +33,11 @@ from tracer.serializers.observability_provider import (
     VerifyResponseSerializer,
 )
 from tracer.services.observability_providers import ObservabilityService
+from tracer.services.observability_switch import (
+    ObservabilityRefused,
+    check_observability_prerequisites,
+    refusal_body,
+)
 from tracer.services.simulation_visibility import HOLDING_FLAG
 from tracer.utils.otel import get_or_create_project
 
@@ -158,8 +167,16 @@ class ObservabilityProviderViewSet(BaseModelViewSetMixinWithUserOrg, ModelViewSe
                         **metadata,
                         HOLDING_FLAG: True,
                     }
+                if serializer.validated_data.get("enabled") and not instance.enabled:
+                    agent = AgentDefinition.no_workspace_objects.filter(
+                        observability_provider=instance
+                    ).first()
+                    if agent is not None:
+                        check_observability_prerequisites(agent)
                 self.perform_update(serializer)
             return self._gm.success_response(serializer.data)
+        except ObservabilityRefused as error:
+            return Response(refusal_body(error), status=status.HTTP_400_BAD_REQUEST)
         except ValidationError as e:
             return self._gm.bad_request(e.detail)
         except Exception as e:
@@ -176,7 +193,10 @@ class ObservabilityProviderViewSet(BaseModelViewSetMixinWithUserOrg, ModelViewSe
     def destroy(self, request, *args, **kwargs):
         try:
             instance = self.get_object()
-            self.perform_destroy(instance)
+            # Only these columns, so a holding flag written meanwhile is kept.
+            instance.deleted = True
+            instance.deleted_at = timezone.now()
+            instance.save(update_fields=["deleted", "deleted_at", "updated_at"])
             return self._gm.success_response(
                 "Observability provider deleted successfully."
             )

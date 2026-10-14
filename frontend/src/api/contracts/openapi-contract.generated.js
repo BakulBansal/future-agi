@@ -48153,7 +48153,6 @@ export const OPENAPI_CONTRACT = Object.freeze({
         observability_enabled: {
           title: "Observability enabled",
           type: "boolean",
-          default: false,
         },
       },
     },

@@ -1,22 +1,35 @@
-"""The provider endpoint keeps a project's holding flag through an update.
+"""The observability switch, and the provider endpoint's hold on a project's flag.
 
-The flag is written by another process whenever a simulated run first exports to
-the project, and nothing a request sends may clear it.
+The switch is the one place an agent's observability is turned on or off. The
+holding flag is written by another process whenever a simulated run first exports
+to the project, and nothing a request sends, and no save the switch makes, may
+clear it.
 """
 
 from __future__ import annotations
 
+import dataclasses
+import inspect
+import json
 import uuid
+from contextlib import contextmanager
+from types import SimpleNamespace
+from unittest.mock import patch
 
+import pytest
 from django.db import connection
+from structlog.testing import capture_logs
 
+import tracer.services.observability_switch as switch
 from model_hub.models.ai_model import AIModel
+from simulate.models import AgentDefinition
+from tfc.utils.api_errors import build_error_envelope
 from tfc.utils.general_methods import GeneralMethods
 from tracer.models.observability_provider import (
     ObservabilityProvider,
     ProviderChoices,
 )
-from tracer.models.project import Project
+from tracer.models.project import Project, ProjectSourceChoices
 from tracer.services.simulation_visibility import HOLDING_FLAG, record_holding
 from tracer.views.observability_provider import ObservabilityProviderViewSet
 
@@ -188,3 +201,778 @@ def test_patch_keeps_flag_written_after_get_object(
         # that took it.
         assert _depth_at(seen, locked_reads[0]) == _depth_at(seen, flag_written[0]) + 1
         assert _depth_at(seen, saved[-1]) == _depth_at(seen, locked_reads[0])
+
+
+# ---------------------------------------------------------------------------
+# The switch
+# ---------------------------------------------------------------------------
+
+KEYWORD_ONLY = inspect.Parameter.KEYWORD_ONLY
+NO_DEFAULT = inspect.Parameter.empty
+
+SUMMARY_FIELDS = [
+    "agent_definition_id",
+    "agent_version_id",
+    "agent_stored",
+    "setup_stale",
+    "provider",
+    "provider_agent_id",
+    "credential_id",
+    "key_present",
+    "type",
+    "kind",
+    "unit_ids",
+    "instrumentation",
+    "setup_hash",
+    "provider_info_complete",
+    "missing",
+]
+KEY_MESSAGE = "API key is required when observability is enabled"
+AGENT_ID_MESSAGE = "Assistant ID is required when observability is enabled"
+INSTRUMENTATION_MESSAGE = (
+    "The agent's code carries no OpenTelemetry or traceAI instrumentation the "
+    "sandbox can configure (an HTTP exporter, not gRPC alone); add one and "
+    "author the agent again"
+)
+MESSAGE_OF_FIELD = {"api_key": KEY_MESSAGE, "assistant_id": AGENT_ID_MESSAGE}
+CODE_OF_FIELD = {
+    "api_key": "credential_missing",
+    "assistant_id": "provider_agent_id_missing",
+}
+
+
+def make_summary(**overrides):
+    """A complete summary of a listed, fully configured hosted agent."""
+    values = {
+        "agent_definition_id": uuid.uuid4(),
+        "agent_version_id": None,
+        "agent_stored": False,
+        "setup_stale": False,
+        "provider": "vapi",
+        "provider_agent_id": "assistant-1",
+        "credential_id": uuid.uuid4(),
+        "key_present": True,
+        "type": "voice",
+        "kind": "hosted",
+        "unit_ids": ("unit-1",),
+        "instrumentation": "none",
+        "setup_hash": None,
+        "provider_info_complete": True,
+        "missing": (),
+    }
+    values.update(overrides)
+    if "provider_info_complete" not in overrides:
+        values["provider_info_complete"] = not values["missing"]
+    return switch._AgentSummary(**values)
+
+
+@contextmanager
+def seams(summary, *, providers=("vapi", "retell", "bland"), published=True):
+    """Stand in for the two reads the switch makes; yields their mocks."""
+    if published:
+        listing = {"return_value": SimpleNamespace(providers=dict.fromkeys(providers))}
+    else:
+        listing = {"side_effect": switch.ProviderListNotPublished}
+    answer = (
+        {"side_effect": summary} if callable(summary) else {"return_value": summary}
+    )
+    with (
+        patch.object(switch, "_agent_summary", **answer) as read_summary,
+        patch.object(switch, "_read_provider_list", **listing) as read_list,
+    ):
+        yield read_summary, read_list
+
+
+def _agent(organization, workspace, **fields):
+    values = {
+        "agent_name": f"switch-agent-{uuid.uuid4().hex[:8]}",
+        "agent_type": AgentDefinition.AgentTypeChoices.VOICE,
+        "contact_number": "+12345678901",
+        "inbound": True,
+        "description": "Switch test agent",
+        "provider": "vapi",
+        "assistant_id": "assistant-1",
+        "api_key": "test-key",
+        "organization": organization,
+        "workspace": workspace,
+        "languages": ["en"],
+    }
+    values.update(fields)
+    return AgentDefinition.objects.create(**values)
+
+
+def _agent_with_row(organization, workspace, *, enabled, metadata=None, **fields):
+    agent = _agent(organization, workspace, **fields)
+    row = _row(organization, workspace, metadata or {})
+    ObservabilityProvider.no_workspace_objects.filter(pk=row.pk).update(enabled=enabled)
+    agent.observability_provider = ObservabilityProvider.no_workspace_objects.get(
+        pk=row.pk
+    )
+    agent.save()
+    return agent
+
+
+def _stored_agent(agent):
+    return AgentDefinition.no_workspace_objects.get(pk=agent.pk)
+
+
+def _turn(agent, enabled, user, organization, workspace):
+    return switch.set_agent_observability(
+        agent_definition=agent,
+        enabled=enabled,
+        user_id=str(user.id),
+        organization=organization,
+        workspace=workspace,
+    )
+
+
+def _created():
+    """How many projects and provider rows exist."""
+    return (
+        Project.no_workspace_objects.count(),
+        ObservabilityProvider.no_workspace_objects.count(),
+    )
+
+
+def _events(logs, prefix="observability_switch"):
+    return [entry for entry in logs if entry["event"].startswith(prefix)]
+
+
+def test_names_and_signatures_are_the_contract_ones():
+    assert [f.name for f in dataclasses.fields(switch._AgentSummary)] == SUMMARY_FIELDS
+    assert switch._AgentSummary.__dataclass_params__.frozen
+    assert [f.name for f in dataclasses.fields(switch.MissingPrerequisite)] == [
+        "code",
+        "field",
+        "message",
+    ]
+    assert switch.MissingPrerequisite.__dataclass_params__.frozen
+    assert [
+        (p.name, p.kind, p.default)
+        for p in inspect.signature(switch.set_agent_observability).parameters.values()
+    ] == [
+        (name, KEYWORD_ONLY, NO_DEFAULT)
+        for name in (
+            "agent_definition",
+            "enabled",
+            "user_id",
+            "organization",
+            "workspace",
+        )
+    ]
+    assert list(inspect.signature(switch.refusal_body).parameters) == ["error"]
+    assert list(
+        inspect.signature(switch.check_observability_prerequisites).parameters
+    ) == ["agent_definition"]
+    assert issubclass(switch.ObservabilityRefused, Exception)
+    assert issubclass(switch.ObservabilityProjectError, Exception)
+    assert issubclass(switch.AgentNotFound, Exception)
+    assert issubclass(switch.ProviderListNotPublished, Exception)
+
+
+def test_prerequisites_are_the_contract_words():
+    assert switch.PREREQUISITES == {
+        "credential": switch.MissingPrerequisite(
+            "credential_missing", "api_key", KEY_MESSAGE
+        ),
+        "provider_agent_id": switch.MissingPrerequisite(
+            "provider_agent_id_missing", "assistant_id", AGENT_ID_MESSAGE
+        ),
+        "instrumentation": switch.MissingPrerequisite(
+            "instrumentation_missing", "instrumentation", INSTRUMENTATION_MESSAGE
+        ),
+    }
+    with pytest.raises(ValueError):
+        switch.ObservabilityRefused(())
+    refused = switch.ObservabilityRefused((switch.PREREQUISITES["credential"],))
+    assert refused.missing == (switch.PREREQUISITES["credential"],)
+
+
+def test_stand_in_summary_reads_the_definition(organization, workspace):
+    agent = _agent(
+        organization,
+        workspace,
+        provider="retell",
+        assistant_id="assistant-9",
+        agent_type=AgentDefinition.AgentTypeChoices.TEXT,
+    )
+    assert switch._agent_summary(agent.id) == switch._AgentSummary(
+        agent_definition_id=agent.id,
+        agent_version_id=None,
+        agent_stored=False,
+        setup_stale=False,
+        provider="retell",
+        provider_agent_id="assistant-9",
+        credential_id=None,
+        key_present=True,
+        type="text",
+        kind=None,
+        unit_ids=(),
+        instrumentation="none",
+        setup_hash=None,
+        provider_info_complete=True,
+        missing=(),
+    )
+
+    bare = _agent(
+        organization, workspace, provider=None, assistant_id=None, api_key=None
+    )
+    summary = switch._agent_summary(bare.id)
+    assert (summary.provider, summary.provider_agent_id, summary.key_present) == (
+        "",
+        "",
+        False,
+    )
+
+    with pytest.raises(switch.AgentNotFound, match="^agent definition not found$"):
+        switch._agent_summary(uuid.uuid4())
+    with pytest.raises(switch.ProviderListNotPublished):
+        switch._read_provider_list()
+
+
+def test_agent_is_source_asks_the_summary(organization, workspace):
+    agent = _agent(organization, workspace)
+    with seams(make_summary(kind="source")):
+        assert switch.agent_is_source(agent) is True
+    for kind in (None, "hosted", "endpoint"):
+        with seams(make_summary(kind=kind)):
+            assert switch.agent_is_source(agent) is False
+
+
+def test_on_list_complete_creates_project_and_row(organization, workspace, user):
+    agent = _agent(organization, workspace)
+    with seams(make_summary(agent_definition_id=agent.id)), capture_logs() as logs:
+        row = _turn(agent, True, user, organization, workspace)
+
+    assert isinstance(row, ObservabilityProvider)
+    assert (row.enabled, row.provider) == (True, "vapi")
+    project = Project.no_workspace_objects.get(pk=row.project_id)
+    assert (project.name, project.trace_type, project.source) == (
+        agent.agent_name,
+        "observe",
+        ProjectSourceChoices.SIMULATOR.value,
+    )
+    assert _stored_agent(agent).observability_provider_id == row.pk
+    assert _events(logs) == []
+
+
+def test_turn_on_reuses_the_project_named_after_the_agent(
+    organization, workspace, user
+):
+    agent = _agent(organization, workspace)
+    existing = Project.no_workspace_objects.create(
+        name=agent.agent_name,
+        organization=organization,
+        workspace=workspace,
+        model_type=AIModel.ModelTypes.GENERATIVE_LLM,
+        trace_type="observe",
+    )
+    projects_before = Project.no_workspace_objects.count()
+    with seams(make_summary(agent_definition_id=agent.id)):
+        row = _turn(agent, True, user, organization, workspace)
+
+    assert row.project_id == existing.pk
+    assert Project.no_workspace_objects.count() == projects_before
+
+
+@pytest.mark.parametrize(
+    "missing, fields",
+    [
+        (("credential",), ["api_key"]),
+        (("provider_agent_id",), ["assistant_id"]),
+        (("credential", "provider_agent_id"), ["api_key", "assistant_id"]),
+        (("provider", "credential"), ["api_key"]),
+    ],
+)
+def test_missing_key_or_agent_id_refused_with_exact_body(
+    organization, workspace, user, missing, fields
+):
+    agent = _agent(organization, workspace)
+    before = _created()
+    summary = make_summary(agent_definition_id=agent.id, missing=missing)
+    with seams(summary), capture_logs() as logs:
+        with pytest.raises(switch.ObservabilityRefused) as raised:
+            _turn(agent, True, user, organization, workspace)
+
+    error = raised.value
+    assert [entry.field for entry in error.missing] == fields
+    detail = "Observability cannot be turned on: " + "; ".join(
+        MESSAGE_OF_FIELD[field] for field in fields
+    )
+    expected = build_error_envelope(
+        detail,
+        status_code=400,
+        code="observability_prerequisite_missing",
+        details={field: [MESSAGE_OF_FIELD[field]] for field in fields},
+    )
+    body = switch.refusal_body(error)
+    assert body == expected
+    assert json.dumps(body) == json.dumps(expected)
+    assert body["code"] == "observability_prerequisite_missing"
+    assert body["attr"] == fields[0]
+    assert body["details"] == {field: [MESSAGE_OF_FIELD[field]] for field in fields}
+    # Nothing was created and the agent still points at no row.
+    assert _created() == before
+    assert _stored_agent(agent).observability_provider_id is None
+    assert _events(logs) == [
+        {
+            "event": "observability_switch_refused",
+            "log_level": "info",
+            "agent_definition_id": str(agent.id),
+            "provider": "vapi",
+            "codes": [CODE_OF_FIELD[field] for field in fields],
+        }
+    ]
+
+
+def test_refusal_body_for_both_entries_is_the_contract_body():
+    error = switch.ObservabilityRefused(
+        (switch.PREREQUISITES["credential"], switch.PREREQUISITES["provider_agent_id"])
+    )
+    detail = f"Observability cannot be turned on: {KEY_MESSAGE}; {AGENT_ID_MESSAGE}"
+    assert switch.refusal_body(error) == {
+        "status": False,
+        "type": "validation_error",
+        "code": "observability_prerequisite_missing",
+        "detail": detail,
+        "message": detail,
+        "error": detail,
+        "result": detail,
+        "attr": "api_key",
+        "details": {
+            "api_key": [KEY_MESSAGE],
+            "assistant_id": [AGENT_ID_MESSAGE],
+        },
+    }
+
+
+def test_plain_column_key_passes_and_logs(organization, workspace, user):
+    agent = _agent(organization, workspace)
+    plain = make_summary(agent_definition_id=agent.id, credential_id=None)
+    with seams(plain), capture_logs() as logs:
+        row = _turn(agent, True, user, organization, workspace)
+
+    assert isinstance(row, ObservabilityProvider)
+    assert _events(logs) == [
+        {
+            "event": "observability_switch_plain_column_key",
+            "log_level": "warning",
+            "agent_definition_id": str(agent.id),
+            "provider": "vapi",
+        }
+    ]
+
+
+def test_outbound_agent_is_checked(organization, workspace, user):
+    agent = _agent(organization, workspace, inbound=False)
+    before = _created()
+    summary = make_summary(agent_definition_id=agent.id, missing=("credential",))
+    with seams(summary):
+        with pytest.raises(switch.ObservabilityRefused):
+            _turn(agent, True, user, organization, workspace)
+    assert _created() == before
+
+
+def test_already_on_is_never_checked(organization, workspace, user):
+    agent = _agent_with_row(organization, workspace, enabled=True)
+    refusing = make_summary(missing=("credential", "provider_agent_id"))
+    with seams(refusing) as (read_summary, read_list):
+        row = _turn(agent, True, user, organization, workspace)
+
+    assert row.pk == agent.observability_provider_id
+    assert _stored(row)[1] is True
+    read_summary.assert_not_called()
+    read_list.assert_not_called()
+
+
+def test_off_is_never_refused(organization, workspace, user):
+    refusing = make_summary(missing=("credential", "provider_agent_id"))
+    agent = _agent_with_row(organization, workspace, enabled=True)
+    with seams(refusing) as (read_summary, read_list):
+        row = _turn(agent, False, user, organization, workspace)
+    assert _stored(row)[1] is False
+    read_summary.assert_not_called()
+    read_list.assert_not_called()
+
+    # No row and off: nothing to switch, nothing created.
+    bare = _agent(organization, workspace)
+    before = _created()
+    with seams(refusing) as (read_summary, read_list):
+        assert _turn(bare, False, user, organization, workspace) is None
+    assert _created() == before
+    read_summary.assert_not_called()
+
+
+def test_turn_on_of_an_existing_off_row_is_checked(organization, workspace, user):
+    agent = _agent_with_row(organization, workspace, enabled=False)
+    refusing = make_summary(agent_definition_id=agent.id, missing=("credential",))
+    with seams(refusing):
+        with pytest.raises(switch.ObservabilityRefused):
+            _turn(agent, True, user, organization, workspace)
+    assert _stored(agent.observability_provider)[1] is False
+
+    with seams(make_summary(agent_definition_id=agent.id)):
+        row = _turn(agent, True, user, organization, workspace)
+    assert _stored(row)[1] is True
+
+
+def test_row_of_a_deleted_project_is_cleared(organization, workspace, user):
+    agent = _agent_with_row(organization, workspace, enabled=True)
+    Project._base_manager.filter(pk=agent.observability_provider.project_id).update(
+        deleted=True
+    )
+    agent = _stored_agent(agent)
+    with seams(make_summary()) as (read_summary, _):
+        assert _turn(agent, True, user, organization, workspace) is None
+    assert _stored_agent(agent).observability_provider_id is None
+    read_summary.assert_not_called()
+
+
+@pytest.mark.parametrize("kind", [None, "hosted", "endpoint"])
+def test_unlisted_provider_as_today(organization, workspace, user, kind):
+    agent = _agent(organization, workspace)
+    # It would be refused if it were checked.
+    summary = make_summary(
+        agent_definition_id=agent.id,
+        provider="acme",
+        kind=kind,
+        missing=("credential", "provider_agent_id"),
+    )
+    with seams(summary), capture_logs() as logs:
+        row = _turn(agent, True, user, organization, workspace)
+
+    assert isinstance(row, ObservabilityProvider)
+    # The row takes the agent's own column, not the summary's word.
+    assert row.provider == "vapi"
+    assert _events(logs) == []
+
+
+@pytest.mark.parametrize("kind", [None, "hosted", "endpoint"])
+def test_list_not_published_as_today_with_event(organization, workspace, user, kind):
+    agent = _agent(organization, workspace)
+    summary = make_summary(
+        agent_definition_id=agent.id, kind=kind, missing=("credential",)
+    )
+    with seams(summary, published=False), capture_logs() as logs:
+        row = _turn(agent, True, user, organization, workspace)
+
+    assert isinstance(row, ObservabilityProvider)
+    assert row.provider == "vapi"
+    assert _events(logs) == [
+        {
+            "event": "observability_switch_unchecked",
+            "log_level": "warning",
+            "agent_definition_id": str(agent.id),
+            "provider": "vapi",
+            "reason": "provider_list_not_published",
+        }
+    ]
+
+
+def test_list_not_published_still_decides_a_source_agent(organization, workspace, user):
+    agent = _agent(organization, workspace, provider=None)
+    none = make_summary(
+        agent_definition_id=agent.id,
+        kind="source",
+        provider="",
+        instrumentation="none",
+    )
+    before = _created()
+    with seams(none, published=False), capture_logs() as logs:
+        with pytest.raises(switch.ObservabilityRefused):
+            _turn(agent, True, user, organization, workspace)
+    assert _created() == before
+    assert [entry["event"] for entry in _events(logs)] == [
+        "observability_switch_unchecked",
+        "observability_switch_refused",
+    ]
+
+    traced = dataclasses.replace(none, instrumentation="traceai")
+    with seams(traced, published=False):
+        row = _turn(agent, True, user, organization, workspace)
+    assert row.provider == "others"
+
+
+def test_kind_none_changes_nothing(organization, workspace, user):
+    agent = _agent(organization, workspace)
+    unlisted = make_summary(
+        agent_definition_id=agent.id,
+        provider="acme",
+        kind=None,
+        missing=("credential",),
+        instrumentation="none",
+    )
+    with seams(unlisted), capture_logs() as logs:
+        row = _turn(agent, True, user, organization, workspace)
+    assert isinstance(row, ObservabilityProvider)
+    assert row.provider == "vapi"
+    assert _events(logs) == []
+
+
+@pytest.mark.parametrize("kind", [None, "hosted", "source", "endpoint"])
+def test_listed_provider_is_checked_whatever_the_kind(
+    organization, workspace, user, kind
+):
+    agent = _agent(organization, workspace)
+    before = _created()
+    summary = make_summary(
+        agent_definition_id=agent.id,
+        kind=kind,
+        instrumentation="traceai",
+        missing=("credential",),
+    )
+    with seams(summary):
+        with pytest.raises(switch.ObservabilityRefused) as raised:
+            _turn(agent, True, user, organization, workspace)
+    assert [entry.code for entry in raised.value.missing] == ["credential_missing"]
+    assert _created() == before
+
+
+@pytest.mark.parametrize("column", [None, "livekit", "phone"])
+@pytest.mark.parametrize("instrumenter", ["traceai", "opentelemetry"])
+def test_source_agent_admitted_with_an_instrumenter_and_refused_without(
+    organization, workspace, user, column, instrumenter
+):
+    # An unlisted code agent: admitted when its code names an instrumenter, and
+    # its row takes the generic provider word whatever its own column says.
+    agent = _agent(organization, workspace, provider=column)
+    summary = make_summary(
+        agent_definition_id=agent.id,
+        kind="source",
+        provider=column or "",
+        instrumentation=instrumenter,
+        missing=("credential", "provider_agent_id"),
+    )
+    with seams(summary), capture_logs() as logs:
+        row = _turn(agent, True, user, organization, workspace)
+    assert isinstance(row, ObservabilityProvider)
+    assert row.provider == "others"
+    assert _events(logs) == []
+
+    # Without one: refused before anything is created, with the one entry.
+    refused_agent = _agent(organization, workspace, provider=column)
+    before = _created()
+    without = dataclasses.replace(
+        summary, agent_definition_id=refused_agent.id, instrumentation="none"
+    )
+    with seams(without), capture_logs() as logs:
+        with pytest.raises(switch.ObservabilityRefused) as raised:
+            _turn(refused_agent, True, user, organization, workspace)
+    assert raised.value.missing == (switch.PREREQUISITES["instrumentation"],)
+    (entry,) = raised.value.missing
+    assert (entry.code, entry.field, entry.message) == (
+        "instrumentation_missing",
+        "instrumentation",
+        INSTRUMENTATION_MESSAGE,
+    )
+    assert switch.refusal_body(raised.value)["details"] == {
+        "instrumentation": [INSTRUMENTATION_MESSAGE]
+    }
+    assert _created() == before
+    assert _events(logs) == [
+        {
+            "event": "observability_switch_refused",
+            "log_level": "info",
+            "agent_definition_id": str(refused_agent.id),
+            # Only our own provider words reach the log; free text reads "unknown".
+            "provider": "livekit" if column == "livekit" else "unknown",
+            "codes": ["instrumentation_missing"],
+        }
+    ]
+
+
+def test_source_agent_with_a_listed_provider_goes_through_todays_checks(
+    organization, workspace, user
+):
+    agent = _agent(organization, workspace)
+    complete = make_summary(
+        agent_definition_id=agent.id, kind="source", instrumentation="none"
+    )
+    with seams(complete):
+        row = _turn(agent, True, user, organization, workspace)
+    assert row.provider == "vapi"
+
+    keyless = _agent(organization, workspace)
+    without_key = dataclasses.replace(
+        complete, agent_definition_id=keyless.id, missing=("credential",)
+    )
+    with seams(without_key):
+        with pytest.raises(switch.ObservabilityRefused) as raised:
+            _turn(keyless, True, user, organization, workspace)
+    assert [entry.code for entry in raised.value.missing] == ["credential_missing"]
+
+
+def test_project_error_when_no_row_comes_back(organization, workspace, user):
+    agent = _agent(organization, workspace)
+    with seams(make_summary(agent_definition_id=agent.id)):
+        with patch.object(
+            switch, "create_observability_provider", return_value={"error": "Invalid"}
+        ):
+            with pytest.raises(
+                switch.ObservabilityProjectError,
+                match="^observability project could not be created$",
+            ):
+                _turn(agent, True, user, organization, workspace)
+    assert _stored_agent(agent).observability_provider_id is None
+
+
+def test_switch_saves_only_enabled(organization, workspace, user):
+    agent = _agent_with_row(
+        organization, workspace, enabled=False, metadata={"assistant_id": "a1"}
+    )
+    summary = make_summary(agent_definition_id=agent.id)
+
+    def flag_lands_during_the_check(agent_definition_id):
+        # After the switch loaded the row and before it saves it.
+        record_holding(str(agent.observability_provider.project_id))
+        return summary
+
+    with seams(flag_lands_during_the_check):
+        row = _turn(agent, True, user, organization, workspace)
+
+    assert _stored(row) == ({"assistant_id": "a1", HOLDING_FLAG: True}, True)
+
+
+def test_switch_saves_only_enabled_when_turning_off(organization, workspace, user):
+    agent = _agent_with_row(
+        organization, workspace, enabled=True, metadata={"assistant_id": "a1"}
+    )
+    row = agent.observability_provider
+    real_save = ObservabilityProvider.save
+
+    def flag_then_save(self, *args, **kwargs):
+        record_holding(str(self.project_id))
+        return real_save(self, *args, **kwargs)
+
+    with patch.object(ObservabilityProvider, "save", flag_then_save):
+        _turn(agent, False, user, organization, workspace)
+
+    assert _stored(row) == ({"assistant_id": "a1", HOLDING_FLAG: True}, False)
+
+
+def test_stand_in_keeps_todays_rule(auth_client, organization, workspace):
+    # Neither read is replaced: a vapi agent with no key is turned on through the
+    # version view exactly as before, and the switch says it did not check.
+    agent = _agent(organization, workspace, api_key=None, assistant_id=None)
+    with capture_logs() as logs:
+        response = auth_client.post(
+            f"/simulate/agent-definitions/{agent.id}/versions/create/",
+            {"commit_message": "turn on", "observability_enabled": True},
+            format="json",
+        )
+
+    assert response.status_code == 201
+    row = _stored_agent(agent).observability_provider
+    assert row is not None
+    assert (row.enabled, row.provider) == (True, "vapi")
+    assert _events(logs) == [
+        {
+            "event": "observability_switch_unchecked",
+            "log_level": "warning",
+            "agent_definition_id": str(agent.id),
+            "provider": "vapi",
+            "reason": "provider_list_not_published",
+        }
+    ]
+
+
+# ---------------------------------------------------------------------------
+# The provider endpoint
+# ---------------------------------------------------------------------------
+
+
+def _put(client, row, payload):
+    return client.put(f"{PROVIDERS_PATH}{row.id}/", payload, format="json")
+
+
+@pytest.mark.parametrize("send", [_patch, _put])
+def test_patch_on_provider_row_is_checked_before_perform_update(
+    auth_client, organization, workspace, send
+):
+    agent = _agent_with_row(
+        organization, workspace, enabled=False, metadata={"assistant_id": "a1"}
+    )
+    row = agent.observability_provider
+    refusing = make_summary(
+        agent_definition_id=agent.id, missing=("credential", "provider_agent_id")
+    )
+    with seams(refusing) as (read_summary, _):
+        response = send(auth_client, row, {"enabled": True, "metadata": {"k": "v"}})
+
+    refusal = switch.ObservabilityRefused(
+        (switch.PREREQUISITES["credential"], switch.PREREQUISITES["provider_agent_id"])
+    )
+    assert response.status_code == 400
+    assert response.json() == switch.refusal_body(refusal)
+    # Refused before anything of the request was saved.
+    assert _stored(row) == ({"assistant_id": "a1"}, False)
+    read_summary.assert_called_once_with(agent.id)
+
+    with seams(make_summary(agent_definition_id=agent.id)):
+        response = send(auth_client, row, {"enabled": True})
+    assert response.status_code == 200
+    assert _stored(row) == ({"assistant_id": "a1"}, True)
+
+
+def test_patch_checks_only_a_turn_on_of_a_row_with_a_live_agent(
+    auth_client, organization, workspace
+):
+    refusing = make_summary(missing=("credential",))
+
+    # Turning on a row whose agent is gone: not checked.
+    gone = _agent_with_row(organization, workspace, enabled=False)
+    AgentDefinition.no_workspace_objects.filter(pk=gone.pk).update(deleted=True)
+    with seams(refusing) as (read_summary, _):
+        response = _patch(auth_client, gone.observability_provider, {"enabled": True})
+    assert response.status_code == 200
+    read_summary.assert_not_called()
+
+    # A row no agent points at: not checked.
+    loose = _row(organization, workspace, {})
+    ObservabilityProvider.no_workspace_objects.filter(pk=loose.pk).update(enabled=False)
+    with seams(refusing) as (read_summary, _):
+        response = _patch(auth_client, loose, {"enabled": True})
+    assert response.status_code == 200
+    read_summary.assert_not_called()
+
+    # A request that does not turn it on, or that turns it off: not checked.
+    live = _agent_with_row(organization, workspace, enabled=True)
+    row = live.observability_provider
+    with seams(refusing) as (read_summary, _):
+        assert _patch(auth_client, row, {"enabled": True}).status_code == 200
+        assert _patch(auth_client, row, {"metadata": {"k": 1}}).status_code == 200
+        assert _patch(auth_client, row, {"enabled": False}).status_code == 200
+        assert _patch(auth_client, row, {"metadata": {"k": 2}}).status_code == 200
+    read_summary.assert_not_called()
+    assert _stored(row)[1] is False
+
+
+def test_delete_keeps_flag_written_after_get_object(
+    auth_client, organization, workspace, monkeypatch
+):
+    original = ObservabilityProviderViewSet.get_object
+
+    def get_object_then_flag_the_project(self):
+        found = original(self)
+        # The flag lands after the view read the row and before it saves.
+        record_holding(str(found.project_id))
+        return found
+
+    monkeypatch.setattr(
+        ObservabilityProviderViewSet, "get_object", get_object_then_flag_the_project
+    )
+    row = _row(organization, workspace, {"assistant_id": "a1"})
+    seen, wrapper = _statements()
+    with wrapper:
+        response = auth_client.delete(f"{PROVIDERS_PATH}{row.id}/")
+
+    assert response.status_code == 200
+    assert _result(response) == "Observability provider deleted successfully."
+    stored = ObservabilityProvider._base_manager.get(pk=row.pk)
+    assert stored.deleted is True
+    assert stored.deleted_at is not None
+    assert stored.metadata == {"assistant_id": "a1", HOLDING_FLAG: True}
+    # The soft delete wrote its own columns and no others.
+    updates = [sql for sql in seen if sql.startswith('UPDATE "tracer_observability_')]
+    assert updates
+    assert all('"metadata"' not in sql and '"enabled"' not in sql for sql in updates)

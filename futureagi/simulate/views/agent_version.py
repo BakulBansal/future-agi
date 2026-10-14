@@ -1,3 +1,4 @@
+from django.db import transaction
 from drf_yasg.utils import swagger_auto_schema
 from rest_framework import status
 from rest_framework.exceptions import NotFound
@@ -48,7 +49,12 @@ from tfc.utils.api_serializers import (
 from tfc.utils.error_codes import get_error_message
 from tfc.utils.general_methods import GeneralMethods
 from tfc.utils.pagination import ExtendedPageNumberPagination
-from tracer.utils.observability_provider import create_observability_provider
+from tracer.services.observability_switch import (
+    ObservabilityRefused,
+    agent_is_source,
+    refusal_body,
+    set_agent_observability,
+)
 
 
 def _error_response(message, status_code):
@@ -135,7 +141,7 @@ class CreateAgentVersionView(APIView):
 
             validated = request.validated_data
             commit_message = validated.get("commit_message", "")
-            observability_enabled = validated.get("observability_enabled", False)
+            observability_enabled = validated.get("observability_enabled")
 
             incoming_api_key = validated.get("api_key")
             preserve_existing_api_key = incoming_api_key is not None and is_masked(
@@ -202,94 +208,89 @@ class CreateAgentVersionView(APIView):
                         )
                 agent.knowledge_base_id = kb_id
                 changed = True
-            if changed:
-                agent.save()
-            provider = agent.observability_provider
-
-            if provider:
-                is_project_deleted = provider.project.deleted
-                if is_project_deleted:
-                    agent.observability_provider = None
+            with transaction.atomic():
+                if changed:
                     agent.save()
-                else:
-                    provider.enabled = observability_enabled
-                    provider.save()
-            else:
-                if observability_enabled:
-                    provider = create_observability_provider(
-                        enabled=True,
-                        user_id=str(request.user.id),
-                        organization=getattr(request, "organization", None)
-                        or request.user.organization,
-                        workspace=getattr(request.user, "workspace", None),
-                        project_name=agent.agent_name,
-                        provider=agent.provider,
+
+                # Resolve masked secrets *before* creating the new version so we read
+                # them from the active version rather than the brand-new one. The UI
+                # resends the LiveKit key/secret masked (it never holds the real
+                # value), so without this a new version blanks them → the hosted
+                # runner authenticates with empty creds and room create returns 401.
+                existing_api_key = None
+                existing_livekit_api_key = None
+                existing_livekit_api_secret = None
+                if (
+                    preserve_existing_api_key
+                    or preserve_livekit_api_key
+                    or preserve_livekit_api_secret
+                ):
+                    active_version = agent.active_version or agent.latest_version
+                    if active_version:
+                        if preserve_existing_api_key:
+                            existing_api_key = resolve_api_key_for_version(
+                                active_version
+                            )
+                        if preserve_livekit_api_key:
+                            existing_livekit_api_key = resolve_api_key_for_version(
+                                active_version
+                            )
+                        if preserve_livekit_api_secret:
+                            existing_livekit_api_secret = (
+                                resolve_api_secret_for_version(active_version)
+                            )
+
+                version = agent.create_version(
+                    description=agent.description,
+                    commit_message=commit_message,
+                    status=AgentVersion.StatusChoices.ACTIVE,
+                )
+                version.activate()
+
+                creds_input = ProviderCredentialsInput(
+                    provider=validated.get("provider") or agent.provider or "",
+                    api_key=existing_api_key
+                    if preserve_existing_api_key
+                    else validated.get("api_key"),
+                    assistant_id=validated.get("assistant_id"),
+                    livekit_url=validated.get("livekit_url"),
+                    livekit_api_key=(
+                        existing_livekit_api_key
+                        if preserve_livekit_api_key
+                        else validated.get("livekit_api_key")
+                    ),
+                    livekit_api_secret=(
+                        existing_livekit_api_secret
+                        if preserve_livekit_api_secret
+                        else validated.get("livekit_api_secret")
+                    ),
+                    livekit_agent_name=validated.get("livekit_agent_name"),
+                    livekit_config_json=validated.get("livekit_config_json"),
+                    livekit_max_concurrency=validated.get("livekit_max_concurrency"),
+                    provider_was_provided="provider" in request.data,
+                )
+                sync_provider_credentials(version, creds_input)
+
+                if observability_enabled is None:
+                    # An absent field leaves a code agent's switch as it is.
+                    row = agent.observability_provider
+                    observability_enabled = bool(
+                        row is not None and row.enabled and agent_is_source(agent)
                     )
-                    agent.observability_provider = provider
-                    agent.save()
+                set_agent_observability(
+                    agent_definition=agent,
+                    enabled=observability_enabled,
+                    user_id=str(request.user.id),
+                    organization=getattr(request, "organization", None)
+                    or request.user.organization,
+                    workspace=getattr(request.user, "workspace", None),
+                )
 
-            # Resolve masked secrets *before* creating the new version so we read
-            # them from the active version rather than the brand-new one. The UI
-            # resends the LiveKit key/secret masked (it never holds the real
-            # value), so without this a new version blanks them → the hosted
-            # runner authenticates with empty creds and room create returns 401.
-            existing_api_key = None
-            existing_livekit_api_key = None
-            existing_livekit_api_secret = None
-            if (
-                preserve_existing_api_key
-                or preserve_livekit_api_key
-                or preserve_livekit_api_secret
-            ):
-                active_version = agent.active_version or agent.latest_version
-                if active_version:
-                    if preserve_existing_api_key:
-                        existing_api_key = resolve_api_key_for_version(active_version)
-                    if preserve_livekit_api_key:
-                        existing_livekit_api_key = resolve_api_key_for_version(
-                            active_version
-                        )
-                    if preserve_livekit_api_secret:
-                        existing_livekit_api_secret = resolve_api_secret_for_version(
-                            active_version
-                        )
-
-            version = agent.create_version(
-                description=agent.description,
-                commit_message=commit_message,
-                status=AgentVersion.StatusChoices.ACTIVE,
-            )
-            version.activate()
-
-            creds_input = ProviderCredentialsInput(
-                provider=validated.get("provider") or agent.provider or "",
-                api_key=existing_api_key
-                if preserve_existing_api_key
-                else validated.get("api_key"),
-                assistant_id=validated.get("assistant_id"),
-                livekit_url=validated.get("livekit_url"),
-                livekit_api_key=(
-                    existing_livekit_api_key
-                    if preserve_livekit_api_key
-                    else validated.get("livekit_api_key")
-                ),
-                livekit_api_secret=(
-                    existing_livekit_api_secret
-                    if preserve_livekit_api_secret
-                    else validated.get("livekit_api_secret")
-                ),
-                livekit_agent_name=validated.get("livekit_agent_name"),
-                livekit_config_json=validated.get("livekit_config_json"),
-                livekit_max_concurrency=validated.get("livekit_max_concurrency"),
-                provider_was_provided="provider" in request.data,
-            )
-            sync_provider_credentials(version, creds_input)
-
-            # Re-snapshot now that ProviderCredentials exist (LiveKit fields)
-            version.configuration_snapshot = version.create_snapshot(
-                commit_message=version.commit_message or ""
-            )
-            version.save(update_fields=["configuration_snapshot"])
+                # Re-snapshot now that ProviderCredentials exist (LiveKit fields)
+                version.configuration_snapshot = version.create_snapshot(
+                    commit_message=version.commit_message or ""
+                )
+                version.save(update_fields=["configuration_snapshot"])
 
             response_data = {
                 "message": "Agent version created successfully",
@@ -301,6 +302,8 @@ class CreateAgentVersionView(APIView):
             return _error_response(
                 "Agent definition not found", status.HTTP_404_NOT_FOUND
             )
+        except ObservabilityRefused as error:
+            return Response(refusal_body(error), status=status.HTTP_400_BAD_REQUEST)
         except Exception as e:
             return _error_response(
                 f"Failed to create agent version: {str(e)}",

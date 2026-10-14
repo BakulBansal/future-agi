@@ -3,9 +3,23 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
+from structlog.testing import capture_logs
 
 from ai_tools.tests.conftest import run_tool
 from ai_tools.tests.fixtures import make_agent_definition, make_scenario
+from simulate.models import AgentDefinition, AgentVersion
+from simulate.models.agent_definition import ProviderCredentials
+from tracer.services import observability_switch
+from tracer.services.simulation_visibility import HOLDING_FLAG, record_holding
+from tracer.tests.test_observability_switch import (
+    _agent,
+    _agent_with_row,
+    _created,
+    _stored,
+    make_summary,
+    seams,
+)
+from tracer.utils.otel import ResourceLimitError
 
 
 def _voice_denial():
@@ -263,3 +277,260 @@ def test_voice_rerun_denied_before_snapshot_or_reset(tool_context):
     call.transcripts.all.return_value.delete.assert_not_called()
     call.reset_to_default.assert_not_called()
     rerun.assert_not_called()
+
+
+# ===================================================================
+# OBSERVABILITY SWITCH, THROUGH THE THREE WRITING TOOLS
+# ===================================================================
+
+WRITING_TOOLS = (
+    "create_agent_definition",
+    "update_agent_definition",
+    "create_agent_version",
+)
+
+
+@pytest.fixture
+def observed_agent(tool_context):
+    return _agent(
+        tool_context.organization,
+        tool_context.workspace,
+        agent_name="Observed Agent",
+        description="Original",
+    )
+
+
+def _tool_call(tool, agent, **extra):
+    """The tool name and the params of a call that turns observability on."""
+    if tool == "create_agent_definition":
+        params = {
+            "agent_name": f"Created {uuid.uuid4().hex[:8]}",
+            "agent_type": "voice",
+            "description": "A created agent",
+            "provider": "others",
+            "contact_number": "+12345678901",
+            "assistant_id": "assistant-1",
+            "api_key": "test-key",
+            "observability_enabled": True,
+        }
+    elif tool == "update_agent_definition":
+        params = {
+            "agent_id": str(agent.id),
+            "description": "Changed",
+            "api_key": "test-key",
+            "observability_enabled": True,
+        }
+    else:
+        params = {
+            "agent_id": str(agent.id),
+            "commit_message": "Changed",
+            "description": "Changed",
+            "api_key": "test-key",
+            "observability_enabled": True,
+        }
+    params.update(extra)
+    return tool, params
+
+
+def _written(tool, agent, params):
+    """The agent the call saved, or None when it saved none."""
+    name = (
+        params["agent_name"] if tool == "create_agent_definition" else agent.agent_name
+    )
+    return AgentDefinition.no_workspace_objects.filter(agent_name=name).first()
+
+
+def _state(tool, agent, params):
+    saved = _written(tool, agent, params)
+    return (
+        saved and (saved.description, saved.api_key, saved.observability_provider_id),
+        AgentVersion.no_workspace_objects.count(),
+        ProviderCredentials.no_workspace_objects.count(),
+        _created(),
+    )
+
+
+def _newest_version(agent):
+    return AgentVersion.no_workspace_objects.filter(agent_definition=agent).order_by(
+        "-version_number"
+    )[0]
+
+
+@pytest.mark.parametrize("tool", WRITING_TOOLS)
+def test_tool_turns_on_with_key_and_agent_id_in_the_plain_column(
+    tool_context, observed_agent, tool
+):
+    name, params = _tool_call(tool, observed_agent)
+    plain = make_summary(credential_id=None, key_present=True)
+
+    with seams(plain), capture_logs() as logs:
+        result = run_tool(name, params, tool_context)
+
+    assert not result.is_error
+    agent = _written(name, observed_agent, params)
+    row = agent.observability_provider
+    assert row is not None and row.enabled is True
+    assert [
+        e["event"] for e in logs if e["event"].startswith("observability_switch")
+    ] == ["observability_switch_plain_column_key"]
+
+
+@pytest.mark.parametrize("tool", WRITING_TOOLS)
+def test_tool_writing_a_key_writes_the_credential_row(
+    tool_context, observed_agent, tool
+):
+    name, params = _tool_call(tool, observed_agent, observability_enabled=False)
+    result = run_tool(name, params, tool_context)
+
+    assert not result.is_error
+    agent = _written(name, observed_agent, params)
+    credentials = ProviderCredentials.no_workspace_objects.get(
+        agent_version=_newest_version(agent)
+    )
+    assert credentials.get_api_key() == "test-key"
+    assert credentials.assistant_id == "assistant-1"
+
+
+@pytest.mark.parametrize("tool", WRITING_TOOLS)
+def test_tool_without_a_key_or_with_a_masked_one_writes_no_credential_row(
+    tool_context, observed_agent, tool
+):
+    for api_key in (None, "********"):
+        name, params = _tool_call(
+            tool, observed_agent, observability_enabled=False, api_key=api_key
+        )
+        result = run_tool(name, params, tool_context)
+
+        assert not result.is_error
+        agent = _written(name, observed_agent, params)
+        assert not ProviderCredentials.no_workspace_objects.filter(
+            agent_version=_newest_version(agent)
+        ).exists()
+
+
+@pytest.mark.parametrize("tool", WRITING_TOOLS)
+def test_tool_version_snapshot_records_observability(
+    tool_context, observed_agent, tool
+):
+    name, params = _tool_call(tool, observed_agent)
+    with seams(make_summary()):
+        result = run_tool(name, params, tool_context)
+
+    assert not result.is_error
+    agent = _written(name, observed_agent, params)
+    # The snapshot is taken after the switch, so it equals the switch's result.
+    snapshot = _newest_version(agent).configuration_snapshot
+    assert snapshot["observability_enabled"] is True
+    assert agent.observability_provider.enabled is True
+
+
+def test_update_tool_without_the_field_turns_observability_off(tool_context):
+    agent = _agent_with_row(
+        tool_context.organization, tool_context.workspace, enabled=True
+    )
+    name, params = _tool_call("update_agent_definition", agent)
+    params.pop("observability_enabled")
+    with seams(make_summary(agent_definition_id=agent.id)):
+        result = run_tool(name, params, tool_context)
+
+    assert not result.is_error
+    assert _stored(agent.observability_provider)[1] is False
+    assert (
+        _newest_version(agent).configuration_snapshot["observability_enabled"] is False
+    )
+
+
+def test_create_tool_keeps_its_provider_gate(tool_context):
+    # An others agent that is asked for observability with no key gets no project.
+    name, params = _tool_call("create_agent_definition", None, api_key=None)
+    created = _created()
+    with patch.object(observability_switch, "set_agent_observability") as switch_call:
+        result = run_tool(name, params, tool_context)
+
+    assert not result.is_error
+    switch_call.assert_not_called()
+    assert _created() == created
+    agent = _written(name, None, params)
+    assert agent.observability_provider_id is None
+
+
+def test_create_tool_project_limit_answers_as_today(tool_context):
+    name, params = _tool_call("create_agent_definition", None)
+    before = _state(name, None, params)
+    with (
+        seams(make_summary()),
+        patch.object(
+            observability_switch,
+            "create_observability_provider",
+            side_effect=ResourceLimitError("limit"),
+        ),
+    ):
+        result = run_tool(name, params, tool_context)
+
+    assert result.is_error
+    assert "PROJECT CREATION LIMIT REACHED" in result.content
+    assert _written(name, None, params) is None
+    assert _state(name, None, params) == before
+
+
+@pytest.mark.parametrize("tool", WRITING_TOOLS)
+def test_tool_project_error_writes_nothing(tool_context, observed_agent, tool):
+    name, params = _tool_call(tool, observed_agent)
+    before = _state(name, observed_agent, params)
+    with (
+        seams(make_summary()),
+        patch.object(
+            observability_switch,
+            "create_observability_provider",
+            return_value={"error": "Invalid data"},
+        ),
+    ):
+        result = run_tool(name, params, tool_context)
+
+    # The error is not caught by the tool, so the base tool reports it.
+    assert result.is_error
+    assert "observability project could not be created" in result.content
+    assert _state(name, observed_agent, params) == before
+
+
+@pytest.mark.parametrize("tool", WRITING_TOOLS)
+def test_tool_refusal_returns_the_detail_and_writes_nothing(
+    tool_context, observed_agent, tool
+):
+    name, params = _tool_call(tool, observed_agent)
+    before = _state(name, observed_agent, params)
+    refusing = make_summary(missing=("credential", "provider_agent_id"))
+    with seams(refusing):
+        result = run_tool(name, params, tool_context)
+
+    assert result.is_error
+    assert result.error_code == "VALIDATION_ERROR"
+    assert result.content == (
+        "**Validation Error:** Observability cannot be turned on: "
+        "API key is required when observability is enabled; "
+        "Assistant ID is required when observability is enabled"
+    )
+    assert _state(name, observed_agent, params) == before
+
+
+@pytest.mark.parametrize("tool", ["update_agent_definition", "create_agent_version"])
+def test_tool_keeps_flag_written_before_the_switch_saves(tool_context, tool):
+    agent = _agent_with_row(
+        tool_context.organization,
+        tool_context.workspace,
+        enabled=False,
+        metadata={"assistant_id": "a1"},
+    )
+    row = agent.observability_provider
+    summary = make_summary(agent_definition_id=agent.id)
+
+    def flag_lands_during_the_check(agent_definition_id):
+        record_holding(str(row.project_id))
+        return summary
+
+    name, params = _tool_call(tool, agent)
+    with seams(flag_lands_during_the_check):
+        result = run_tool(name, params, tool_context)
+
+    assert not result.is_error
+    assert _stored(row) == ({"assistant_id": "a1", HOLDING_FLAG: True}, True)

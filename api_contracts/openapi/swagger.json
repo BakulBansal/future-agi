@@ -119740,8 +119740,7 @@
                 },
                 "observability_enabled": {
                     "title": "Observability enabled",
-                    "type": "boolean",
-                    "default": false
+                    "type": "boolean"
                 }
             }
         },
