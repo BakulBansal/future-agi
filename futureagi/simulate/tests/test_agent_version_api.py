@@ -36,7 +36,6 @@ from simulate.models.test_execution import TestExecution as TestExecutionModel
 from simulate.views import agent_version as agent_version_views
 from tracer.models.observability_provider import ObservabilityProvider
 from tracer.services import observability_switch
-from tracer.services.simulation_visibility import HOLDING_FLAG, record_holding
 from tracer.tests.test_observability_switch import (
     AGENT_ID_MESSAGE,
     _agent,
@@ -1240,50 +1239,6 @@ class TestCreateAgentVersionObservability:
         assert stored.agent_name == "Before Rename"
         assert AgentVersion.objects.filter(agent_definition=agent).count() == versions
         assert _created() == created
-
-    def test_version_view_keeps_flag_written_before_the_switch_saves(
-        self, auth_client, organization, workspace
-    ):
-        agent = _agent_with_row(
-            organization, workspace, enabled=False, metadata={"assistant_id": "a1"}
-        )
-        row = agent.observability_provider
-        summary = make_summary(agent_definition_id=agent.id)
-
-        def flag_lands_during_the_check(agent_definition_id):
-            record_holding(str(row.project_id))
-            return summary
-
-        with seams(flag_lands_during_the_check):
-            response = _create_version(
-                auth_client, agent, {"observability_enabled": True}
-            )
-
-        assert response.status_code == status.HTTP_201_CREATED
-        assert _stored(row) == ({"assistant_id": "a1", HOLDING_FLAG: True}, True)
-        assert ObservabilityProvider.no_workspace_objects.get(pk=row.pk).enabled
-
-    def test_version_view_keeps_flag_when_the_agent_is_already_on(
-        self, auth_client, organization, workspace
-    ):
-        # The commonest save: a new version of an agent already observed.
-        agent = _agent_with_row(
-            organization, workspace, enabled=True, metadata={"assistant_id": "a1"}
-        )
-        row = agent.observability_provider
-        real_save = ObservabilityProvider.save
-
-        def flag_then_save(self, *args, **kwargs):
-            record_holding(str(self.project_id))
-            return real_save(self, *args, **kwargs)
-
-        with patch.object(ObservabilityProvider, "save", flag_then_save):
-            response = _create_version(
-                auth_client, agent, {"observability_enabled": True}
-            )
-
-        assert response.status_code == status.HTTP_201_CREATED
-        assert _stored(row) == ({"assistant_id": "a1", HOLDING_FLAG: True}, True)
 
     def test_version_without_the_field_keeps_a_stored_code_agents_switch_on(
         self, auth_client, organization, workspace

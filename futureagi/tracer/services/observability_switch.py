@@ -273,7 +273,7 @@ def set_agent_observability(
             return None
         if enabled and not row.enabled:
             check_observability_prerequisites(agent_definition)
-        # Only these columns, so a holding flag written meanwhile is kept.
+        # Only these columns, so any other column written meanwhile is kept.
         row.enabled = enabled
         row.save(update_fields=["enabled", "updated_at"])
         return row
