@@ -3,13 +3,11 @@ Conftest for tracer app tests.
 Provides fixtures specific to tracer models and test data.
 """
 
-import importlib.util
 import json
 import uuid
 from datetime import timedelta
 
 import pytest
-from django.test import SimpleTestCase
 from django.utils import timezone
 
 from model_hub.models.ai_model import AIModel
@@ -67,119 +65,6 @@ def _stub_eval_task_workflow(monkeypatch):
         _fake_signal,
         raising=False,
     )
-
-
-def pytest_configure(config):
-    # ``--strict-markers`` rejects a marker the ini file does not list, and the
-    # ini file is outside this test package.
-    config.addinivalue_line(
-        "markers",
-        "real_holding_decision: a test without database access that keeps the "
-        "real hide_simulated and holding_projects and supplies the read itself",
-    )
-
-
-# Every module that imports the holding decision by name. A name imported with
-# ``from ... import`` is looked up in the importing module, so patching the
-# module that defines it would change nothing there.
-# test_holding_decision_fixture.py fails when a module imports either function
-# and is missing from these two tuples.
-_ONE_PROJECT_DECISION_SITES = (
-    "ai_tools.tools.tracing.create_custom_eval_config.project_hides_simulated",
-    "ai_tools.tools.tracing.get_project_eval_attributes.project_hides_simulated",
-    "ee.agenthub.cluster_rca.agent.project_hides_simulated",
-    "ee.agenthub.cluster_rca.context_builder.project_hides_simulated",
-    "model_hub.services.bulk_selection.project_hides_simulated",
-    "tracer.selectors.eval_tasks.row_resolver.project_hides_simulated",
-    "tracer.services.clickhouse.query_builders.monitor_metrics.hide_simulated",
-    "tracer.services.clickhouse.v2.span_reader.hide_simulated",
-    "tracer.services.trace_investigation.project_hides_simulated",
-    "tracer.views.charts.project_hides_simulated",
-    "tracer.views.observation_span.project_hides_simulated",
-    "tracer.views.project.project_hides_simulated",
-    "tracer.views.span_attributes.project_hides_simulated",
-    "tracer.views.trace.project_hides_simulated",
-)
-_PROJECT_SCOPE_DECISION_SITES = (
-    "model_hub.views.ai_filter.holding_projects",
-    "tracer.services.clickhouse.query_builders.monitor_metrics.holding_projects",
-    "tracer.services.clickhouse.v2.property_catalog.source_adapters.holding_projects",
-    "tracer.services.dashboard_metrics_catalog.holding_projects",
-    "tracer.utils.helper.holding_projects",
-    "tracer.views.dashboard.holding_projects",
-    "tracer.views.observation_span.holding_projects",
-    "tracer.views.span_attributes.holding_projects",
-    "tracer.views.trace.holding_projects",
-)
-
-
-def _site_is_importable(site):
-    """Whether the module a ``module.name`` patch target lives in can be imported.
-
-    The ``ee`` modules are absent from a build without ee, and patching them by
-    dotted path would raise ImportError in every test without a database.
-    """
-    module = site.rpartition(".")[0]
-    if not module.startswith("ee."):
-        return True
-    try:
-        return importlib.util.find_spec(module) is not None
-    except ImportError:
-        return False
-
-
-def _project_holds_nothing(project_id):
-    return False
-
-
-def _projects_hold_nothing(project_ids):
-    return frozenset()
-
-
-def _has_database_access(request):
-    # The marker is read directly: pytest-django requests the database for a
-    # marked test while that test is being set up, which can be after this
-    # fixture ran, so the fixture names alone would miss it.
-    if request.node.get_closest_marker("django_db") is not None:
-        return True
-    # pytest-django opens the database for these classes when it sets the class
-    # up, without a mark or a fixture name.
-    test_class = getattr(request.node, "cls", None)
-    if (
-        test_class is not None
-        and issubclass(test_class, SimpleTestCase)
-        and test_class.databases
-    ):
-        return True
-    # Known limit: a fixture cannot see a body that calls
-    # ``django_db_blocker.unblock()`` or ``request.getfixturevalue("db")``.
-    return not {"db", "transactional_db"}.isdisjoint(request.fixturenames)
-
-
-@pytest.fixture(autouse=True)
-def projects_hold_nothing_without_database(request, monkeypatch):
-    """Answer "no project holds simulated traces" in a test with no database.
-
-    Readers ask Postgres whether a project holds marked traces. A test that
-    cannot reach Postgres would fail on that read before it got to the code it
-    checks, and "nothing holds" is every project's answer until a marked trace
-    arrives, so these tests keep checking the SQL that is sent today.
-
-    A test with database access runs the real decision, so the integration and
-    database-backed suites still exercise the read. A test without database
-    access that wants the real functions is marked ``real_holding_decision``;
-    a module can also switch this off by defining a fixture of the same name.
-    """
-    if request.node.get_closest_marker("real_holding_decision") is not None:
-        return
-    if _has_database_access(request):
-        return
-    for site in _ONE_PROJECT_DECISION_SITES:
-        if _site_is_importable(site):
-            monkeypatch.setattr(site, _project_holds_nothing)
-    for site in _PROJECT_SCOPE_DECISION_SITES:
-        if _site_is_importable(site):
-            monkeypatch.setattr(site, _projects_hold_nothing)
 
 
 @pytest.fixture

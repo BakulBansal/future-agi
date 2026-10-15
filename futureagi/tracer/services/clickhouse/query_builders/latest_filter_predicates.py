@@ -444,64 +444,6 @@ def simulator_call_root_predicate() -> tuple[str, dict[str, Any]]:
     return predicate, {"simulator_phone_numbers": tuple(VAPI_PHONE_NUMBERS)}
 
 
-def simulation_unmarked_row_sql() -> str:
-    """Row test that is true when no simulation mark touches the span.
-
-    Builders reaching this write legacy column tokens and let their v2 rewrite
-    boundary translate the whole statement once, so the legacy map column is the
-    right spelling here. The exact-graph compiler writes CH25 tokens directly
-    and asks for its own column instead.
-    """
-
-    # Imported at call time so this compiler, which the analytics layer imports,
-    # cannot form an import cycle with the module that reads ClickHouse.
-    from tracer.services.simulation_visibility import row_exclusion_sql
-
-    return row_exclusion_sql(map_column="span_attr_str")
-
-
-def with_simulation_hidden(where_fragment: str, *, hide_simulated: bool) -> str:
-    """Add the unmarked row test to a legacy ``AND ...`` fragment when hiding.
-
-    The fragment is returned untouched otherwise, so a statement that does not
-    hide keeps the exact text it is built from today.
-    """
-
-    if not hide_simulated:
-        return where_fragment
-    return f"{where_fragment}\n          AND {simulation_unmarked_row_sql()}"
-
-
-_SIMULATION_HIDE_ALIAS = "latest_unmarked_value"
-
-
-def simulation_hide_plan(*, scope: str) -> LatestFilterPredicate:
-    """Latest-state plan that keeps only what no simulation mark touches.
-
-    ``root`` judges a trace by its live root alone, which carries the mark
-    whenever the trace is marked, so a child's mark never hides a trace whose
-    root is clean. A list never returns a trace that has no live root, so a lost
-    root cannot let a marked trace through here; the graph compiler counts
-    spans instead of listing roots and so looks at every live span. ``span``
-    judges one row by its own latest version.
-
-    It is built from the one shared row test, so the span key and the resource
-    key can never drift apart, and it is never an element of a request's filter
-    list: the decisions that read the request's filters must not see it.
-    """
-
-    unmarked = simulation_unmarked_row_sql()
-    return LatestFilterPredicate(
-        aggregates=(
-            f"argMax({unmarked}, _peerdb_version) AS {_SIMULATION_HIDE_ALIAS}",
-        ),
-        predicate=f"{_SIMULATION_HIDE_ALIAS} = 1",
-        seed_predicate=unmarked,
-        params={},
-        scope=scope,
-    )
-
-
 def _normalize_value(
     config: dict[str, Any], coerce: Callable[[object], object]
 ) -> tuple[str, object | None]:
@@ -1614,7 +1556,6 @@ def compile_exact_graph_filter_predicates(
     project_id: str,
     observe_type: str,
     annotation_label_ids: list[str] | tuple[str, ...] | None = None,
-    hide_simulated: bool = False,
 ) -> tuple[str, dict[str, Any]]:
     """Compile exact graph filters, including overflow JSON arrays/maps.
 
@@ -1756,30 +1697,6 @@ def compile_exact_graph_filter_predicates(
             """
         )
         params.update(simulator_params)
-
-    if hide_simulated:
-        from tracer.services.simulation_visibility import row_exclusion_sql
-
-        # These clauses run against CH25 columns, unlike the legacy-token plans.
-        unmarked = row_exclusion_sql(map_column="attrs_string")
-        if normalized_observe_type == "span":
-            clauses.append(unmarked)
-        else:
-            # A trace graph hides every row of a trace in which any live span is
-            # marked, not only one whose root is. A process torn down at the
-            # end of a run loses its last export batch, and the root ends last,
-            # so it is the span most likely to be missing while its marked
-            # children are stored and would otherwise be counted.
-            marked_span = f"NOT ({unmarked})"
-            clauses.append(
-                f"""
-            trace_id NOT IN (
-                SELECT DISTINCT trace_id
-                FROM ({latest_span_membership_source_sql(predicate=marked_span)})
-                WHERE matched
-            )
-            """
-            )
 
     return " AND ".join(f"({clause})" for clause in clauses), params
 
@@ -2412,12 +2329,9 @@ __all__ = [
     "is_internal_trace_root_filter",
     "partition_span_filter_plans",
     "partition_trace_filter_plans",
-    "simulation_hide_plan",
-    "simulation_unmarked_row_sql",
     "simulator_call_root_predicate",
     "supports_span_filters",
     "supports_trace_filters",
     "targets_span_filter_domain",
     "targets_trace_filter_domain",
-    "with_simulation_hidden",
 ]

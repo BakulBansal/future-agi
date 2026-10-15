@@ -10,7 +10,6 @@ from ai_tools.tests.fixtures import make_agent_definition, make_scenario
 from simulate.models import AgentDefinition, AgentVersion
 from simulate.models.agent_definition import ProviderCredentials
 from tracer.services import observability_switch
-from tracer.services.simulation_visibility import HOLDING_FLAG, record_holding
 from tracer.tests.test_observability_switch import (
     _agent,
     _agent_with_row,
@@ -516,29 +515,6 @@ def test_tool_refusal_returns_the_detail_and_writes_nothing(
         "Assistant ID is required when observability is enabled"
     )
     assert _state(name, observed_agent, params) == before
-
-
-@pytest.mark.parametrize("tool", ["update_agent_definition", "create_agent_version"])
-def test_tool_keeps_flag_written_before_the_switch_saves(tool_context, tool):
-    agent = _agent_with_row(
-        tool_context.organization,
-        tool_context.workspace,
-        enabled=False,
-        metadata={"assistant_id": "a1"},
-    )
-    row = agent.observability_provider
-    summary = make_summary(agent_definition_id=agent.id)
-
-    def flag_lands_during_the_check(agent_definition_id):
-        record_holding(str(row.project_id))
-        return summary
-
-    name, params = _tool_call(tool, agent)
-    with seams(flag_lands_during_the_check):
-        result = run_tool(name, params, tool_context)
-
-    assert not result.is_error
-    assert _stored(row) == ({"assistant_id": "a1", HOLDING_FLAG: True}, True)
 
 
 def test_create_version_tool_double_submit_gives_one_project_and_one_row(

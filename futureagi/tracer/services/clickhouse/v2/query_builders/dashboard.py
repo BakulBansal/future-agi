@@ -43,10 +43,6 @@ from tracer.services.clickhouse.v2.query_builders.filters import (
     _append_v2_settings,
     rewrite_v1_sql_to_v2,
 )
-from tracer.services.simulation_visibility import (
-    SIMULATION_MARK_KEY,
-    row_exclusion_sql,
-)
 
 # Tables whose columns must NOT be rewritten (they keep `_peerdb_is_deleted`).
 _LEGACY_TABLE_RE = re.compile(
@@ -575,10 +571,6 @@ class DashboardQueryBuilderV2(V2RewriteMixin, DashboardQueryBuilder):
         metric_presence = getattr(self, "_exact_metric_presence", None)
         if metric_presence is not None:
             keys.append(metric_presence[1])
-        if self.hide_simulated:
-            # The outer statement tests the span mark through this Map, so a
-            # narrowing that dropped it would read every marked span as clean.
-            keys.append(SIMULATION_MARK_KEY)
         try:
             # This optimized source inlines keys into a Map expression below.
             # Arbitrary UTF-8 keys remain supported by the untouched FINAL
@@ -639,13 +631,8 @@ class DashboardQueryBuilderV2(V2RewriteMixin, DashboardQueryBuilder):
         for column in CH_INSERT_COLUMNS:
             if column in _EXACT_REPLAY_IDENTITY_COLUMNS:
                 continue
-            # The resource mark is read from the winner's resource column, so a
-            # holding project's source carries it although others leave it out.
-            packs_resource_mark = self.hide_simulated and column == "resource_attrs"
-            if (
-                column in _EXACT_REPLAY_UNPACKED_COLUMNS
-                and not (overflow and column == _EXACT_REPLAY_OVERFLOW_COLUMN)
-                and not packs_resource_mark
+            if column in _EXACT_REPLAY_UNPACKED_COLUMNS and not (
+                overflow and column == _EXACT_REPLAY_OVERFLOW_COLUMN
             ):
                 continue
             packed.append(
@@ -837,24 +824,6 @@ class DashboardQueryBuilderV2(V2RewriteMixin, DashboardQueryBuilder):
             if exact_filters
             else ""
         )
-        # The mark is tested on the final winner, like the filters: an earlier
-        # version of a span never decides whether the span is hidden.
-        mark_state = mark_live_predicate = ""
-        if self.hide_simulated:
-            mark_index = (7 if breakdown_map is not None else 5) + (
-                1 if exact_filters else 0
-            )
-            mark_predicate = self._qualify_span_expression(
-                row_exclusion_sql(map_column="span_attr_str"), "custom_metric_source"
-            )
-            mark_state = f", ({mark_predicate})"
-            # Rides on the filter line with its own break, so a project that does
-            # not hold keeps today's statement byte for byte.
-            mark_live_predicate = (
-                "\n"
-                + " " * 18
-                + f"AND tupleElement(latest_metric_state, {mark_index}) = 1"
-            )
         aggregate = AGGREGATIONS.get(aggregation, "avg({col})").format(
             col="metric_value"
         )
@@ -893,7 +862,7 @@ class DashboardQueryBuilderV2(V2RewriteMixin, DashboardQueryBuilder):
                             ),
                             custom_metric_source.attrs_number[
                                 %(custom_metric_attr_key)s
-                            ]{breakdown_state}{filter_state}{mark_state}
+                            ]{breakdown_state}{filter_state}
                         ) AS metric_winner
                 FROM spans AS custom_metric_source FINAL
                 PREWHERE custom_metric_source.project_id IN %(project_ids)s
@@ -920,7 +889,7 @@ class DashboardQueryBuilderV2(V2RewriteMixin, DashboardQueryBuilder):
                 WHERE tupleElement(latest_metric_state, 1) = 0
                   AND tupleElement(latest_metric_state, 3) = 1
                   {breakdown_live_predicate}
-                  {filter_live_predicate}{mark_live_predicate}
+                  {filter_live_predicate}
                   AND tupleElement(latest_metric_state, 2) >= %(start_date)s
                   AND tupleElement(latest_metric_state, 2) < %(end_date)s
             )

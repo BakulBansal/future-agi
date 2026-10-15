@@ -33,7 +33,6 @@ from tracer.services.clickhouse.client import (
     is_clickhouse_enabled,
 )
 from tracer.services.clickhouse.query_service import AnalyticsQueryService
-from tracer.services.simulation_visibility import SIMULATION_MARK_KEY
 
 logger = structlog.get_logger(__name__)
 
@@ -91,17 +90,13 @@ def _ch_available() -> bool:
     return client is not None and client.is_configured
 
 
-def list_attribute_keys_for_project(
-    project_id: str, *, hide_simulated: bool = False
-) -> list[AttributeKey]:
+def list_attribute_keys_for_project(project_id: str) -> list[AttributeKey]:
     """Return every distinct span attribute key seen for the project.
 
     Walks the three shredded Map columns on the ``spans`` table
     (``attrs_string`` / ``attrs_number`` / ``attrs_bool``) and reports
     each key with its inferred type and total occurrence count, sorted by
     occurrences descending.
-
-    ``hide_simulated`` leaves the spans of marked traces out of the inventory.
 
     Returns an empty list (with a log) if ClickHouse is unavailable.
     """
@@ -119,7 +114,6 @@ def list_attribute_keys_for_project(
         [project_id],
         include_counts=True,
         order_by_count_desc=True,
-        hide_simulated=hide_simulated,
     )
 
     logger.info(
@@ -497,18 +491,18 @@ def trace_ids_with_simulator_call_execution_id(
     # value got bucketed into a different map or where the key didn't
     # land in the str map. The OR keeps us safe regardless of which map
     # the key was assigned to (string vs numeric vs bool).
-    query = f"""
+    query = """
         SELECT DISTINCT toString(trace_id)
         FROM spans
         WHERE trace_id IN %(trace_ids)s
           AND (
-                mapContains(attrs_string,  '{SIMULATION_MARK_KEY}')
-             OR mapContains(attrs_number,  '{SIMULATION_MARK_KEY}')
-             OR mapContains(attrs_bool, '{SIMULATION_MARK_KEY}')
-             OR JSONHas(span_attributes_raw, '{SIMULATION_MARK_KEY}')
+                mapContains(attrs_string,  'fi.simulator.call_execution_id')
+             OR mapContains(attrs_number,  'fi.simulator.call_execution_id')
+             OR mapContains(attrs_bool, 'fi.simulator.call_execution_id')
+             OR JSONHas(span_attributes_raw, 'fi.simulator.call_execution_id')
           )
           AND JSONExtractRaw(span_attributes_raw,
-                             '{SIMULATION_MARK_KEY}') NOT IN ('null', '')
+                             'fi.simulator.call_execution_id') NOT IN ('null', '')
     """
     try:
         client = get_clickhouse_client()
@@ -552,16 +546,16 @@ def spans_by_eval_attribute_call_execution_ids(
 
     # JSONExtractString for an exact value match — equivalent to PG's
     # ``eval_attributes @> '{"k": "v"}'`` when the value is a scalar string.
-    query = f"""
+    query = """
         SELECT
             toString(id)        AS span_id,
             toString(trace_id)  AS trace_id,
             JSONExtractString(eval_attributes,
-                              '{SIMULATION_MARK_KEY}') AS call_exec_id,
+                              'fi.simulator.call_execution_id') AS call_exec_id,
             eval_attributes     AS eval_attributes
         FROM spans
         WHERE JSONExtractString(eval_attributes,
-                                '{SIMULATION_MARK_KEY}') IN %(ids)s
+                                'fi.simulator.call_execution_id') IN %(ids)s
     """
     out: dict[str, list[dict]] = {}
     try:

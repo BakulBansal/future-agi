@@ -117,8 +117,6 @@ def get_eval_graph_data(
     refresh: bool = False,
     organization_id: str | None = None,
     workspace_id: str | None = None,
-    *,
-    hide_simulated: bool = False,
 ) -> Any:
     """Read an eval graph from the authoritative direct-write CH25 tables."""
     del property
@@ -169,8 +167,6 @@ def get_eval_graph_data(
             tenant_scope["organization_id"] = organization_id
         if workspace_id is not None:
             tenant_scope["workspace_id"] = workspace_id
-        # Passed only when set, so every other project's call is the call it was.
-        hiding = {"hide_simulated": True} if hide_simulated else {}
         return fetch_eval_chart_series_ch(
             analytics=V2AnalyticsQueryService(),
             project_id=str(ch_project_id),
@@ -184,7 +180,6 @@ def get_eval_graph_data(
             eval_name=custom_eval_config.name,
             refresh=refresh,
             **tenant_scope,
-            **hiding,
         )
     except Exception as exc:
         logger.exception(
@@ -443,7 +438,6 @@ def _read_direct_system_metrics(
     refresh: bool = False,
     organization_id: str | None = None,
     workspace_id: str | None = None,
-    hide_simulated: bool = False,
 ) -> dict[str, list[dict[str, Any]]]:
     """Execute the direct-write system-metric builder on the CH25 service."""
     try:
@@ -459,8 +453,6 @@ def _read_direct_system_metrics(
             tenant_scope["organization_id"] = organization_id
         if workspace_id is not None:
             tenant_scope["workspace_id"] = workspace_id
-        # Passed only when set, so every other project's call is the call it was.
-        hiding = {"hide_simulated": True} if hide_simulated else {}
         return fetch_all_system_metrics_ch(
             analytics=V2AnalyticsQueryService(),
             project_id=project_id,
@@ -468,7 +460,6 @@ def _read_direct_system_metrics(
             interval=interval,
             refresh=refresh,
             **tenant_scope,
-            **hiding,
         )
     except Exception as exc:
         logger.exception(
@@ -490,8 +481,6 @@ def get_all_system_metrics(
     refresh: bool = False,
     organization_id: str | None = None,
     workspace_id: str | None = None,
-    *,
-    hide_simulated: bool = False,
 ) -> dict:
     """Read latency, token, cost, and traffic series in one CH25 query."""
     del property
@@ -507,7 +496,6 @@ def get_all_system_metrics(
         refresh=refresh,
         organization_id=organization_id,
         workspace_id=workspace_id,
-        hide_simulated=hide_simulated,
     )
     # Preserve the historical public response exactly; the shared builder also
     # exposes additional aliases used by newer dashboard endpoints.
@@ -715,8 +703,6 @@ def get_system_metric_data(
     refresh: bool = False,
     organization_id: str | None = None,
     workspace_id: str | None = None,
-    *,
-    hide_simulated: bool = False,
 ) -> dict:
     """Read one public system-metric series from direct-write CH25."""
     del property
@@ -739,7 +725,6 @@ def get_system_metric_data(
         refresh=refresh,
         organization_id=organization_id,
         workspace_id=workspace_id,
-        hide_simulated=hide_simulated,
     )
     metric_key = metric_name if metric_name in metrics else "latency"
     traffic_by_timestamp = {

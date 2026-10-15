@@ -65,9 +65,6 @@ from tracer.services.clickhouse.read_budget import ReadDeadline
 from tracer.services.clickhouse.v2.query_builders.filters import (
     ClickHouseFilterBuilderV2,
 )
-from tracer.services.simulation_visibility import (
-    hide_simulated as project_hides_simulated,
-)
 from tracer.utils.filters import (
     apply_created_at_filters,
     normalize_filter_item,
@@ -491,7 +488,6 @@ def _resolve_voice_call_ids_clickhouse(
     cursor: ListCursor | None = None,
     resumable: bool = False,
     deadline: ReadDeadline | None = None,
-    hide_simulated: bool = False,
 ) -> ResolveResult:
     """Resolve voice-call trace IDs via ClickHouse, mirroring ``list_voice_calls``.
 
@@ -517,7 +513,6 @@ def _resolve_voice_call_ids_clickhouse(
             filters=filters or [],
             annotation_label_ids=annotation_label_ids,
             remove_simulation_calls=remove_simulation_calls,
-            hide_simulated=hide_simulated,
         )
     )
     if not builder.supports_bounded_filter_scan():
@@ -618,7 +613,6 @@ def _resolve_trace_ids_clickhouse(
     cursor: ListCursor | None = None,
     resumable: bool = False,
     deadline: ReadDeadline | None = None,
-    hide_simulated: bool = False,
 ) -> ResolveResult:
     """Resolve regular trace IDs via ClickHouse, mirroring ``list_traces_of_session``.
 
@@ -662,7 +656,6 @@ def _resolve_trace_ids_clickhouse(
             bounded_internal_scan=_needs_bounded_internal_scan(filters),
             bounded_identity_only=True,
             bounded_bulk_scan=True,
-            hide_simulated=hide_simulated,
         )
     )
     if not builder.supports_bounded_filter_scan():
@@ -801,12 +794,7 @@ def resolve_filtered_trace_ids(
     if not _project_matches_workspace(project, workspace):
         return ResolveResult(ids=[], total_matching=0, truncated=False)
 
-    # One read for the request, shared by the label list and by the voice and
-    # trace resolvers.
-    hide_simulated = project_hides_simulated(str(project.id))
-    annotation_labels = get_annotation_labels_for_project(
-        project.id, organization, hide_simulated=hide_simulated
-    )
+    annotation_labels = get_annotation_labels_for_project(project.id, organization)
     annotation_label_ids = [str(lbl.id) for lbl in annotation_labels]
     if deadline is not None:
         deadline.remaining_ms(floor_ms=1)
@@ -836,7 +824,6 @@ def resolve_filtered_trace_ids(
             annotation_label_ids=annotation_label_ids,
             cursor=cursor,
             resumable=resumable,
-            hide_simulated=hide_simulated,
             **_optional_deadline_kwargs(deadline),
         )
     return _resolve_trace_ids_clickhouse(
@@ -847,7 +834,6 @@ def resolve_filtered_trace_ids(
         annotation_label_ids=annotation_label_ids,
         cursor=cursor,
         resumable=resumable,
-        hide_simulated=hide_simulated,
         **_optional_deadline_kwargs(deadline),
     )
 
@@ -893,7 +879,6 @@ def _resolve_span_ids_clickhouse(
     cursor: ListCursor | None = None,
     resumable: bool = False,
     deadline: ReadDeadline | None = None,
-    hide_simulated: bool = False,
 ) -> ResolveResult:
     """Resolve span IDs from ClickHouse, mirroring ``list_spans_observe``.
 
@@ -928,7 +913,6 @@ def _resolve_span_ids_clickhouse(
             annotation_label_ids=annotation_label_ids,
             bounded_internal_scan=_needs_bounded_internal_scan(ch_filters),
             bounded_identity_only=True,
-            hide_simulated=hide_simulated,
         )
     )
     if not builder.supports_bounded_filter_scan():
@@ -1059,10 +1043,7 @@ def resolve_filtered_span_ids(
     if not _project_matches_workspace(project, workspace):
         return ResolveResult(ids=[], total_matching=0, truncated=False)
 
-    hide_simulated = project_hides_simulated(str(project.id))
-    annotation_labels = get_annotation_labels_for_project(
-        project.id, organization, hide_simulated=hide_simulated
-    )
+    annotation_labels = get_annotation_labels_for_project(project.id, organization)
     annotation_label_ids = [str(lbl.id) for lbl in annotation_labels]
     if deadline is not None:
         deadline.remaining_ms(floor_ms=1)
@@ -1075,7 +1056,6 @@ def resolve_filtered_span_ids(
         annotation_label_ids=annotation_label_ids,
         cursor=cursor,
         resumable=resumable,
-        hide_simulated=hide_simulated,
         **_optional_deadline_kwargs(deadline),
     )
 

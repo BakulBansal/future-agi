@@ -1,10 +1,4 @@
-"""The observability switch, and the provider endpoint's hold on a project's flag.
-
-The switch is the one place an agent's observability is turned on or off. The
-holding flag is written by another process whenever a simulated run first exports
-to the project, and nothing a request sends, and no save the switch makes, may
-clear it.
-"""
+"""The observability switch: the one place an agent's observability is turned on or off."""
 
 from __future__ import annotations
 
@@ -30,19 +24,16 @@ from simulate.services import agent_setup
 from simulate.tests.test_agent_setup_service import source_agent
 from tfc.middleware.workspace_context import set_workspace_context
 from tfc.utils.api_errors import build_error_envelope
-from tfc.utils.general_methods import GeneralMethods
 from tracer.models.observability_provider import (
     ObservabilityProvider,
     ProviderChoices,
 )
 from tracer.models.project import Project, ProjectSourceChoices
-from tracer.services.simulation_visibility import HOLDING_FLAG, record_holding
-from tracer.views.observability_provider import ObservabilityProviderViewSet
 
 PROVIDERS_PATH = "/tracer/observability-provider/"
 
 
-def _row(organization, workspace, metadata, *, holding=False):
+def _row(organization, workspace, metadata):
     project = Project.no_workspace_objects.create(
         name=f"switch-{uuid.uuid4().hex[:10]}",
         organization=organization,
@@ -58,8 +49,6 @@ def _row(organization, workspace, metadata, *, holding=False):
         workspace=workspace,
         metadata=metadata,
     )
-    if holding:
-        record_holding(str(project.id))
     return row
 
 
@@ -72,11 +61,6 @@ def _stored(row):
 
 def _patch(client, row, payload):
     return client.patch(f"{PROVIDERS_PATH}{row.id}/", payload, format="json")
-
-
-def _result(response):
-    body = response.json()
-    return body.get("result", body)
 
 
 def _statements():
@@ -99,114 +83,6 @@ def _depth_at(statements, index):
         elif sql.startswith(("RELEASE SAVEPOINT", "ROLLBACK TO SAVEPOINT")):
             depth -= 1
     return depth
-
-
-def test_patch_metadata_keeps_holding(auth_client, organization, workspace):
-    row = _row(organization, workspace, {"assistant_id": "a1"}, holding=True)
-    assert _stored(row) == ({"assistant_id": "a1", HOLDING_FLAG: True}, True)
-
-    # An empty object replaces the rest of metadata but not the flag.
-    response = _patch(auth_client, row, {"metadata": {}})
-    assert response.status_code == 200
-    assert _result(response)["metadata"] == {HOLDING_FLAG: True}
-    assert _stored(row) == ({HOLDING_FLAG: True}, True)
-
-    # Another key lands beside the flag.
-    response = _patch(auth_client, row, {"metadata": {"assistant_id": "a2"}})
-    assert response.status_code == 200
-    assert _result(response)["metadata"] == {"assistant_id": "a2", HOLDING_FLAG: True}
-    assert _stored(row) == ({"assistant_id": "a2", HOLDING_FLAG: True}, True)
-
-    # A request that names the flag cannot turn it off.
-    response = _patch(
-        auth_client, row, {"metadata": {HOLDING_FLAG: False, "assistant_id": "a3"}}
-    )
-    assert response.status_code == 200
-    assert _stored(row) == ({"assistant_id": "a3", HOLDING_FLAG: True}, True)
-
-    # A request with no metadata leaves the stored one, flag included.
-    response = _patch(auth_client, row, {"enabled": False})
-    assert response.status_code == 200
-    assert _stored(row) == ({"assistant_id": "a3", HOLDING_FLAG: True}, False)
-
-    # Metadata that is not an object is refused and nothing in the body is
-    # written, `enabled` included.
-    refused = GeneralMethods().bad_request({"metadata": ["metadata must be an object"]})
-    before = _stored(row)
-    for not_an_object in ("x", None, ["a"], 7):
-        response = _patch(
-            auth_client, row, {"metadata": not_an_object, "enabled": True}
-        )
-        assert response.status_code == 400
-        assert response.json() == refused.data
-        assert _stored(row) == before
-
-    # A row that does not hold stores whatever it is sent, as it always did.
-    plain = _row(organization, workspace, {"assistant_id": "p"})
-    response = _patch(auth_client, plain, {"metadata": "x"})
-    assert response.status_code == 200
-    assert _stored(plain) == ("x", True)
-    response = _patch(auth_client, plain, {"metadata": {"k": 1}})
-    assert response.status_code == 200
-    assert _stored(plain) == ({"k": 1}, True)
-
-
-def test_patch_keeps_flag_written_after_get_object(
-    auth_client, organization, workspace, monkeypatch
-):
-    original = ObservabilityProviderViewSet.get_object
-
-    def get_object_then_flag_the_project(self):
-        found = original(self)
-        # The flag lands after the view read the row and before it saves.
-        record_holding(str(found.project_id))
-        return found
-
-    monkeypatch.setattr(
-        ObservabilityProviderViewSet, "get_object", get_object_then_flag_the_project
-    )
-
-    for payload, expected in (
-        # A save of the row as it was read would put its metadata back.
-        ({"enabled": False}, {"assistant_id": "a1", HOLDING_FLAG: True}),
-        # The row did not hold when it was read, so the request's metadata would
-        # be taken as it is.
-        (
-            {"metadata": {"assistant_id": "a2"}},
-            {"assistant_id": "a2", HOLDING_FLAG: True},
-        ),
-    ):
-        row = _row(organization, workspace, {"assistant_id": "a1"})
-        seen, wrapper = _statements()
-        with wrapper:
-            response = _patch(auth_client, row, payload)
-
-        assert response.status_code == 200
-        assert _result(response)["metadata"] == expected
-        assert _stored(row)[0] == expected
-
-        # The flag writer ran first, and the view then read the row again with
-        # a lock that a later flag write has to wait for.
-        flag_written = [i for i, sql in enumerate(seen) if "jsonb_typeof" in sql]
-        locked_reads = [
-            i
-            for i, sql in enumerate(seen)
-            if " FOR UPDATE" in sql and "tracer_observability_provider" in sql
-        ]
-        saved = [
-            i
-            for i, sql in enumerate(seen)
-            if sql.startswith('UPDATE "tracer_observability_provider"')
-        ]
-        assert flag_written
-        assert locked_reads
-        assert saved
-        assert flag_written[0] < locked_reads[0] < saved[-1]
-        # The lock is taken and the save made inside one transaction opened after
-        # the flag was written; a row lock lasts only as long as the transaction
-        # that took it.
-        assert _depth_at(seen, locked_reads[0]) == _depth_at(seen, flag_written[0]) + 1
-        assert _depth_at(seen, saved[-1]) == _depth_at(seen, locked_reads[0])
 
 
 # ---------------------------------------------------------------------------
@@ -830,21 +706,28 @@ def test_project_error_when_no_row_comes_back(organization, workspace, user):
     assert _stored_agent(agent).observability_provider_id is None
 
 
+def _write_meanwhile(row_id):
+    # Another request's write to a column the switch does not own.
+    ObservabilityProvider.no_workspace_objects.filter(pk=row_id).update(
+        metadata={"assistant_id": "a1", "written": "meanwhile"}
+    )
+
+
 def test_switch_saves_only_enabled(organization, workspace, user):
     agent = _agent_with_row(
         organization, workspace, enabled=False, metadata={"assistant_id": "a1"}
     )
     summary = make_summary(agent_definition_id=agent.id)
 
-    def flag_lands_during_the_check(agent_definition_id):
+    def write_lands_during_the_check(agent_definition_id):
         # After the switch loaded the row and before it saves it.
-        record_holding(str(agent.observability_provider.project_id))
+        _write_meanwhile(agent.observability_provider_id)
         return summary
 
-    with seams(flag_lands_during_the_check):
+    with seams(write_lands_during_the_check):
         row = _turn(agent, True, user, organization, workspace)
 
-    assert _stored(row) == ({"assistant_id": "a1", HOLDING_FLAG: True}, True)
+    assert _stored(row) == ({"assistant_id": "a1", "written": "meanwhile"}, True)
 
 
 def test_switch_saves_only_enabled_when_turning_off(organization, workspace, user):
@@ -854,14 +737,14 @@ def test_switch_saves_only_enabled_when_turning_off(organization, workspace, use
     row = agent.observability_provider
     real_save = ObservabilityProvider.save
 
-    def flag_then_save(self, *args, **kwargs):
-        record_holding(str(self.project_id))
+    def write_then_save(self, *args, **kwargs):
+        _write_meanwhile(self.pk)
         return real_save(self, *args, **kwargs)
 
-    with patch.object(ObservabilityProvider, "save", flag_then_save):
+    with patch.object(ObservabilityProvider, "save", write_then_save):
         _turn(agent, False, user, organization, workspace)
 
-    assert _stored(row) == ({"assistant_id": "a1", HOLDING_FLAG: True}, False)
+    assert _stored(row) == ({"assistant_id": "a1", "written": "meanwhile"}, False)
 
 
 def test_agent_with_nothing_stored_keeps_todays_rule(
@@ -961,37 +844,6 @@ def test_patch_checks_only_a_turn_on_of_a_row_with_a_live_agent(
         assert _patch(auth_client, row, {"metadata": {"k": 2}}).status_code == 200
     read_summary.assert_not_called()
     assert _stored(row)[1] is False
-
-
-def test_delete_keeps_flag_written_after_get_object(
-    auth_client, organization, workspace, monkeypatch
-):
-    original = ObservabilityProviderViewSet.get_object
-
-    def get_object_then_flag_the_project(self):
-        found = original(self)
-        # The flag lands after the view read the row and before it saves.
-        record_holding(str(found.project_id))
-        return found
-
-    monkeypatch.setattr(
-        ObservabilityProviderViewSet, "get_object", get_object_then_flag_the_project
-    )
-    row = _row(organization, workspace, {"assistant_id": "a1"})
-    seen, wrapper = _statements()
-    with wrapper:
-        response = auth_client.delete(f"{PROVIDERS_PATH}{row.id}/")
-
-    assert response.status_code == 200
-    assert _result(response) == "Observability provider deleted successfully."
-    stored = ObservabilityProvider._base_manager.get(pk=row.pk)
-    assert stored.deleted is True
-    assert stored.deleted_at is not None
-    assert stored.metadata == {"assistant_id": "a1", HOLDING_FLAG: True}
-    # The soft delete wrote its own columns and no others.
-    updates = [sql for sql in seen if sql.startswith('UPDATE "tracer_observability_')]
-    assert updates
-    assert all('"metadata"' not in sql and '"enabled"' not in sql for sql in updates)
 
 
 @pytest.mark.parametrize("word", ["", "grpc", "TRACEAI"])

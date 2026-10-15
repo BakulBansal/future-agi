@@ -45,7 +45,6 @@ from tracer.services.clickhouse.v2.query_settings import (
     application_read_settings,
     current_settings,
 )
-from tracer.services.simulation_visibility import hide_simulated, row_exclusion_sql
 
 
 # Field list that the eval runner actually reads off of an ObservationSpan.
@@ -1330,8 +1329,6 @@ class CHSpanReader:
         if exclude_trace_ids:
             where.append("trace_id NOT IN %(exclude_trace_ids)s")
             params["exclude_trace_ids"] = tuple(exclude_trace_ids)
-        if hide_simulated(str(project_id)):
-            where.append(row_exclusion_sql(map_column="attrs_string"))
         rows = self._client.query(
             "SELECT id FROM spans FINAL "
             f"WHERE {' AND '.join(where)} "
@@ -1357,8 +1354,6 @@ class CHSpanReader:
         if exclude_ids:
             where.append("id NOT IN %(exclude_ids)s")
             params["exclude_ids"] = tuple(exclude_ids)
-        if hide_simulated(str(project_id)):
-            where.append(row_exclusion_sql(map_column="attrs_string"))
         rows = self._client.query(
             "SELECT id FROM spans FINAL "
             f"WHERE {' AND '.join(where)} "
@@ -1386,8 +1381,6 @@ class CHSpanReader:
         if exclude_trace_ids:
             where.append("trace_id NOT IN %(exclude)s")
             params["exclude"] = tuple(exclude_trace_ids)
-        if hide_simulated(str(project_id)):
-            where.append(row_exclusion_sql(map_column="attrs_string"))
         rows = self._client.query(
             "SELECT toString(trace_id) AS tid, max(start_time) AS st "
             "FROM spans FINAL "
@@ -2159,10 +2152,6 @@ class CHSpanReader:
             where.append("start_time >= %(str_s)s")
             where.append("start_time < %(str_e)s")
             params["str_s"], params["str_e"] = start_time_range
-        # A read that names its traces counts those traces whatever they are;
-        # only a count over the project's population leaves marked ones out.
-        if project_id and trace_ids is None and hide_simulated(str(project_id)):
-            where.append(row_exclusion_sql(map_column="attrs_string"))
         # roots_only counts distinct traces, not root rows — a trace with more
         # than one parentless span must count once (mirrors the GROUP BY tid /
         # first-root-per-trace dedupe elsewhere in this reader).
@@ -2368,8 +2357,6 @@ class CHSpanReader:
         if status_filter:
             where.append("status = %(stat)s")
             params["stat"] = status_filter
-        if hide_simulated(str(project_id)):
-            where.append(row_exclusion_sql(map_column="attrs_string"))
         rows = self._client.query(
             "SELECT name, count() AS usage_count, "
             "countIf(lower(status) = 'error') AS error_count, "

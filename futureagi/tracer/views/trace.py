@@ -1,5 +1,4 @@
 import concurrent.futures
-import hashlib
 import json
 import math
 import re
@@ -11,7 +10,6 @@ from uuid import UUID
 import structlog
 from django.conf import settings
 from django.contrib.postgres.aggregates import ArrayAgg
-from django.core.cache import cache as django_cache
 from django.db import models
 from django.db.models import (
     Avg,
@@ -172,14 +170,6 @@ from tracer.services.filter_principal_context import (
     bind_request_my_annotations_principal,
 )
 from tracer.services.observability_providers import ObservabilityService
-from tracer.services.simulation_visibility import (
-    SIMULATION_MARK_KEY,
-    MarkedLookupFailed,
-    holding_projects,
-)
-from tracer.services.simulation_visibility import (
-    hide_simulated as project_hides_simulated,
-)
 from tracer.services.users_list_manager import USER_EXPORT_PAGE_SIZE, UsersListManager
 from tracer.utils.annotations import (
     build_annotation_subqueries as _build_annotation_subqueries_impl,
@@ -582,7 +572,7 @@ def _decode_projected_trace_attribute_value(raw_value: Any) -> Any:
 
 
 _SIMULATOR_CALL_EXECUTION_KEYS = (
-    SIMULATION_MARK_KEY,
+    "fi.simulator.call_execution_id",
     "fi.simulator.callExecutionId",
     "call_execution_id",
     "callExecutionId",
@@ -2627,35 +2617,15 @@ class TraceView(BaseModelViewSetMixin, ModelViewSet):
                     project_id=project_id, deleted=False
                 ).values_list("id", flat=True)
             ]
-            eval_config_ids = []
-            if project_config_ids:
-                # One read for the request. A config whose only eval rows
-                # belong to marked traces would be offered with an empty
-                # chart behind it.
-                hide_simulated = project_hides_simulated(str(project_id))
-                names_key = (
-                    "eval_names_with_data:"
-                    + str(project_id)
-                    + ":"
-                    + hashlib.sha256(
-                        ",".join(sorted(project_config_ids)).encode()
-                    ).hexdigest()
-                    + ":hide_simulated"
+            eval_config_ids = (
+                analytics.get_eval_config_ids_with_data_ch(
+                    str(project_id),
+                    candidate_config_ids=project_config_ids,
+                    window_days=None,
                 )
-                # The hiding read scans the project's marked spans, and three
-                # pickers open it together, so only that answer is kept.
-                cached_ids = django_cache.get(names_key) if hide_simulated else None
-                if cached_ids is not None:
-                    eval_config_ids = list(cached_ids)
-                else:
-                    eval_config_ids = analytics.get_eval_config_ids_with_data_ch(
-                        str(project_id),
-                        candidate_config_ids=project_config_ids,
-                        window_days=None,
-                        hide_simulated=hide_simulated,
-                    )
-                    if hide_simulated:
-                        django_cache.set(names_key, list(eval_config_ids), timeout=120)
+                if project_config_ids
+                else []
+            )
 
             # Config lookup always from PG (small config table)
             configs = (
@@ -2755,11 +2725,7 @@ class TraceView(BaseModelViewSetMixin, ModelViewSet):
         except UnsupportedFilterShapeError:
             return self._gm.bad_request("Trace filter configuration is invalid")
         except Exception as exc:
-            if (
-                is_read_budget_error(exc)
-                or is_clickhouse_query_error(exc)
-                or isinstance(exc, MarkedLookupFailed)
-            ):
+            if is_read_budget_error(exc) or is_clickhouse_query_error(exc):
                 logger.warning(
                     "trace_list_query_unavailable",
                     project_version_id=str(
@@ -2811,11 +2777,6 @@ class TraceView(BaseModelViewSetMixin, ModelViewSet):
                     _project_queryset_for_request(self.request)
                     .filter(id=project_id)
                     .first()
-                )
-                # One read per request, shared by whichever chart read runs
-                # below. A project that does not exist costs no read.
-                hide_simulated = project is not None and project_hides_simulated(
-                    project_id
                 )
 
             if not project_id or not project or project.trace_type != "observe":
@@ -2907,7 +2868,6 @@ class TraceView(BaseModelViewSetMixin, ModelViewSet):
                         ),
                         workspace_id=str(workspace_id) if workspace_id else None,
                         timeout_ms=graph_action_remaining_ms(deadline),
-                        hide_simulated=hide_simulated,
                     )
                 elif metric_type == "EVAL":
                     graph = fetch_eval_graph_ch(
@@ -2925,7 +2885,6 @@ class TraceView(BaseModelViewSetMixin, ModelViewSet):
                         ),
                         workspace_id=str(workspace_id) if workspace_id else None,
                         timeout_ms=graph_action_remaining_ms(deadline),
-                        hide_simulated=hide_simulated,
                     )
                 else:
                     graph = fetch_annotation_graph_ch(
@@ -2943,7 +2902,6 @@ class TraceView(BaseModelViewSetMixin, ModelViewSet):
                         ),
                         workspace_id=str(workspace_id) if workspace_id else None,
                         timeout_ms=graph_action_remaining_ms(deadline),
-                        hide_simulated=hide_simulated,
                     )
                 graph.update(
                     graph_query_evidence(
@@ -3736,9 +3694,7 @@ class TraceView(BaseModelViewSetMixin, ModelViewSet):
         except FilterPrincipalContextError as exc:
             return self._gm.bad_request(str(exc))
         except Exception as exc:
-            if is_clickhouse_api_read_unavailable_error(exc) or isinstance(
-                exc, MarkedLookupFailed
-            ):
+            if is_clickhouse_api_read_unavailable_error(exc):
                 logger.warning(
                     "observe_trace_list_query_unavailable",
                     project_id=str(
@@ -3866,11 +3822,7 @@ class TraceView(BaseModelViewSetMixin, ModelViewSet):
         except FilterPrincipalContextError as exc:
             return self._gm.bad_request(str(exc))
         except Exception as exc:
-            if (
-                is_read_budget_error(exc)
-                or is_clickhouse_query_error(exc)
-                or isinstance(exc, MarkedLookupFailed)
-            ):
+            if is_read_budget_error(exc) or is_clickhouse_query_error(exc):
                 logger.warning(
                     "voice_call_list_query_unavailable",
                     project_id=str(project_id),
@@ -4333,7 +4285,6 @@ class TraceView(BaseModelViewSetMixin, ModelViewSet):
             # Omitting physical filter witnesses raises the exact classifier's
             # safe batch from 20 to 100 without changing filter membership.
             bounded_include_filter_witnesses=False,
-            hide_simulated=project_hides_simulated(str(project_id)),
         )
         error_code = builder.bounded_filter_degraded_error_code()
         if error_code or not builder.supports_bounded_filter_scan():
@@ -4677,16 +4628,6 @@ class TraceView(BaseModelViewSetMixin, ModelViewSet):
             )
             eval_config_ids = [str(c.id) for c in eval_configs]
 
-        # One read for the request: when any project of an organization-wide
-        # read holds, the whole read leaves marked traces out. An organization
-        # with no observe project reaches here with an empty scope and no
-        # project id; that is an empty read, not a lookup of a missing id.
-        hide_simulated = (
-            bool(holding_projects(scope_project_ids))
-            if org_scope or not project_id
-            else project_hides_simulated(str(project_id))
-        )
-
         annotation_label_ids_by_project = None
         labels_by_project = {}
         if org_scope:
@@ -4697,7 +4638,6 @@ class TraceView(BaseModelViewSetMixin, ModelViewSet):
                 labels_by_project = get_annotation_labels_by_project(
                     [str(project_id) for project_id in org_project_ids],
                     organization=org,
-                    hide_simulated=hide_simulated,
                 )
                 annotation_label_ids_by_project = {
                     project_key: [str(label.id) for label in labels]
@@ -4708,9 +4648,7 @@ class TraceView(BaseModelViewSetMixin, ModelViewSet):
             # authoritative metadata used by residual has_annotation filters.
             annotation_labels = []
         else:
-            annotation_labels = get_annotation_labels_for_project(
-                project_id, hide_simulated=hide_simulated
-            )
+            annotation_labels = get_annotation_labels_for_project(project_id)
         annotation_label_ids = list(
             dict.fromkeys(
                 str(label.id)
@@ -4752,7 +4690,6 @@ class TraceView(BaseModelViewSetMixin, ModelViewSet):
             eval_config_ids=eval_config_ids,
             annotation_label_ids=annotation_label_ids,
             annotation_label_ids_by_project=annotation_label_ids_by_project,
-            hide_simulated=hide_simulated,
         )
         pin_filter_seed_witness_slack(builder, cursor_state)
         requires_cursor = builder.requires_cursor_for_long_filtered_read()
@@ -5809,14 +5746,9 @@ class TraceView(BaseModelViewSetMixin, ModelViewSet):
             remove_simulation_calls
         ).lower() not in ("false", "0", "")
 
-        # One read for the request, shared by the depth preflight and the page
-        # builder below.
-        hide_simulated = project_hides_simulated(str(project_id))
-
-        # Reject unsupported numbered-page depths before the eval and annotation
-        # lookups and any ClickHouse work.  The builder's scan recommendations
-        # depend only on the request shape; eval and annotation projections do
-        # not affect this bound.
+        # Reject unsupported numbered-page depths before any PG or ClickHouse
+        # work.  The builder's scan recommendations depend only on the request
+        # shape; eval and annotation projections do not affect this bound.
         preflight_builder = VoiceCallListQueryBuilderV2(
             project_id=str(project_id),
             filters=filters,
@@ -5825,7 +5757,6 @@ class TraceView(BaseModelViewSetMixin, ModelViewSet):
             eval_config_ids=[],
             remove_simulation_calls=sim_flag,
             annotation_label_ids=[],
-            hide_simulated=hide_simulated,
         )
         preflight_classify_batch_size = int(
             preflight_builder.recommended_filter_classify_batch_size() or 50
@@ -5856,9 +5787,7 @@ class TraceView(BaseModelViewSetMixin, ModelViewSet):
         eval_configs, eval_config_ids = get_project_eval_configs(project_id)
 
         # Get annotation labels that have actual annotations/scores for this project
-        annotation_labels = get_annotation_labels_for_project(
-            project_id, hide_simulated=hide_simulated
-        )
+        annotation_labels = get_annotation_labels_for_project(project_id)
         annotation_label_ids = [str(label.id) for label in annotation_labels]
         label_types = {str(label.id): label.type for label in annotation_labels}
 
@@ -5882,7 +5811,6 @@ class TraceView(BaseModelViewSetMixin, ModelViewSet):
             eval_config_ids=eval_config_ids,
             remove_simulation_calls=sim_flag,
             annotation_label_ids=annotation_label_ids,
-            hide_simulated=hide_simulated,
         )
         pin_filter_seed_witness_slack(builder, cursor_state)
         voice_request_start, voice_request_end = builder.parse_time_range(filters)
@@ -6681,11 +6609,9 @@ class TraceView(BaseModelViewSetMixin, ModelViewSet):
         eval_configs = project_configs
         eval_config_ids = [str(c.id) for c in eval_configs]
 
-        # One read for the request, shared by the label list and the builder.
-        hide_simulated = project_hides_simulated(project_id)
         # Get annotation labels that have actual annotations for this project
         annotation_labels = get_annotation_labels_for_project(
-            project_version.project_id, hide_simulated=hide_simulated
+            project_version.project_id
         )
         annotation_label_ids = [str(label.id) for label in annotation_labels]
         label_types = {str(label.id): label.type for label in annotation_labels}
@@ -6699,7 +6625,6 @@ class TraceView(BaseModelViewSetMixin, ModelViewSet):
             eval_config_ids=eval_config_ids,
             annotation_label_ids=annotation_label_ids,
             project_version_id=str(project_version_id),
-            hide_simulated=hide_simulated,
         )
 
         # Phase 1: Get paginated traces. Project-version-scoped task/eval
@@ -7146,7 +7071,6 @@ class TraceView(BaseModelViewSetMixin, ModelViewSet):
                 project_id=project_id,
                 filters=filters,
                 refresh=refresh,
-                hide_simulated=project_hides_simulated(project_id),
                 **tenant_scope,
             )
             return self._gm.success_response(result)
