@@ -23,6 +23,7 @@ const useDebugAnalysis = vi.fn();
 const useDrawerRunCalls = vi.fn();
 const useOptimizerAnalysis = vi.fn();
 const useCallExecutionV3Detail = vi.fn();
+const useRunTraces = vi.fn();
 vi.mock("src/api/simulate-environments/runDetail", async (importOriginal) => {
   const actual = await importOriginal();
   return {
@@ -33,6 +34,7 @@ vi.mock("src/api/simulate-environments/runDetail", async (importOriginal) => {
     useRunCalls: (...args) => useDrawerRunCalls(...args),
     useOptimizerAnalysis: (...args) => useOptimizerAnalysis(...args),
     useCallExecutionV3Detail: (...args) => useCallExecutionV3Detail(...args),
+    useRunTraces: (...args) => useRunTraces(...args),
   };
 });
 
@@ -198,6 +200,12 @@ function RunAnalyticsStub({ onOpenCall }) {
 }
 RunAnalyticsStub.propTypes = { onOpenCall: PropTypes.func };
 vi.mock("../RunAnalytics", () => ({ default: RunAnalyticsStub }));
+
+function RunTracesSectionStub({ executionId }) {
+  return <div>{`traces-section:${executionId}`}</div>;
+}
+RunTracesSectionStub.propTypes = { executionId: PropTypes.string };
+vi.mock("../RunTracesSection", () => ({ default: RunTracesSectionStub }));
 
 function CallDrawerStub({ task, hasPrev, hasNext, onPrev, onNext, onClose }) {
   if (!task) return null;
@@ -385,6 +393,13 @@ beforeEach(() => {
   useRunCalls.mockReturnValue({ tasks: [], groups: [], isLoading: false });
   useCallExecutionV3Detail.mockReset();
   useCallExecutionV3Detail.mockReturnValue({ data: undefined, error: null });
+  useRunTraces.mockReset();
+  useRunTraces.mockReturnValue({
+    observability: "unavailable",
+    projectId: null,
+    traces: [],
+    count: 0,
+  });
   callListNavigation.mockReset();
   callListNavigation.mockReturnValue({
     hasPrev: false,
@@ -471,7 +486,12 @@ describe("RunDetail", () => {
 
   it("offers Stop simulation in the header only while the run can be stopped", () => {
     useRunDetail.mockReturnValue({
-      identity: { ...IDENTITY, runState: "running", status: "running", stoppable: true },
+      identity: {
+        ...IDENTITY,
+        runState: "running",
+        status: "running",
+        stoppable: true,
+      },
       stats: STATS,
       isLoading: false,
     });
@@ -494,7 +514,12 @@ describe("RunDetail", () => {
 
   it("shows Cancelling in the header while a stopped run winds down", () => {
     useRunDetail.mockReturnValue({
-      identity: { ...IDENTITY, runState: "cancelling", status: "cancelling", stoppable: false },
+      identity: {
+        ...IDENTITY,
+        runState: "cancelling",
+        status: "cancelling",
+        stoppable: false,
+      },
       stats: STATS,
       isLoading: false,
     });
@@ -511,7 +536,12 @@ describe("RunDetail", () => {
     "disables the header actions while the run is %s",
     (status) => {
       useRunDetail.mockReturnValue({
-        identity: { ...IDENTITY, runState: status, status, stoppable: status === "running" },
+        identity: {
+          ...IDENTITY,
+          runState: status,
+          status,
+          stoppable: status === "running",
+        },
         stats: STATS,
         isLoading: false,
       });
@@ -1010,13 +1040,72 @@ describe("RunDetail", () => {
   it("tells the navigation a live run is live", async () => {
     const user = userEvent.setup();
     useRunDetail.mockReturnValue({
-      identity: { ...IDENTITY, runState: "running", status: "running", stoppable: true },
+      identity: {
+        ...IDENTITY,
+        runState: "running",
+        status: "running",
+        stoppable: true,
+      },
       stats: STATS,
       isLoading: false,
     });
     renderDetail();
     await user.click(screen.getByRole("button", { name: "open c1" }));
     expect(navArgs().live).toBe(true);
+  });
+
+  it("offers no Traces tab when the run has no traceable project", () => {
+    renderDetail();
+
+    expect(screen.getByRole("tab", { name: "Analytics" })).toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: /^Traces/ })).toBeNull();
+    expect(screen.queryByText(/^traces-section:/)).toBeNull();
+  });
+
+  it("adds a Traces tab with the run's count after Analytics and shows the traces there", async () => {
+    const user = userEvent.setup();
+    useRunTraces.mockReturnValue({
+      observability: "on",
+      projectId: "project-1",
+      traces: [],
+      count: 25,
+    });
+    renderDetail();
+
+    const tabs = screen.getAllByRole("tab").map((tab) => tab.textContent);
+    expect(tabs.slice(-2)).toEqual(["Analytics", "Traces (25)"]);
+    expect(useRunTraces).toHaveBeenCalledWith("ex1", { enabled: true });
+    expect(screen.queryByText("traces-section:ex1")).toBeNull();
+
+    await user.click(screen.getByRole("tab", { name: "Traces (25)" }));
+
+    expect(screen.getByText("traces-section:ex1")).toBeInTheDocument();
+  });
+
+  it("shows a Traces tab without a count when observability is off", async () => {
+    const user = userEvent.setup();
+    useRunTraces.mockReturnValue({
+      observability: "off",
+      agentId: "agent-1",
+      projectId: null,
+      traces: [],
+      count: 0,
+    });
+    renderDetail();
+
+    const tabs = screen.getAllByRole("tab").map((tab) => tab.textContent);
+    expect(tabs.slice(-2)).toEqual(["Analytics", "Traces"]);
+
+    await user.click(screen.getByRole("tab", { name: "Traces" }));
+
+    expect(screen.getByText("traces-section:ex1")).toBeInTheDocument();
+  });
+
+  it("never asks for traces on a run that is not backed", () => {
+    renderDetail({ backed: false });
+
+    expect(useRunTraces).toHaveBeenCalledWith("ex1", { enabled: false });
+    expect(screen.queryByRole("tab", { name: /^Traces/ })).toBeNull();
   });
 
   it("marks a call opened from Analytics as not from the table", async () => {

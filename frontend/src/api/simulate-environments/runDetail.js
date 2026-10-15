@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import axios, { endpoints } from "src/utils/axios";
 import { extractKpis } from "src/sections/test-detail/common";
 import { normalizeEvalResult } from "src/sections/develop-detail/DataTab/common";
@@ -592,6 +592,59 @@ export function useCallExecutionV3Detail(callExecId, enabled = true, options) {
  * @param {?string} callExecId
  * @returns {{ callDetail: ?CallDetail, isLoading: boolean }}
  */
+export const RUN_TRACES_PAGE_SIZE = 20;
+
+export const RUN_TRACES_OBSERVABILITY = {
+  UNAVAILABLE: "unavailable",
+  OFF: "off",
+  ON: "on",
+};
+
+const traceRow = (projectId, raw) => ({
+  traceId: raw.trace_id,
+  projectId,
+  name: raw.name ?? "",
+  startTime: raw.start_time ?? null,
+  status: raw.status ?? "",
+  latencyMs: raw.latency_ms ?? null,
+});
+
+export function useRunTraces(
+  executionId,
+  { page = 1, pageSize = RUN_TRACES_PAGE_SIZE, enabled = true } = {},
+) {
+  const query = useQuery({
+    queryKey: ["simulation-run-traces-v3", executionId, page, pageSize],
+    queryFn: async () => {
+      const response = await axios.get(
+        endpoints.runResultsV3.traces(executionId),
+        { params: { page, page_size: pageSize } },
+      );
+      return response.data;
+    },
+    enabled: !!executionId && enabled,
+    placeholderData: keepPreviousData,
+  });
+  const projectId = query.data?.project_id ?? null;
+  const traces = useMemo(
+    () =>
+      projectId
+        ? (query.data?.traces ?? []).map((raw) => traceRow(projectId, raw))
+        : [],
+    [projectId, query.data],
+  );
+  return {
+    ...query,
+    observability:
+      query.data?.observability ?? RUN_TRACES_OBSERVABILITY.UNAVAILABLE,
+    agentId: query.data?.agent_id ?? null,
+    projectId,
+    traces,
+    count: query.data?.count ?? 0,
+    totalPages: query.data?.total_pages ?? 1,
+  };
+}
+
 export function useCallDetail(callExecId) {
   const query = useCallExecutionV3Detail(callExecId);
   const callDetail = useMemo(() => mapCallDetail(query.data), [query.data]);
