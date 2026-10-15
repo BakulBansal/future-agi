@@ -36,9 +36,14 @@ def analyze_audio(audio_bytes: bytes) -> AudioMetrics:
     pitch = None
     try:
         frame_length = 2048
-        if (\n            samples.size >= frame_length\n            and sample_rate > 2 * librosa.note_to_hz("C2")\n        ):
+        if (
+            samples.size >= frame_length
+            and sample_rate > 2 * librosa.note_to_hz("C2")
+        ):
             f0, voiced, _ = librosa.pyin(
-                samples,\n                sr=sample_rate,\n                fmin=librosa.note_to_hz("C2"),
+                samples,
+                sr=sample_rate,
+                fmin=librosa.note_to_hz("C2"),
                 fmax=min(librosa.note_to_hz("C7"), sample_rate * 0.45),
                 frame_length=frame_length,
             )
@@ -50,13 +55,15 @@ def analyze_audio(audio_bytes: bytes) -> AudioMetrics:
 
     frame_length = max(256, min(2048, samples.size))
     hop_length = max(1, frame_length // 4)
-    rms = librosa.feature.rms(\n        y=samples, frame_length=frame_length, hop_length=hop_length, center=False\n    )[0]
+    rms = librosa.feature.rms(
+        y=samples, frame_length=frame_length, hop_length=hop_length, center=False
+    )[0]
     power = np.square(rms)
     power = power[np.isfinite(power)]
     snr = None
     if power.size >= 5:
-        noise = float(np.quantile(power, 0.2))
-        speech = float(np.quantile(power, 0.8))
+        noise = float(np.quantile(power, 0.1))
+        speech = float(np.quantile(power, 0.9))
         if noise > 1e-12 and speech > noise * 1.05:
             ratio = (speech - noise) / noise
             candidate = 10.0 * np.log10(ratio)
