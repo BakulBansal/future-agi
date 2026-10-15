@@ -257,15 +257,12 @@ class SQL_query_handler:
         return result[0][0] if result else 0
 
     @classmethod
-    def get_span_attributes_for_project(cls, project_id, *, hide_simulated=False):
+    def get_span_attributes_for_project(cls, project_id):
         """
         Returns a list of distinct span_attributes keys for a given project using raw SQL.
 
         Uses COALESCE to check span_attributes first, falling back to eval_attributes
         for backward compatibility during migration.
-
-        With ``hide_simulated`` a span that carries either simulation mark is left
-        out; the test is the one ``simulation_visibility`` owns.
         """
         query = """
             SELECT DISTINCT key
@@ -277,16 +274,7 @@ class SQL_query_handler:
               AND (span_attributes IS NOT NULL AND span_attributes != '{}'::jsonb
                    OR eval_attributes IS NOT NULL AND eval_attributes != '{}'::jsonb)
         """
-        params = [project_id]
-        if hide_simulated:
-            # Imported here so loading this module does not load the ClickHouse
-            # query-builder package.
-            from tracer.services.simulation_visibility import (
-                postgres_span_exclusion_sql,
-            )
-
-            query += f"\n              AND {postgres_span_exclusion_sql()}\n"
-        rows = cls.execute_query(query, params)
+        rows = cls.execute_query(query, [project_id])
         return [row[0] for row in rows]
 
     @classmethod

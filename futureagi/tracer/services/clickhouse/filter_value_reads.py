@@ -206,69 +206,7 @@ def _value_digest(value: str) -> str:
     return blake2b(value.encode("utf-8"), digest_size=16).hexdigest()
 
 
-def _unmarked_row_sql() -> str:
-    # Imported at call time: the visibility module reaches the model layer, and
-    # this module is loaded while the query service is still importing.
-    from tracer.services.simulation_visibility import row_exclusion_sql
-
-    return row_exclusion_sql(map_column="attrs_string")
-
-
-def _hiding_spans_source(columns: tuple[str, ...]) -> str:
-    """A spans read that carries each row's mark test as ``row_unmarked``.
-
-    The test runs in this inner read because the voice statement renames
-    ``attrs_string`` to its latest value one level up, where a test written
-    against the column would read the aggregate instead.
-    """
-
-    # A metric can read a column the statement already carries, such as the
-    # project id, and a repeated name would make the outer reference ambiguous.
-    distinct_columns = ", ".join(dict.fromkeys(columns))
-    return (
-        "(\n"
-        f"                SELECT {distinct_columns},\n"
-        f"                    toUInt8({_unmarked_row_sql()}) AS row_unmarked\n"
-        "                FROM spans\n"
-        "                PREWHERE project_id IN %(project_ids)s\n"
-        "                  AND start_time >= %(window_start)s\n"
-        "                  AND start_time < %(window_end)s\n"
-        "            )"
-    )
-
-
-def _span_source(columns: tuple[str, ...], *, hide_simulated: bool) -> str:
-    if hide_simulated:
-        return _hiding_spans_source(columns)
-    return (
-        "spans\n"
-        "            PREWHERE project_id IN %(project_ids)s\n"
-        "              AND start_time >= %(window_start)s\n"
-        "              AND start_time < %(window_end)s"
-    )
-
-
-def _latest_span_value_cte(source_column: str, *, hide_simulated: bool = False) -> str:
-    # The mark is read from the winning version, like deletion: an older version
-    # of a span never decides whether the span is hidden.
-    unmarked_state = (
-        ",\n                argMax(row_unmarked, _version) AS latest_unmarked"
-        if hide_simulated
-        else ""
-    )
-    source = _span_source(
-        (
-            "project_id",
-            "trace_id",
-            "id",
-            "start_time",
-            "_version",
-            "is_deleted",
-            "parent_span_id",
-            source_column,
-        ),
-        hide_simulated=hide_simulated,
-    )
+def _latest_span_value_cte(source_column: str) -> str:
     return f"""
         latest_spans AS (
             SELECT
@@ -278,40 +216,20 @@ def _latest_span_value_cte(source_column: str, *, hide_simulated: bool = False) 
                 start_time,
                 argMax(is_deleted, _version) AS latest_is_deleted,
                 argMax(tuple(parent_span_id), _version).1 AS latest_parent_span_id,
-                argMax(tuple({source_column}), _version).1 AS raw_value{unmarked_state}
-            FROM {source}
+                argMax(tuple({source_column}), _version).1 AS raw_value
+            FROM spans
+            PREWHERE project_id IN %(project_ids)s
+              AND start_time >= %(window_start)s
+              AND start_time < %(window_end)s
             GROUP BY project_id, trace_id, id, start_time
         )
     """
 
 
-def _latest_voice_value_cte(*, hide_simulated: bool = False) -> str:
+def _latest_voice_value_cte() -> str:
     """Latest root fields needed by normalized voice response expressions."""
 
-    unmarked_state = (
-        ",\n                argMax(row_unmarked, _version) AS latest_unmarked"
-        if hide_simulated
-        else ""
-    )
-    source = _span_source(
-        (
-            "project_id",
-            "trace_id",
-            "id",
-            "start_time",
-            "_version",
-            "is_deleted",
-            "parent_span_id",
-            "observation_type",
-            "provider",
-            "cost",
-            "attrs_string",
-            "attrs_number",
-            "attributes_extra",
-        ),
-        hide_simulated=hide_simulated,
-    )
-    return f"""
+    return """
         latest_spans AS (
             SELECT
                 project_id,
@@ -325,8 +243,11 @@ def _latest_voice_value_cte(*, hide_simulated: bool = False) -> str:
                 argMax(tuple(cost), _version).1 AS cost,
                 argMax(attrs_string, _version) AS attrs_string,
                 argMax(attrs_number, _version) AS attrs_number,
-                argMax(tuple(attributes_extra), _version).1 AS attributes_extra{unmarked_state}
-            FROM {source}
+                argMax(tuple(attributes_extra), _version).1 AS attributes_extra
+            FROM spans
+            PREWHERE project_id IN %(project_ids)s
+              AND start_time >= %(window_start)s
+              AND start_time < %(window_end)s
             GROUP BY project_id, trace_id, id, start_time
         )
     """
@@ -370,16 +291,12 @@ def read_span_system_filter_values(
     lookback_days: int = 7,
     now: datetime | None = None,
     deadline: ReadDeadline | None = None,
-    hide_simulated: bool = False,
 ) -> FilterValueRead:
     """Return exact latest-state values within one finite partition window.
 
     ``query_complete=False/sample_limit`` means the exact distinct vocabulary
     exceeded the public picker cap; a timeout/resource exception is deliberately
     allowed to reach the API boundary for sanitized degraded handling.
-
-    ``hide_simulated`` leaves out every span of a marked trace, so a value that
-    only simulated calls carry is never offered.
     """
 
     if not 1 <= int(limit) <= FILTER_VALUE_LEGACY_MAX:
@@ -392,11 +309,9 @@ def read_span_system_filter_values(
             source_column = _SYSTEM_VALUE_SOURCE_COLUMNS[metric_name]
         except KeyError as exc:
             raise ValueError("unsupported system filter-value metric") from exc
-        latest_value_cte = _latest_span_value_cte(
-            source_column, hide_simulated=hide_simulated
-        )
+        latest_value_cte = _latest_span_value_cte(source_column)
     else:
-        latest_value_cte = _latest_voice_value_cte(hide_simulated=hide_simulated)
+        latest_value_cte = _latest_voice_value_cte()
     window_start, window_end = _window(lookback_days=lookback_days, now=now)
     project_scope = tuple(dict.fromkeys(str(value) for value in project_ids if value))
     if not project_scope:
@@ -417,8 +332,6 @@ def read_span_system_filter_values(
         )
     else:
         root_clause = ""
-    if hide_simulated:
-        root_clause += "\n              AND latest_unmarked = 1"
     search_clause = (
         "AND positionCaseInsensitiveUTF8(toString(raw_picker_value), "
         "%(filter_value_search)s) > 0"
@@ -719,7 +632,6 @@ def read_span_system_filter_value_cursor_page(
     seen_value_contains: Callable[[str], bool] | None = None,
     seen_value_count: int | None = None,
     deadline: ReadDeadline | None = None,
-    hide_simulated: bool = False,
 ) -> FilterValueCursorPageRead:
     """Walk exact system values over a frozen retained-data window.
 
@@ -727,10 +639,6 @@ def read_span_system_filter_value_cursor_page(
     geometrically; dense failures narrow the *same* unconsumed frontier.  The
     value keyset completes a dense slice without OFFSET, while server-held
     digests suppress values already emitted from newer slices.
-
-    ``hide_simulated`` leaves out every span of a marked trace. The walk's
-    position and seen digests are plain values, so a walk begun before the
-    project held can continue under the rule without skipping a visible value.
     """
 
     if not 1 <= int(page_size) <= FILTER_VALUE_MAX_PAGE_SIZE:
@@ -781,12 +689,10 @@ def read_span_system_filter_value_cursor_page(
             source_column = _SYSTEM_VALUE_SOURCE_COLUMNS[metric_name]
         except KeyError as exc:
             raise ValueError("unsupported system filter-value metric") from exc
-        latest_value_cte = _latest_span_value_cte(
-            source_column, hide_simulated=hide_simulated
-        )
+        latest_value_cte = _latest_span_value_cte(source_column)
         value_expression, join = _system_value_expression(metric_name)
     else:
-        latest_value_cte = _latest_voice_value_cte(hide_simulated=hide_simulated)
+        latest_value_cte = _latest_voice_value_cte()
         value_expression, join = voice_expression, ""
     if voice_expression is not None:
         root_clause = (
@@ -799,8 +705,6 @@ def read_span_system_filter_value_cursor_page(
         )
     else:
         root_clause = ""
-    if hide_simulated:
-        root_clause += "\n                      AND latest_unmarked = 1"
 
     width = (
         current_end - active_start

@@ -14,9 +14,6 @@ from ai_tools.formatting import (
 )
 from ai_tools.registry import register_tool
 from model_hub.utils.eval_mapping import non_path_mapping_keys
-from tracer.services.simulation_visibility import (
-    hide_simulated as project_hides_simulated,
-)
 
 logger = structlog.get_logger(__name__)
 
@@ -181,8 +178,7 @@ class CreateCustomEvalConfigTool(BaseTool):
 
         # Fetch available eval attributes for the project
         available_attributes = SQL_query_handler.get_span_attributes_for_project(
-            str(params.project_id),
-            hide_simulated=project_hides_simulated(str(params.project_id)),
+            str(params.project_id)
         )
 
         # Get required and optional keys from the eval template config

@@ -78,7 +78,6 @@ def test_final_status_uses_bounded_typed_attribute_reader(monkeypatch):
     ) == ["Rechazado", "Aprobado"]
     assert capture["selector_kwargs"]["typed_only"] is True
     assert capture["selector_kwargs"]["json_attribute_mode"] == "arrays"
-    assert capture["selector_kwargs"]["hide_simulated"] is False
     assert 0 < capture["selector_kwargs"]["wall_timeout_ms"] <= 4_000
     assert capture["project_ids"] == [PROJECT_ID]
     assert capture["key"] == "final_status"
@@ -188,7 +187,6 @@ def test_system_metric_uses_v2_service_and_exact_bounded_reader(monkeypatch):
         "limit": 100,
         "lookback_days": 365,
         "deadline": capture["deadline"],
-        "hide_simulated": False,
     }
 
 

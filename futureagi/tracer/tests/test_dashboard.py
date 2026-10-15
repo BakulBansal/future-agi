@@ -3796,11 +3796,9 @@ class TestMetricsEndpoint:
             "typed_only",
             "json_attribute_mode",
             "wall_timeout_ms",
-            "hide_simulated",
         }
         assert selector_init["typed_only"] is True
         assert selector_init["json_attribute_mode"] == "arrays"
-        assert selector_init["hide_simulated"] is False
         # Project authorization and cursor setup consume the same request-owned
         # wall. The selector therefore receives the positive *remaining*
         # budget rather than starting a new independent timeout.
@@ -12454,11 +12452,6 @@ class TestMetricsCatalogPagination:
             patch(
                 "tracer.services.dashboard_metrics_catalog.build_metrics_catalog",
                 return_value=metrics,
-            ),
-            patch(
-                "tracer.services.dashboard_metrics_catalog."
-                "_resolve_metrics_catalog_project_scope",
-                return_value=([], False),
             ),
         ):
             result = get_cached_metrics_catalog(

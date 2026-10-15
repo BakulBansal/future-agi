@@ -86,7 +86,7 @@ def _run_non_observe_bounded_page(monkeypatch, page):
     monkeypatch.setattr(
         observation_span_view,
         "get_annotation_labels_for_project",
-        lambda _project_id, **_kwargs: [],
+        lambda _project_id: [],
     )
     monkeypatch.setattr(observation_span_view, "get_default_span_config", lambda: [])
     monkeypatch.setattr(

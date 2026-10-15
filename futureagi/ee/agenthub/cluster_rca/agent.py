@@ -78,9 +78,6 @@ from tracer.services.clickhouse.span_attribute_lookups import (
     list_attributes_for_trace,
     scoped_trace_ids,
 )
-from tracer.services.simulation_visibility import (
-    hide_simulated as project_hides_simulated,
-)
 
 
 # Type alias for the streaming-events callback the caller can pass in.
@@ -1978,12 +1975,7 @@ class ClusterAnalysisAgent:
                     "list(attribute_keys) needs filter.cluster_id or a "
                     "known project context.",
                 )
-            # The model reads these keys and the user reads its narrative, so a
-            # project that holds simulated traces leaves their keys out.
-            project_keys = list_attribute_keys_for_project(
-                self.project_id,
-                hide_simulated=project_hides_simulated(str(self.project_id)),
-            )
+            project_keys = list_attribute_keys_for_project(self.project_id)
             rows = [
                 {"key": k.key, "type": k.type, "count": k.count}
                 for k in project_keys

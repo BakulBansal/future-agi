@@ -172,7 +172,6 @@ from tracer.services.exact_aggregation_cache import (
     read_or_schedule_exact_snapshot,
 )
 from tracer.services.postgres_read_policy import application_postgres_reads
-from tracer.services.simulation_visibility import MarkedLookupFailed, holding_projects
 from tracer.utils.helper import get_annotation_labels_by_project
 from tracer.utils.property_registry import (
     names_a_stored_definition,
@@ -225,15 +224,6 @@ def _read_property_catalog_value_page(request, query_params, *, deadline):
         raise _PropertyCatalogValueRequestError(str(exc)) from exc
     except (DatabaseError, MetricsCatalogUnavailable) as exc:
         raise PropertyCatalogValueUnavailable("scope_unavailable") from exc
-    # The collector's observed values know nothing of simulated traces, so a
-    # holding scope is answered by the span readers that leave them out; a
-    # scope that does not hold keeps this catalog.
-    try:
-        holds_simulated = _filter_values_hide_simulated(deadline, projects)
-    except DatabaseError as exc:
-        raise PropertyCatalogValueUnavailable("scope_unavailable") from exc
-    if holds_simulated:
-        raise PropertyCatalogValueNotReady("simulated_traces")
     scope = cursor_scope_for_request(request, project_ids=projects)
     scope.update(
         agent_definition_id="", dataset_id="", workspace_scope=not raw_projects
@@ -393,23 +383,6 @@ def _materialize_dashboard_query_scope(
     return scoped
 
 
-def _scope_holds_simulated(project_ids):
-    """One read: does any project of this dashboard hold marked traces?
-
-    A dashboard without trace metrics keeps its ``project_ids`` as sent, so an
-    id that is not a UUID is left out here instead of failing the whole read in
-    Postgres; such an id could not name a holding project anyway.
-    """
-
-    scope = []
-    for value in project_ids or []:
-        try:
-            scope.append(str(UUID(str(value))))
-        except (TypeError, ValueError):
-            continue
-    return bool(holding_projects(scope))
-
-
 # Exact dashboards may hydrate wide attribute Maps. Do not impose a row-count
 # ceiling: wide but selective production reads can legitimately scan many
 # compact rows. Bound the work by wall time, bytes, memory, result size, and
@@ -456,13 +429,6 @@ def _run_filter_value_pg_read(deadline, read):
         read_only=True,
     ):
         return read()
-
-
-def _filter_values_hide_simulated(deadline, project_ids):
-    """The holding decision, read the way the picker's other Postgres reads are."""
-    return _run_filter_value_pg_read(
-        deadline, lambda: _scope_holds_simulated(project_ids)
-    )
 
 
 def _session_overlay_filter_value_ids(
@@ -1514,17 +1480,13 @@ def _read_dashboard_rollup_fast_path(
     *,
     refresh_state=None,
     deadline=None,
-    hide_simulated=False,
 ):
     """Read simple trace metrics from bounded materialized hourly states."""
 
-    # The hourly states carry no attribute, so they cannot leave a marked
-    # trace out: a holding project is answered by the exact read instead.
     if (
         query_config.get("filters")
         or query_config.get("breakdowns")
         or query_config.get("granularity") == "minute"
-        or hide_simulated
     ):
         return _dashboard_refresh_or_degraded(
             query_config,
@@ -1808,7 +1770,6 @@ def _read_public_dashboard_query(
     refresh,
     deadline=None,
     try_rollup=True,
-    hide_simulated=False,
 ):
     """Serve cached data or dispatch one deduplicated heavy refresh."""
 
@@ -1867,7 +1828,6 @@ def _read_public_dashboard_query(
         query_config,
         refresh_state=snapshot if isinstance(snapshot, dict) else None,
         deadline=deadline,
-        hide_simulated=hide_simulated,
     )
 
 
@@ -2202,7 +2162,6 @@ def _bind_dashboard_annotation_completeness(
     *,
     deadline,
     allow_metadata_read,
-    hide_simulated=False,
 ):
     """Bind authoritative per-project label sets into the snapshot identity."""
 
@@ -2232,7 +2191,6 @@ def _bind_dashboard_annotation_completeness(
         lambda: get_annotation_labels_by_project(
             list(project_ids),
             organization=workspace.organization,
-            hide_simulated=hide_simulated,
         ),
     )
     normalized = {
@@ -2899,14 +2857,9 @@ class DashboardViewSet(BaseModelViewSetMixin, ModelViewSet):
         # Attribute inventory is served by CH25/V2, whose configuration is
         # independent from the legacy ClickHouse feature gate.
         analytics = AnalyticsQueryService()
-        # One decision for the whole request, like the other readers of a
-        # project list: any holding project hides marked traces for all.
-        hides_simulated = _scope_holds_simulated(project_ids)
         for pid in project_ids:
             try:
-                keys = analytics.get_span_attribute_keys_ch(
-                    pid, hide_simulated=hides_simulated
-                )
+                keys = analytics.get_span_attribute_keys_ch(pid)
             except Exception as exc:
                 logger.warning(
                     "dashboard_span_attribute_discovery_failed",
@@ -3947,12 +3900,6 @@ class DashboardViewSet(BaseModelViewSetMixin, ModelViewSet):
                             seen_value_contains=seen_state.contains,
                             seen_value_count=seen_state.seen_count,
                             deadline=filter_value_deadline,
-                            # This batch's own projects decide: a walk crosses
-                            # batches, and a position or seen digest is a plain
-                            # value that stays valid under either answer.
-                            hide_simulated=_filter_values_hide_simulated(
-                                filter_value_deadline, project_ids
-                            ),
                         )
                         appended_digests = (
                             page_read.appended_value_digests
@@ -4094,16 +4041,6 @@ class DashboardViewSet(BaseModelViewSetMixin, ModelViewSet):
                             }
                         )
 
-                    # Decided once for this request. A hiding walk is signed
-                    # apart from a non-hiding one, so a continuation never
-                    # resumes under the other rule; a project that does not
-                    # hold keeps the query, and so its cursors, as they were.
-                    hides_simulated = _filter_values_hide_simulated(
-                        filter_value_deadline, project_ids
-                    )
-                    if hides_simulated:
-                        cursor_query = {**cursor_query, "hide_simulated": True}
-
                     selector = None
                     if cursor_token:
                         cursor_state, cursor_window_mode = decode_native_list_cursor(
@@ -4202,7 +4139,6 @@ class DashboardViewSet(BaseModelViewSetMixin, ModelViewSet):
                         seen_value_contains=seen_state.contains,
                         seen_value_count=seen_state.seen_count,
                         deadline=filter_value_deadline,
-                        hide_simulated=hides_simulated,
                     )
                     next_cursor = None
                     if page_read.has_more:
@@ -4329,9 +4265,6 @@ class DashboardViewSet(BaseModelViewSetMixin, ModelViewSet):
                             )
                         ),
                         deadline=filter_value_deadline,
-                        hide_simulated=_filter_values_hide_simulated(
-                            filter_value_deadline, project_ids
-                        ),
                     )
                     values = list(value_read.values)
                 except Exception as exc:
@@ -4915,12 +4848,6 @@ class DashboardViewSet(BaseModelViewSetMixin, ModelViewSet):
                                 wall_timeout_ms=filter_value_deadline.remaining_ms(
                                     ATTRIBUTE_PROPERTY_PICKER_WALL_TIMEOUT_MS
                                 ),
-                                # This batch's own projects decide: a walk
-                                # crosses batches, and its position and seen
-                                # digests stay valid under either answer.
-                                hide_simulated=_filter_values_hide_simulated(
-                                    filter_value_deadline, project_ids
-                                ),
                             )
                             page_read = selector.read_value_cursor_page(
                                 project_ids,
@@ -5018,15 +4945,6 @@ class DashboardViewSet(BaseModelViewSetMixin, ModelViewSet):
                             "search": search,
                             "attribute_type": attribute_type,
                         }
-                        # Decided once for this request and signed into the
-                        # query only when set, so a hiding walk never resumes
-                        # under the other rule and a project that does not hold
-                        # keeps its cursors as they were.
-                        hides_simulated = _filter_values_hide_simulated(
-                            filter_value_deadline, project_ids
-                        )
-                        if hides_simulated:
-                            cursor_query["hide_simulated"] = True
 
                         selector = None
                         if cursor_token:
@@ -5123,7 +5041,6 @@ class DashboardViewSet(BaseModelViewSetMixin, ModelViewSet):
                                         ATTRIBUTE_PROPERTY_PICKER_WALL_TIMEOUT_MS
                                     )
                                 ),
-                                hide_simulated=hides_simulated,
                             )
                             window_end = datetime.now(UTC)
                             retained_start = selector.retained_window_start(
@@ -5178,7 +5095,6 @@ class DashboardViewSet(BaseModelViewSetMixin, ModelViewSet):
                                 wall_timeout_ms=filter_value_deadline.remaining_ms(
                                     ATTRIBUTE_PROPERTY_PICKER_WALL_TIMEOUT_MS
                                 ),
-                                hide_simulated=hides_simulated,
                             )
                         page_read = selector.read_value_cursor_page(
                             project_ids,
@@ -5291,9 +5207,6 @@ class DashboardViewSet(BaseModelViewSetMixin, ModelViewSet):
                         now=datetime.now(UTC),
                         wall_timeout_ms=filter_value_deadline.remaining_ms(
                             ATTRIBUTE_PROPERTY_PICKER_WALL_TIMEOUT_MS
-                        ),
-                        hide_simulated=_filter_values_hide_simulated(
-                            filter_value_deadline, project_ids
                         ),
                     )
                     read = selector.read_values(
@@ -6291,26 +6204,14 @@ class DashboardWidgetViewSet(BaseModelViewSetMixin, ModelViewSet):
         except DashboardQueryScopeError as exc:
             return self._gm.bad_request(str(exc))
 
-        # Decided from the concrete scope, once: the snapshot key, every trace
-        # statement and the fast-path refusal below must agree on it. The
-        # exact worker recomputes it rather than trusting the stored identity,
-        # which may predate the project holding.
-        hide_simulated = _scope_holds_simulated(query_config.get("project_ids"))
-
         try:
             query_config = _bind_dashboard_annotation_completeness(
                 query_config,
                 workspace,
                 deadline=read_deadline,
                 allow_metadata_read=not _exact_worker,
-                hide_simulated=hide_simulated,
             )
-        except (
-            AnnotationScoreReadUnavailable,
-            DatabaseError,
-            MarkedLookupFailed,
-            ReadDeadlineExceeded,
-        ):
+        except (AnnotationScoreReadUnavailable, DatabaseError, ReadDeadlineExceeded):
             return self._gm.custom_error_response(
                 status.HTTP_503_SERVICE_UNAVAILABLE,
                 "Dashboard annotation metadata is temporarily unavailable. Please retry.",
@@ -6331,11 +6232,6 @@ class DashboardWidgetViewSet(BaseModelViewSetMixin, ModelViewSet):
             cache_identity["trace_snapshot_semantics"] = (
                 "physical-latest-complete-series-v2"
             )
-        if hide_simulated and cache_identity_override is None:
-            # A snapshot stored before the project held has no such key, so it
-            # is never served to a holding project. A replayed identity is
-            # written under the key it was scheduled with.
-            cache_identity["hide_simulated"] = True
 
         def _schedule_heavy_dashboard_read():
             payload = _read_public_dashboard_query(
@@ -6344,7 +6240,6 @@ class DashboardWidgetViewSet(BaseModelViewSetMixin, ModelViewSet):
                 refresh=True,
                 deadline=read_deadline,
                 try_rollup=False,
-                hide_simulated=hide_simulated,
             )
             return self._gm.success_response(payload)
 
@@ -6379,7 +6274,6 @@ class DashboardWidgetViewSet(BaseModelViewSetMixin, ModelViewSet):
                 else _read_dashboard_rollup_fast_path(
                     query_config,
                     deadline=read_deadline,
-                    hide_simulated=hide_simulated,
                 )
             )
             if _dashboard_snapshot_is_renderable(rollup_payload):
@@ -6431,8 +6325,6 @@ class DashboardWidgetViewSet(BaseModelViewSetMixin, ModelViewSet):
                 # public CH25 path resolves the latest physical span state.
                 "require_versioned_snapshot": True,
             }
-            if hide_simulated:
-                trace_config["hide_simulated"] = True
             project_ids = trace_config.get("project_ids", [])
             # Reuse the exact same scope helper as cache-key materialization.
             # Default workspaces deliberately include legacy workspace-null
