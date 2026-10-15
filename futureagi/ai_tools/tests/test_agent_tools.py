@@ -15,9 +15,14 @@ from tracer.tests.test_observability_switch import (
     _agent,
     _agent_with_row,
     _created,
+    _statements,
     _stored,
+    _stored_agent,
+    agent_update_columns,
+    assert_one_project_and_row,
     make_summary,
     seams,
+    stale_copies,
 )
 from tracer.utils.otel import ResourceLimitError
 
@@ -534,3 +539,64 @@ def test_tool_keeps_flag_written_before_the_switch_saves(tool_context, tool):
 
     assert not result.is_error
     assert _stored(row) == ({"assistant_id": "a1", HOLDING_FLAG: True}, True)
+
+
+def test_create_version_tool_double_submit_gives_one_project_and_one_row(
+    tool_context,
+):
+    agent = _agent(tool_context.organization, tool_context.workspace)
+    name, first = _tool_call("create_agent_version", agent, description="First")
+    _, second = _tool_call("create_agent_version", agent, description="Second")
+
+    # Both calls read the agent before either one switched it on.
+    with seams(make_summary(agent_definition_id=agent.id)), stale_copies(agent):
+        first_result = run_tool(name, first, tool_context)
+        second_result = run_tool(name, second, tool_context)
+
+    assert not first_result.is_error
+    assert not second_result.is_error
+    assert_one_project_and_row(agent)
+    assert _stored_agent(agent).description == "Second"
+
+
+def test_create_version_tool_never_writes_the_link_and_keeps_other_writes(
+    tool_context,
+):
+    agent = _agent_with_row(
+        tool_context.organization, tool_context.workspace, enabled=True
+    )
+    name, params = _tool_call(
+        "create_agent_version", agent, observability_enabled=False
+    )
+    params.pop("api_key")
+    # Another copy writes a field, and clears the link, after this one is read.
+    with stale_copies(agent, count=1):
+        AgentDefinition.no_workspace_objects.filter(pk=agent.pk).update(
+            model="written-meanwhile", observability_provider=None
+        )
+        seen, recording = _statements()
+        with seams(make_summary(agent_definition_id=agent.id)), recording:
+            result = run_tool(name, params, tool_context)
+
+    assert not result.is_error
+    assert agent_update_columns(seen) == [{"description", "updated_at"}]
+    stored = _stored_agent(agent)
+    assert stored.description == "Changed"
+    assert stored.model == "written-meanwhile"
+    assert stored.observability_provider_id is None
+
+
+def test_create_version_tool_without_changed_fields_does_not_update_the_agent(
+    tool_context,
+):
+    agent = _agent(tool_context.organization, tool_context.workspace)
+    seen, recording = _statements()
+    with recording:
+        result = run_tool(
+            "create_agent_version",
+            {"agent_id": str(agent.id), "commit_message": "No changes"},
+            tool_context,
+        )
+
+    assert not result.is_error
+    assert agent_update_columns(seen) == []

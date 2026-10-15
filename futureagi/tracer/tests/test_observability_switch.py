@@ -11,6 +11,7 @@ from __future__ import annotations
 import dataclasses
 import inspect
 import json
+import re
 import uuid
 from contextlib import contextmanager
 from types import SimpleNamespace
@@ -1317,3 +1318,93 @@ def test_lock_key_follows_organization_and_workspace(organization, workspace):
     other_org = SimpleNamespace(id=uuid.uuid4())
     assert key != switch._workspace_lock_key(other_org, str(workspace.id))
     assert -(2**63) <= key < 2**63
+
+
+def agent_update_columns(statements):
+    """The columns each recorded UPDATE of an agent row wrote."""
+    written = []
+    for sql in statements:
+        match = re.match(r'UPDATE "simulate_agent_definition" SET (.*?) WHERE', sql)
+        if match:
+            written.append(set(re.findall(r'"(\w+)" = ', match.group(1))))
+    return written
+
+
+@contextmanager
+def stale_copies(agent, count=2):
+    """Serve ``count`` copies of the agent, all read now, to the next lookups.
+
+    A request's own ``AgentDefinition.objects.get`` returns them in turn, so each
+    request starts from a copy that predates the others' writes.
+    """
+    manager = AgentDefinition.objects
+    real_get = manager.get
+    copies = [real_get(pk=agent.pk) for _ in range(count)]
+
+    def get(*args, **kwargs):
+        wanted = str(kwargs.get("id", kwargs.get("pk")))
+        if wanted == str(agent.pk) and copies:
+            return copies.pop(0)
+        return real_get(*args, **kwargs)
+
+    with patch.object(manager, "get", side_effect=get):
+        yield
+
+
+def assert_one_project_and_row(agent):
+    """One observe project and one provider row for the agent, linked to it."""
+    short, full = switch._agent_tags(agent)
+    names = [
+        agent.agent_name,
+        switch._tagged_name(agent.agent_name, short),
+        switch._tagged_name(agent.agent_name, full),
+    ]
+    rows = list(
+        ObservabilityProvider.no_workspace_objects.filter(project__name__in=names)
+    )
+    projects = list(Project._base_manager.filter(name__in=names, trace_type="observe"))
+    assert len(rows) == 1
+    assert len(projects) == 1
+    assert rows[0].project_id == projects[0].pk
+    assert _stored_agent(agent).observability_provider_id == rows[0].pk
+
+
+def test_switch_writes_only_the_link_when_it_creates_the_row(
+    organization, workspace, user
+):
+    agent = _agent(organization, workspace)
+    seen, recording = _statements()
+    with seams(make_summary(agent_definition_id=agent.id)), recording:
+        _turn(agent, True, user, organization, workspace)
+
+    assert agent_update_columns(seen) == [{"observability_provider_id", "updated_at"}]
+
+
+def test_switch_writes_only_the_link_when_it_clears_a_deleted_projects_row(
+    organization, workspace, user
+):
+    agent = _agent_with_row(organization, workspace, enabled=True)
+    Project._base_manager.filter(pk=agent.observability_provider.project_id).update(
+        deleted=True
+    )
+    agent = _stored_agent(agent)
+    seen, recording = _statements()
+    with seams(make_summary()), recording:
+        _turn(agent, True, user, organization, workspace)
+
+    assert agent_update_columns(seen) == [{"observability_provider_id", "updated_at"}]
+
+
+def test_switch_keeps_a_field_another_copy_wrote_meanwhile(
+    organization, workspace, user
+):
+    agent = _agent(organization, workspace, description="Before")
+    AgentDefinition.no_workspace_objects.filter(pk=agent.pk).update(
+        description="Written meanwhile"
+    )
+
+    _turn_on(agent, user, organization, workspace)
+
+    stored = _stored_agent(agent)
+    assert stored.description == "Written meanwhile"
+    assert stored.observability_provider_id is not None

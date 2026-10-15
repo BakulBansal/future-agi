@@ -24,6 +24,9 @@ from simulate.views import agent_definition as agent_definition_views
 from tracer.services import observability_switch
 from tracer.tests.test_observability_switch import (
     _created,
+    _statements,
+    _stored_agent,
+    agent_update_columns,
     make_summary,
     seams,
 )
@@ -456,6 +459,30 @@ class TestGetAgentDefinition:
 @pytest.mark.api
 class TestEditAgentDefinition:
     """Tests for PUT /simulate/agent-definitions/{id}/edit/"""
+
+    def test_edit_writes_only_the_fields_it_was_sent(
+        self, auth_client, agent_definition
+    ):
+        stale = AgentDefinition.objects.get(pk=agent_definition.pk)
+        AgentDefinition.objects.filter(pk=agent_definition.pk).update(
+            model="written-meanwhile"
+        )
+        seen, recording = _statements()
+        with (
+            recording,
+            patch.object(AgentDefinition.objects, "get", return_value=stale),
+        ):
+            response = auth_client.put(
+                f"/simulate/agent-definitions/{agent_definition.id}/edit/",
+                {"description": "Edited"},
+                format="json",
+            )
+
+        assert response.status_code == status.HTTP_200_OK
+        assert agent_update_columns(seen) == [{"description", "updated_at"}]
+        stored = _stored_agent(agent_definition)
+        assert stored.description == "Edited"
+        assert stored.model == "written-meanwhile"
 
     def test_edit_success(self, auth_client, agent_definition):
         response = auth_client.put(

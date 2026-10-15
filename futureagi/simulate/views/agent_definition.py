@@ -705,14 +705,19 @@ class EditAgentDefinitionView(APIView):
                 "websocket_url",
                 "websocket_headers",
             ]
+            changed_fields = []
             for field in update_fields:
                 if field == "api_key" and preserve_existing_api_key:
                     continue
                 if field in validated:
                     setattr(agent, field, validated[field])
+                    changed_fields.append(field)
             if "knowledge_base" in validated:
                 agent.knowledge_base_id = validated["knowledge_base"]
-            agent.save()
+                changed_fields.append("knowledge_base")
+            # Only what this request set: a full save of this copy could undo an
+            # observability link another request wrote meanwhile.
+            agent.save(update_fields=[*changed_fields, "updated_at"])
 
             # Route livekit_* fields to ProviderCredentials so they
             # actually persist (setattr on the model is a no-op for these

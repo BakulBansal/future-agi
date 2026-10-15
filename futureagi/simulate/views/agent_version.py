@@ -175,13 +175,13 @@ class CreateAgentVersionView(APIView):
                 "model",
                 "model_details",
             ]
-            changed = False
+            changed_fields = []
             for field in update_fields:
                 if field == "api_key" and preserve_existing_api_key:
                     continue
                 if field in validated:
                     setattr(agent, field, validated[field])
-                    changed = True
+                    changed_fields.append(field)
 
             if "knowledge_base" in validated:
                 kb_id = validated["knowledge_base"]
@@ -207,10 +207,12 @@ class CreateAgentVersionView(APIView):
                             status=status.HTTP_400_BAD_REQUEST,
                         )
                 agent.knowledge_base_id = kb_id
-                changed = True
+                changed_fields.append("knowledge_base")
             with transaction.atomic():
-                if changed:
-                    agent.save()
+                if changed_fields:
+                    # Only these columns: a full save would write back this
+                    # request's stale copy of the observability link.
+                    agent.save(update_fields=[*changed_fields, "updated_at"])
 
                 # Resolve masked secrets *before* creating the new version so we read
                 # them from the active version rather than the brand-new one. The UI
