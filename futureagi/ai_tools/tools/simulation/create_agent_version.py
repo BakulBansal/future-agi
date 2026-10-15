@@ -270,11 +270,10 @@ class CreateAgentVersionTool(BaseTool):
 
         try:
             with transaction.atomic():
-                # Save agent updates
+                # Only these columns: a full save would write back this
+                # copy's stale observability link.
                 if updated_fields:
                     agent.save(update_fields=updated_fields + ["updated_at"])
-                else:
-                    agent.save()
 
                 # --- Create new active version ---
                 version = agent.create_version(

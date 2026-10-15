@@ -267,7 +267,9 @@ def set_agent_observability(
     if row is not None:
         if row.project.deleted:
             agent_definition.observability_provider = None
-            agent_definition.save()
+            agent_definition.save(
+                update_fields=["observability_provider", "updated_at"]
+            )
             return None
         if enabled and not row.enabled:
             check_observability_prerequisites(agent_definition)
@@ -307,7 +309,8 @@ def set_agent_observability(
                 "observability project could not be created"
             )
         agent_definition.observability_provider = row
-        agent_definition.save()
+        # Only the link, so the caller's stale copy of other fields is not written.
+        agent_definition.save(update_fields=["observability_provider", "updated_at"])
     return row
 
 

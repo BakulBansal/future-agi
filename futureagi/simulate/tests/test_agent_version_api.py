@@ -20,6 +20,7 @@ from rest_framework import status
 
 from accounts.models.workspace import Workspace
 from agentcc.services.credential_manager import mask_key
+from model_hub.models.develop_dataset import KnowledgeBaseFile
 from model_hub.models.evals_metric import EvalTemplate
 from simulate.models import (
     AgentDefinition,
@@ -42,10 +43,15 @@ from tracer.tests.test_observability_switch import (
     _agent_with_row,
     _created,
     _row,
+    _statements,
     _stored,
+    _stored_agent,
     _stored_code_agent,
+    agent_update_columns,
+    assert_one_project_and_row,
     make_summary,
     seams,
+    stale_copies,
 )
 
 # ============================================================================
@@ -1293,3 +1299,77 @@ class TestCreateAgentVersionObservability:
 
         assert response.status_code == status.HTTP_201_CREATED
         assert ObservabilityProvider.no_workspace_objects.get(pk=row.pk).enabled
+
+    def test_double_submit_gives_the_agent_one_project_and_one_row(
+        self, auth_client, organization, workspace
+    ):
+        agent = _agent(organization, workspace, description="Before")
+
+        # Both submits read the agent before either one switched it on.
+        with seams(make_summary(agent_definition_id=agent.id)), stale_copies(agent):
+            first = _create_version(
+                auth_client,
+                agent,
+                {"description": "First", "observability_enabled": True},
+            )
+            second = _create_version(
+                auth_client,
+                agent,
+                {"description": "Second", "observability_enabled": True},
+            )
+
+        assert first.status_code == status.HTTP_201_CREATED
+        assert second.status_code == status.HTTP_201_CREATED
+        assert_one_project_and_row(agent)
+        assert _stored_agent(agent).description == "Second"
+
+    def test_version_view_never_writes_the_link_and_keeps_other_writes(
+        self, auth_client, organization, workspace
+    ):
+        agent = _agent_with_row(organization, workspace, enabled=True)
+        # Another copy writes a field, and clears the link, after this one is read.
+        with stale_copies(agent, count=1):
+            AgentDefinition.no_workspace_objects.filter(pk=agent.pk).update(
+                model="written-meanwhile", observability_provider=None
+            )
+            seen, recording = _statements()
+            with seams(make_summary(agent_definition_id=agent.id)), recording:
+                response = _create_version(
+                    auth_client,
+                    agent,
+                    {"description": "Changed", "observability_enabled": False},
+                )
+
+        assert response.status_code == status.HTTP_201_CREATED
+        written = agent_update_columns(seen)
+        assert written == [{"description", "updated_at"}]
+        stored = _stored_agent(agent)
+        assert stored.description == "Changed"
+        assert stored.model == "written-meanwhile"
+        assert stored.observability_provider_id is None
+
+    def test_version_saves_a_changed_knowledge_base(
+        self, auth_client, organization, workspace
+    ):
+        agent = _agent(organization, workspace)
+        knowledge_base = KnowledgeBaseFile.objects.create(
+            name="kb", organization=organization
+        )
+
+        response = _create_version(
+            auth_client, agent, {"knowledge_base": str(knowledge_base.id)}
+        )
+
+        assert response.status_code == status.HTTP_201_CREATED
+        assert _stored_agent(agent).knowledge_base_id == knowledge_base.id
+
+    def test_version_without_changed_fields_does_not_update_the_agent(
+        self, auth_client, organization, workspace
+    ):
+        agent = _agent(organization, workspace)
+        seen, recording = _statements()
+        with recording:
+            response = _create_version(auth_client, agent, {})
+
+        assert response.status_code == status.HTTP_201_CREATED
+        assert agent_update_columns(seen) == []
