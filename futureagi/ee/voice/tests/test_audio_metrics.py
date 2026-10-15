@@ -49,6 +49,16 @@ def test_invalid_bytes_raise_value_error():
         analyze_audio(b"not an audio recording")
 
 
+def test_empty_bytes_raise_value_error():
+    with pytest.raises(ValueError, match="empty"):
+        analyze_audio(b"")
+
+
+def test_non_bytes_input_raises_type_error():
+    with pytest.raises(TypeError, match="bytes-like"):
+        analyze_audio("not bytes")
+
+
 def test_stereo_is_supported_and_results_are_repeatable():
     recording = wav(stereo=True)
     first = analyze_audio(recording)

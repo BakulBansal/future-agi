@@ -1,7 +1,10 @@
 """Deterministic acoustic measurements for decoded single-speaker audio."""
 
+import logging
 from dataclasses import dataclass
 from io import BytesIO
+
+_LOGGER = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -17,6 +20,13 @@ def analyze_audio(audio_bytes: bytes) -> AudioMetrics:
     proxies. It is not calibrated ground-truth SNR and returns ``None`` when
     the decoded clip does not contain enough signal/noise information.
     """
+    if not isinstance(audio_bytes, (bytes, bytearray, memoryview)):
+        raise TypeError(
+            f"audio_bytes must be bytes-like, got {type(audio_bytes).__name__}"
+        )
+    if not audio_bytes:
+        raise ValueError("audio_bytes is empty")
+
     try:
         import librosa
         import numpy as np
@@ -49,7 +59,7 @@ def analyze_audio(audio_bytes: bytes) -> AudioMetrics:
             if valid.size:
                 pitch = float(np.mean(valid))
     except (ValueError, librosa.ParameterError):
-        pass
+        _LOGGER.warning("audio_metrics_pitch_unavailable", exc_info=True)
 
     frame_length = min(2048, samples.size)
     hop_length = max(1, frame_length // 4)

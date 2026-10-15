@@ -486,7 +486,9 @@ def _preprocess_audio_signal_metrics(inputs):
     try:
         from tfc.utils.storage import audio_bytes_from_url_or_base64
     except ImportError as exc:
-        logger.warning("audio_metrics_preprocess_import_failed", error=str(exc))
+        logger.warning(
+            "audio_metrics_preprocess_import_failed", error=str(exc), exc_info=True
+        )
         inputs["_audio_metrics_error"] = f"Audio loader unavailable: {exc}"
         return inputs
 
@@ -497,7 +499,9 @@ def _preprocess_audio_signal_metrics(inputs):
             pad_silence=False,
         )
     except Exception as exc:
-        logger.warning("audio_metrics_preprocess_load_failed", error=str(exc))
+        logger.warning(
+            "audio_metrics_preprocess_load_failed", error=str(exc), exc_info=True
+        )
         inputs["_audio_metrics_error"] = f"Could not load audio: {exc}"
         return inputs
 
@@ -506,7 +510,9 @@ def _preprocess_audio_signal_metrics(inputs):
 
         metrics = analyze_audio(audio_bytes)
     except (ValueError, RuntimeError, EOFError, OSError) as exc:
-        logger.warning("audio_metrics_preprocess_analysis_failed", error=str(exc))
+        logger.warning(
+            "audio_metrics_preprocess_analysis_failed", error=str(exc), exc_info=True
+        )
         inputs["_audio_metrics_error"] = f"Could not analyse audio: {exc}"
         return inputs
 
