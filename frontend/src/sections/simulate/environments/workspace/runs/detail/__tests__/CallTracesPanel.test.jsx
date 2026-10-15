@@ -26,7 +26,6 @@ const TRACES = [
     startTime: "2026-10-15T10:02:00Z",
     status: "OK",
     latencyMs: 1830,
-    callExecutionId: "call-1",
   },
   {
     traceId: "trace-1",
@@ -34,7 +33,6 @@ const TRACES = [
     startTime: "2026-10-15T10:01:00Z",
     status: "ERROR",
     latencyMs: 420,
-    callExecutionId: "call-1",
   },
 ];
 
@@ -58,7 +56,7 @@ describe("CallTracesPanel", () => {
 
     expect(screen.getByText("book_ride")).toBeInTheDocument();
     expect(screen.getByText("verify_identity")).toBeInTheDocument();
-    expect(screen.getByText("1,830 ms")).toBeInTheDocument();
+    expect(screen.getByText("1.8s")).toBeInTheDocument();
     expect(mocks.store.setVisibleTraces).toHaveBeenLastCalledWith([
       { traceId: "trace-2", projectId: "hidden-project" },
       { traceId: "trace-1", projectId: "hidden-project" },
@@ -97,7 +95,6 @@ describe("CallTracesPanel", () => {
           startTime: null,
           status: null,
           latencyMs: null,
-          callExecutionId: "call-1",
         },
       ],
     });

@@ -12,7 +12,7 @@ import Iconify from "src/components/iconify";
 import {
   callTranscript,
   useCallExecutionV3Detail,
-  useRunTraces,
+  useCallTraces,
 } from "src/api/simulate-environments/runDetail";
 import VoiceDetailDrawerV2 from "src/components/VoiceDetailDrawerV2";
 import CallTracesPanel from "./CallTracesPanel";
@@ -86,7 +86,7 @@ export default function VoiceCallDrawer({
     [data],
   );
 
-  const callTraces = useRunTraces(executionId, { callExecutionId: task.id });
+  const callTraces = useCallTraces(executionId, task.id);
   const leftPanelTabs = useMemo(
     () =>
       callTraces.projectId || callTraces.isError

@@ -22,6 +22,7 @@ import {
 
 import VoiceDrawerHeader from "./VoiceDrawerHeader";
 import VoiceLeftPanel from "./VoiceLeftPanel";
+import { LEFT_PANEL_TAB_SHAPE } from "./constants";
 import VoiceRightPanel from "./VoiceRightPanel";
 import { shareResourceFor } from "./shareResource";
 
@@ -630,7 +631,7 @@ VoiceDetailDrawerV2.propTypes = {
   embedded: PropTypes.bool,
   hiddenActionIds: PropTypes.arrayOf(PropTypes.string),
   hidePathTabs: PropTypes.bool,
-  leftPanelTabs: PropTypes.array,
+  leftPanelTabs: PropTypes.arrayOf(LEFT_PANEL_TAB_SHAPE),
   hideAnnotationTab: PropTypes.bool,
   showFixWithFalcon: PropTypes.bool,
 };

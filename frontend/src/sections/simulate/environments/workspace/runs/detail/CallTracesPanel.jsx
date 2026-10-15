@@ -2,10 +2,11 @@ import { useEffect } from "react";
 import PropTypes from "prop-types";
 import { alpha } from "@mui/material/styles";
 import { Box, ButtonBase, Stack, Typography } from "@mui/material";
-import Iconify from "src/components/iconify";
 import { fDateTime } from "src/utils/format-time";
+import { formatLatency } from "src/sections/projects/LLMTracing/formatters";
 import { useLLMTracingStoreShallow } from "src/sections/projects/LLMTracing/states";
 import LLMTracingTraceDetailDrawer from "src/sections/projects/LLMTracing/LLMTracingTraceDetailDrawer";
+import EmptyState from "../../../components/EmptyState";
 import { CALL_TRACES_COPY } from "./callTraces.constants";
 
 const MONO = "ui-monospace, Menlo, monospace";
@@ -32,7 +33,7 @@ export default function CallTracesPanel({
 
   if (isError) {
     return (
-      <PanelMessage
+      <EmptyState
         icon="solar:danger-triangle-linear"
         title={CALL_TRACES_COPY.error}
       />
@@ -42,7 +43,7 @@ export default function CallTracesPanel({
   return (
     <Stack sx={{ minHeight: 0, flex: 1 }}>
       {traces.length === 0 ? (
-        <PanelMessage
+        <EmptyState
           icon="solar:graph-new-linear"
           title={CALL_TRACES_COPY.empty}
           body={CALL_TRACES_COPY.emptyBody}
@@ -80,32 +81,6 @@ CallTracesPanel.propTypes = {
   ).isRequired,
   projectId: PropTypes.string,
   isError: PropTypes.bool,
-};
-
-function PanelMessage({ icon, title, body }) {
-  return (
-    <Stack
-      alignItems="center"
-      justifyContent="center"
-      spacing={1}
-      sx={{ flex: 1, py: 6, px: 3, textAlign: "center" }}
-    >
-      <Iconify icon={icon} width={22} sx={{ color: "text.subtitle" }} />
-      <Typography sx={{ typography: "s2", fontWeight: "fontWeightSemiBold" }}>
-        {title}
-      </Typography>
-      {body && (
-        <Typography sx={{ typography: "s3", color: "text.subtitle" }}>
-          {body}
-        </Typography>
-      )}
-    </Stack>
-  );
-}
-PanelMessage.propTypes = {
-  icon: PropTypes.string.isRequired,
-  title: PropTypes.string.isRequired,
-  body: PropTypes.string,
 };
 
 function TraceRow({ trace, onOpen }) {
@@ -166,7 +141,7 @@ function TraceRow({ trace, onOpen }) {
       >
         {trace.startTime && <span>{fDateTime(trace.startTime)}</span>}
         {trace.latencyMs != null && (
-          <span>{CALL_TRACES_COPY.latency(trace.latencyMs)}</span>
+          <span>{formatLatency(trace.latencyMs)}</span>
         )}
         {!hasRoot && (
           <Box component="span" sx={{ fontFamily: MONO }}>

@@ -9,13 +9,19 @@ time window, newest first.
 
 from __future__ import annotations
 
+import uuid
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
 from django.utils import timezone
 
-from simulate.models import CallExecution, HostedHarnessJob, TestExecution
+from simulate.models import (
+    AgentDefinition,
+    CallExecution,
+    HostedHarnessJob,
+    TestExecution,
+)
 from simulate.services.agent_setup import AgentNotFound, agent_summary
 from tracer.models.project import Project
 from tracer.services.clickhouse.client import get_clickhouse_client
@@ -44,7 +50,13 @@ class RunTracesSource:
     project_id: str
 
 
-def simulation_project_id(agent) -> str | None:
+@dataclass(frozen=True)
+class RunTraces:
+    project_id: str | None
+    traces: list[RunTrace]
+
+
+def simulation_project_id(agent: AgentDefinition) -> str | None:
     project = Project.with_simulation.filter(
         simulation_agent=agent, deleted=False
     ).first()
@@ -60,8 +72,11 @@ def run_traces_source(execution: TestExecution) -> RunTracesSource | None:
     agent = execution.agent_definition or execution.run_test.agent_definition
     if agent is None:
         return None
+    version = execution.agent_version or execution.run_test.agent_version
     try:
-        summary = agent_summary(agent.id)
+        summary = agent_summary(
+            agent.id, agent_version_id=version.id if version else None
+        )
     except AgentNotFound:
         return None
     if summary.kind != TRACED_AGENT_KIND:
@@ -72,10 +87,32 @@ def run_traces_source(execution: TestExecution) -> RunTracesSource | None:
     return RunTracesSource(job=job, project_id=project_id)
 
 
-def is_call_of_run(execution: TestExecution, call_execution_id: str) -> bool:
-    return CallExecution.objects.filter(
+def call_of_run(execution: TestExecution, raw_id: str) -> str | None:
+    try:
+        call_execution_id = str(uuid.UUID(raw_id))
+    except ValueError:
+        return None
+    if not CallExecution.objects.filter(
         id=call_execution_id, test_execution=execution
-    ).exists()
+    ).exists():
+        return None
+    return call_execution_id
+
+
+def list_run_traces(
+    execution: TestExecution, *, call_execution_id: str | None = None
+) -> RunTraces:
+    source = run_traces_source(execution)
+    if source is None:
+        return RunTraces(project_id=None, traces=[])
+    if call_execution_id is not None:
+        call_execution_id = call_of_run(execution, call_execution_id)
+        if call_execution_id is None:
+            return RunTraces(project_id=source.project_id, traces=[])
+    return RunTraces(
+        project_id=source.project_id,
+        traces=read_run_traces(source, call_execution_id=call_execution_id),
+    )
 
 
 def run_traces_sql(*, by_call: bool = False) -> str:

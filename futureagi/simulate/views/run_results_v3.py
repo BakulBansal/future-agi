@@ -45,14 +45,11 @@ from simulate.services.run_results_v3_queries import (
     run_call_rows_queryset,
     run_calls_queryset,
 )
-from simulate.services.run_traces_v3 import (
-    is_call_of_run,
-    read_run_traces,
-    run_traces_source,
-)
+from simulate.services.run_traces_v3 import list_run_traces
 from simulate.services.test_executor import build_eval_configs_map
 from simulate.views.scoping import run_test_workspace_filter
 from tfc.utils.api_contracts import validated_request
+from tfc.utils.api_serializers import ApiDetailErrorResponseSerializer
 from tracer.services.clickhouse.client import CHError
 
 logger = structlog.get_logger(__name__)
@@ -559,50 +556,30 @@ class RunTracesV3View(APIView):
 
     @validated_request(
         query_serializer=RunTracesV3QuerySerializer,
-        responses={200: RunTracesV3ResponseSerializer},
+        responses={
+            200: RunTracesV3ResponseSerializer,
+            503: ApiDetailErrorResponseSerializer,
+        },
         operation_id="simulate_v3_test_execution_traces",
     )
     def get(self, request, test_execution_id, *args, **kwargs):
         execution = _execution_for_request(request, test_execution_id)
-        source = run_traces_source(execution)
-        if source is None:
-            return Response({"project_id": None, "traces": []})
-        call_execution_id = request.validated_query_data.get("call_execution_id")
-        if call_execution_id is not None:
-            call_execution_id = _call_of_run(execution, call_execution_id)
-            if call_execution_id is None:
-                return Response({"project_id": source.project_id, "traces": []})
         try:
-            traces = read_run_traces(source, call_execution_id=call_execution_id)
+            result = list_run_traces(
+                execution,
+                call_execution_id=request.validated_query_data.get("call_execution_id"),
+            )
         except (CHError, TimeoutError) as exc:
             logger.warning(
                 "run_traces_read_failed",
                 test_execution_id=str(execution.id),
-                job_id=str(source.job.id),
                 error=type(exc).__name__,
             )
             return Response(
                 {"detail": "Traces are unavailable right now"},
                 status=status.HTTP_503_SERVICE_UNAVAILABLE,
             )
-        return Response(
-            RunTracesV3ResponseSerializer(
-                {
-                    "project_id": source.project_id,
-                    "traces": [asdict(trace) for trace in traces],
-                }
-            ).data
-        )
-
-
-def _call_of_run(execution, raw_id):
-    try:
-        call_execution_id = str(uuid.UUID(raw_id))
-    except ValueError:
-        return None
-    if not is_call_of_run(execution, call_execution_id):
-        return None
-    return call_execution_id
+        return Response(RunTracesV3ResponseSerializer(asdict(result)).data)
 
 
 class RunCallsV3View(APIView):

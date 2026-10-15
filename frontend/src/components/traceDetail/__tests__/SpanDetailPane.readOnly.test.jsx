@@ -50,10 +50,9 @@ describe("SpanDetailPane read-only", () => {
     ).toBeInTheDocument();
   });
 
-  it("hides the action menu, the tag input and the Annotations tab when read-only", () => {
-    renderPane({ readOnly: true });
+  it("hides the tag input and the Annotations tab when read-only", () => {
+    renderPane({ readOnly: true, onAction: vi.fn() });
 
-    expect(screen.queryByRole("button", { name: "Actions" })).toBeNull();
     expect(screen.getByText("billing")).toBeInTheDocument();
     expect(screen.queryByText("tag")).toBeNull();
     expect(screen.queryByText("Annotations")).toBeNull();

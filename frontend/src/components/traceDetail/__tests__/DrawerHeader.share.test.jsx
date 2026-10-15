@@ -1,5 +1,5 @@
 import React from "react";
-import { render } from "@testing-library/react";
+import { render } from "src/utils/test-utils";
 import { describe, expect, it, vi } from "vitest";
 import DrawerHeader from "../DrawerHeader";
 

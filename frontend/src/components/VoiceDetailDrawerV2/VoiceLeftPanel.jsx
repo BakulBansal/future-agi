@@ -8,6 +8,7 @@ import { getLoadingStateWithRespectiveStatus } from "src/sections/test-detail/co
 import PathAnalysisView from "./PathAnalysisView";
 import TranscriptView from "./TranscriptView";
 import VoiceAudioBridge from "./VoiceAudioBridge";
+import { LEFT_PANEL_TAB_SHAPE } from "./constants";
 
 const TABS = {
   TRANSCRIPT: "transcript",
@@ -215,14 +216,7 @@ VoiceLeftPanel.propTypes = {
   scenarioId: PropTypes.string,
   embedded: PropTypes.bool,
   hidePathTabs: PropTypes.bool,
-  extraTabs: PropTypes.arrayOf(
-    PropTypes.shape({
-      label: PropTypes.string.isRequired,
-      value: PropTypes.string.isRequired,
-      icon: PropTypes.string,
-      content: PropTypes.node,
-    }),
-  ),
+  extraTabs: PropTypes.arrayOf(LEFT_PANEL_TAB_SHAPE),
 };
 
 export default VoiceLeftPanel;

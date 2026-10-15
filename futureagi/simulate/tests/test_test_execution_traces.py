@@ -6,6 +6,7 @@ import pytest
 from django.utils import timezone
 from rest_framework import status
 
+from accounts.models import Organization
 from model_hub.models.ai_model import AIModel
 from simulate.models import (
     AgentDefinition,
@@ -17,6 +18,8 @@ from simulate.models import (
     TestExecution,
 )
 from simulate.services import run_traces_v3
+from simulate.services.agent_setup import store_agent
+from simulate.tests.test_agent_setup_service import source_agent
 from tracer.models.project import Project
 from tracer.services.clickhouse.client import CHError
 
@@ -74,8 +77,12 @@ def simulator_agent(db, organization, workspace):
 
 
 @pytest.fixture
-def execution(db, organization, workspace, agent, simulator_agent):
-    run_test = RunTest.objects.create(
+def version(agent):
+    return agent.create_version(description="", commit_message="first", status="active")
+
+
+def _execution(organization, workspace, agent, simulator_agent, version=None):
+    run_test = RunTest.no_workspace_objects.create(
         name="Traces run",
         agent_definition=agent,
         simulator_agent=simulator_agent,
@@ -87,7 +94,13 @@ def execution(db, organization, workspace, agent, simulator_agent):
         status=TestExecution.ExecutionStatus.COMPLETED,
         simulator_agent=simulator_agent,
         agent_definition=agent,
+        agent_version=version,
     )
+
+
+@pytest.fixture
+def execution(db, organization, workspace, agent, simulator_agent, version):
+    return _execution(organization, workspace, agent, simulator_agent, version)
 
 
 @pytest.fixture
@@ -162,15 +175,15 @@ def clickhouse(monkeypatch):
     return fake
 
 
-@pytest.fixture
-def summary_kind(monkeypatch):
-    def set_kind(kind):
-        monkeypatch.setattr(
-            run_traces_v3, "agent_summary", lambda agent_id: SimpleNamespace(kind=kind)
-        )
+def _store(version, kind):
+    store_agent(
+        agent_version_id=version.id, agent=source_agent(kind=kind), sdk_version="0.2.3"
+    )
 
-    set_kind("source")
-    return set_kind
+
+@pytest.fixture
+def source_setup(version):
+    _store(version, "source")
 
 
 def _row(
@@ -194,7 +207,7 @@ def test_run_traces_listed_from_the_hidden_project_for_a_bound_source_agent(
     call,
     hidden_project,
     clickhouse,
-    summary_kind,
+    source_setup,
     organization,
     workspace,
     user,
@@ -265,7 +278,7 @@ def test_run_traces_listed_from_the_hidden_project_for_a_bound_source_agent(
 
 
 def test_the_statement_is_bounded_to_the_project_the_job_and_its_window(
-    auth_client, execution, job, hidden_project, clickhouse, summary_kind
+    auth_client, execution, job, hidden_project, clickhouse, source_setup
 ):
     auth_client.get(URL.format(execution.id))
 
@@ -287,7 +300,7 @@ def test_the_statement_is_bounded_to_the_project_the_job_and_its_window(
 
 
 def test_a_first_launch_is_listed_by_the_job_id_alone(
-    auth_client, execution, job, hidden_project, clickhouse, summary_kind
+    auth_client, execution, job, hidden_project, clickhouse, source_setup
 ):
     clickhouse.rows = [
         (str(hidden_project.id), str(job.id), _row("trace-a", timezone.now()))
@@ -306,7 +319,7 @@ def test_a_run_still_going_is_read_up_to_now(
     execution,
     hidden_project,
     clickhouse,
-    summary_kind,
+    source_setup,
     organization,
     workspace,
 ):
@@ -327,7 +340,7 @@ def test_one_calls_traces(
     scenario,
     hidden_project,
     clickhouse,
-    summary_kind,
+    source_setup,
 ):
     other_call = CallExecution.objects.create(
         test_execution=execution, scenario=scenario
@@ -354,7 +367,7 @@ def test_one_calls_traces(
 
 @pytest.mark.parametrize("value", ["not-a-uuid", "", str(uuid.uuid4())])
 def test_a_call_that_is_not_this_runs_lists_nothing(
-    auth_client, execution, job, hidden_project, clickhouse, summary_kind, value
+    auth_client, execution, job, hidden_project, clickhouse, source_setup, value
 ):
     response = auth_client.get(URL.format(execution.id), {"call_execution_id": value})
 
@@ -371,7 +384,7 @@ def test_a_call_of_another_run_lists_nothing(
     simulator_agent,
     hidden_project,
     clickhouse,
-    summary_kind,
+    source_setup,
 ):
     sibling = TestExecution.objects.create(
         run_test=execution.run_test,
@@ -392,7 +405,7 @@ def test_a_call_of_another_run_lists_nothing(
 
 
 def test_an_unbound_run_lists_nothing(
-    auth_client, execution, hidden_project, clickhouse, summary_kind
+    auth_client, execution, hidden_project, clickhouse, source_setup
 ):
     response = auth_client.get(URL.format(execution.id))
 
@@ -401,18 +414,35 @@ def test_an_unbound_run_lists_nothing(
     assert clickhouse.calls == []
 
 
-@pytest.mark.parametrize("kind", ["hosted", None])
+@pytest.mark.parametrize("kind", ["endpoint", None])
 def test_an_agent_that_is_not_source_lists_nothing(
-    auth_client, execution, job, hidden_project, clickhouse, summary_kind, kind
+    auth_client, execution, job, version, hidden_project, clickhouse, kind
 ):
-    summary_kind(kind)
+    if kind is not None:
+        _store(version, kind)
 
     assert auth_client.get(URL.format(execution.id)).json() == NOTHING
     assert clickhouse.calls == []
 
 
+def test_the_runs_own_version_decides_the_kind(
+    auth_client, execution, job, agent, source_setup, hidden_project, clickhouse
+):
+    newer = agent.create_version(
+        description="", commit_message="second", status="active"
+    )
+    _store(newer, "endpoint")
+    clickhouse.rows = [
+        (str(hidden_project.id), str(job.id), _row("trace-a", timezone.now()))
+    ]
+
+    response = auth_client.get(URL.format(execution.id))
+
+    assert [trace["trace_id"] for trace in response.json()["traces"]] == ["trace-a"]
+
+
 def test_an_agent_with_no_hidden_project_lists_nothing(
-    auth_client, execution, job, clickhouse, summary_kind, monkeypatch
+    auth_client, execution, job, clickhouse, source_setup, monkeypatch
 ):
     monkeypatch.setattr(run_traces_v3, "simulation_project_id", lambda agent: None)
 
@@ -424,7 +454,7 @@ def test_an_agent_with_no_hidden_project_lists_nothing(
     "error", [CHError("boom"), TimeoutError("ClickHouse read deadline exhausted")]
 )
 def test_a_clickhouse_failure_is_the_views_error(
-    auth_client, execution, job, hidden_project, clickhouse, summary_kind, error
+    auth_client, execution, job, hidden_project, clickhouse, source_setup, error
 ):
     clickhouse.error = error
 
@@ -435,10 +465,33 @@ def test_a_clickhouse_failure_is_the_views_error(
 
 
 def test_a_run_of_another_organization_is_not_found(
-    auth_client, execution, job, hidden_project, clickhouse, summary_kind
+    auth_client, hidden_project, clickhouse, source_setup
 ):
-    assert (
-        auth_client.get(URL.format(uuid.uuid4())).status_code
-        == status.HTTP_404_NOT_FOUND
+    stranger = Organization.objects.create(name="Other Organization")
+    foreign_agent = AgentDefinition.no_workspace_objects.create(
+        agent_name="Foreign agent",
+        agent_type=AgentDefinition.AgentTypeChoices.TEXT,
+        inbound=True,
+        organization=stranger,
     )
+    foreign_version = foreign_agent.create_version(
+        description="", commit_message="first", status="active"
+    )
+    _store(foreign_version, "source")
+    foreign_simulator = SimulatorAgent.no_workspace_objects.create(
+        name="Foreign simulator",
+        prompt="You are a test simulator.",
+        voice_provider="elevenlabs",
+        voice_name="marissa",
+        model="gpt-4",
+        organization=stranger,
+    )
+    foreign = _execution(
+        stranger, None, foreign_agent, foreign_simulator, foreign_version
+    )
+    _job(stranger, None, test_execution=foreign, terminal_at=timezone.now())
+
+    response = auth_client.get(URL.format(foreign.id))
+
+    assert response.status_code == status.HTTP_404_NOT_FOUND
     assert clickhouse.calls == []

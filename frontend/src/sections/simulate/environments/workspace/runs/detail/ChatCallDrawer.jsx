@@ -9,7 +9,7 @@ import { CustomTabs } from "src/components/tabs/tabs";
 import { ShareDialog } from "src/components/share-dialog";
 import {
   useCallDetail,
-  useRunTraces,
+  useCallTraces,
 } from "src/api/simulate-environments/runDetail";
 
 import { BUILD_TONES } from "../../../buildEnvironment/buildTones";
@@ -113,7 +113,7 @@ export default function ChatCallDrawer({
   const [side, setSide] = useState("analytics");
   const [artifact, setArtifact] = useState("transcript");
   const { callDetail, isLoading } = useCallDetail(task.id);
-  const callTraces = useRunTraces(executionId, { callExecutionId: task.id });
+  const callTraces = useCallTraces(executionId, task.id);
   const hasTraces = !!callTraces.projectId || callTraces.isError;
   const showTraces = hasTraces && artifact === "traces";
 

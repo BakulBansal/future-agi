@@ -32130,6 +32130,9 @@ export const OPENAPI_CONTRACT = Object.freeze({
           200: {
             $ref: "#/definitions/RunTracesV3Response",
           },
+          503: {
+            $ref: "#/definitions/ApiDetailErrorResponse",
+          },
           default: {
             $ref: "#/definitions/ManagementAPIErrorResponse",
           },

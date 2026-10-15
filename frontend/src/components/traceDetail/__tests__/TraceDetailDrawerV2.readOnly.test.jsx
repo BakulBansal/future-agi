@@ -5,8 +5,27 @@ import { render } from "src/utils/test-utils";
 
 const mocks = vi.hoisted(() => ({
   getSavedViews: vi.fn(() => ({ data: undefined })),
-  getTraceDetail: vi.fn(() => ({ data: undefined, isLoading: true })),
+  getTraceDetail: vi.fn(() => ({
+    isLoading: false,
+    data: {
+      trace: { id: "trace-1", tags: [] },
+      observation_spans: [
+        {
+          observation_span: {
+            id: "span-1",
+            trace: "trace-1",
+            name: "bookstore_agent",
+            observation_type: "agent",
+            start_time: "2026-10-14T11:08:13Z",
+          },
+          children: [],
+        },
+      ],
+    },
+  })),
   toolbarProps: vi.fn(),
+  headerProps: vi.fn(),
+  spanPaneProps: vi.fn(),
 }));
 
 vi.mock("src/api/project/saved-views", async (importOriginal) => ({
@@ -21,6 +40,20 @@ vi.mock("src/api/project/trace-detail", () => ({
 vi.mock("../DrawerToolbar", () => ({
   default: (props) => {
     mocks.toolbarProps(props);
+    return null;
+  },
+}));
+
+vi.mock("../DrawerHeader", () => ({
+  default: (props) => {
+    mocks.headerProps(props);
+    return null;
+  },
+}));
+
+vi.mock("../SpanDetailPane", () => ({
+  default: (props) => {
+    mocks.spanPaneProps(props);
     return null;
   },
 }));
@@ -42,28 +75,37 @@ const renderDrawer = (props) =>
 
 describe("TraceDetailDrawerV2 read-only", () => {
   beforeEach(() => {
+    Element.prototype.scrollIntoView = vi.fn();
     mocks.getSavedViews.mockClear();
     mocks.getTraceDetail.mockClear();
     mocks.toolbarProps.mockClear();
+    mocks.headerProps.mockClear();
+    mocks.spanPaneProps.mockClear();
   });
 
-  it("reads the project's saved views and offers to edit them when it can act", () => {
+  it("reads saved views and offers every action when it can act", () => {
     renderDrawer();
 
     expect(mocks.getSavedViews).toHaveBeenLastCalledWith("project-1");
     expect(mocks.toolbarProps.mock.lastCall[0].readOnly).toBe(false);
-    expect(mocks.getTraceDetail).toHaveBeenLastCalledWith("trace-1", {
-      projectId: "project-1",
-    });
+    const header = mocks.headerProps.mock.lastCall[0];
+    expect(header.onShare).toEqual(expect.any(Function));
+    expect(header.onOpenNewTab).toEqual(expect.any(Function));
+    const pane = mocks.spanPaneProps.mock.lastCall[0];
+    expect(pane.onAction).toEqual(expect.any(Function));
+    expect(pane.readOnly).toBe(false);
   });
 
-  it("asks for no saved views and locks the toolbar", () => {
+  it("asks for no saved views and offers no action when read-only", () => {
     renderDrawer({ readOnly: true });
 
     expect(mocks.getSavedViews).toHaveBeenLastCalledWith(null);
     expect(mocks.toolbarProps.mock.lastCall[0].readOnly).toBe(true);
-    expect(mocks.getTraceDetail).toHaveBeenLastCalledWith("trace-1", {
-      projectId: "project-1",
-    });
+    const header = mocks.headerProps.mock.lastCall[0];
+    expect(header.onShare).toBeUndefined();
+    expect(header.onOpenNewTab).toBeUndefined();
+    const pane = mocks.spanPaneProps.mock.lastCall[0];
+    expect(pane.onAction).toBeUndefined();
+    expect(pane.readOnly).toBe(true);
   });
 });

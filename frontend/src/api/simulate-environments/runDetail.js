@@ -592,34 +592,29 @@ const traceRow = (raw) => ({
   startTime: raw.start_time ?? null,
   status: raw.status ?? null,
   latencyMs: raw.latency_ms ?? null,
-  callExecutionId: raw.call_execution_id ?? null,
 });
 
-export function useRunTraces(
-  executionId,
-  { callExecutionId = null, enabled = true } = {},
-) {
+export function useCallTraces(executionId, callExecutionId) {
   const query = useQuery({
-    queryKey: ["simulation-run-traces-v3", executionId, callExecutionId],
+    queryKey: ["simulation-call-traces-v3", executionId, callExecutionId],
     queryFn: async () => {
       const response = await axios.get(
         endpoints.runResultsV3.traces(executionId),
-        {
-          params: callExecutionId
-            ? { call_execution_id: callExecutionId }
-            : undefined,
-        },
+        { params: { call_execution_id: callExecutionId } },
       );
       return response.data;
     },
-    enabled: !!executionId && enabled,
+    enabled: !!executionId && !!callExecutionId,
   });
-  const projectId = query.data?.project_id ?? null;
   const traces = useMemo(
-    () => (projectId ? (query.data?.traces ?? []).map(traceRow) : []),
-    [projectId, query.data],
+    () => (query.data?.traces ?? []).map(traceRow),
+    [query.data],
   );
-  return { ...query, projectId, traces };
+  return {
+    projectId: query.data?.project_id ?? null,
+    traces,
+    isError: query.isError,
+  };
 }
 
 /**

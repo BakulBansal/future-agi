@@ -67356,19 +67356,26 @@ export type simulateV3TestExecutionTracesResponse200 = {
   status: 200;
 };
 
+export type simulateV3TestExecutionTracesResponse503 = {
+  data: ApiDetailErrorResponseApi;
+  status: 503;
+};
+
 export type simulateV3TestExecutionTracesResponseDefault = {
   data: ManagementAPIErrorResponseApi;
-  status: Exclude<HTTPStatusCodes, 200>;
+  status: Exclude<HTTPStatusCodes, 200 | 503>;
 };
 
 export type simulateV3TestExecutionTracesResponseSuccess =
   simulateV3TestExecutionTracesResponse200 & {
     headers: Headers;
   };
-export type simulateV3TestExecutionTracesResponseError =
-  simulateV3TestExecutionTracesResponseDefault & {
-    headers: Headers;
-  };
+export type simulateV3TestExecutionTracesResponseError = (
+  | simulateV3TestExecutionTracesResponse503
+  | simulateV3TestExecutionTracesResponseDefault
+) & {
+  headers: Headers;
+};
 
 export type simulateV3TestExecutionTracesResponse =
   | simulateV3TestExecutionTracesResponseSuccess

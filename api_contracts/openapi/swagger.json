@@ -58176,6 +58176,12 @@
                             "$ref": "#/definitions/RunTracesV3Response"
                         }
                     },
+                    "503": {
+                        "description": "",
+                        "schema": {
+                            "$ref": "#/definitions/ApiDetailErrorResponse"
+                        }
+                    },
                     "default": {
                         "description": "Default error response",
                         "schema": {

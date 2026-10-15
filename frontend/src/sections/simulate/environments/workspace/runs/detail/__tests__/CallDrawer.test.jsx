@@ -8,7 +8,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 // decision under test) stays real — it lives in its own `callRouting` module.
 const useCallDetail = vi.fn();
 const useCallExecutionV3Detail = vi.fn();
-const useRunTraces = vi.fn(() => ({
+const useCallTraces = vi.fn(() => ({
   projectId: null,
   traces: [],
   isError: false,
@@ -19,7 +19,7 @@ vi.mock("src/api/simulate-environments/runDetail", async (importOriginal) => {
     ...actual,
     useCallDetail: (...a) => useCallDetail(...a),
     useCallExecutionV3Detail: (...a) => useCallExecutionV3Detail(...a),
-    useRunTraces: (...a) => useRunTraces(...a),
+    useCallTraces: (...a) => useCallTraces(...a),
   };
 });
 
@@ -611,7 +611,7 @@ describe("CallDrawer — the call's traces", () => {
   const ROWS = [{ traceId: "trace-1", name: "book_ride" }];
 
   afterEach(() => {
-    useRunTraces.mockReturnValue({
+    useCallTraces.mockReturnValue({
       projectId: null,
       traces: [],
       isError: false,
@@ -623,7 +623,7 @@ describe("CallDrawer — the call's traces", () => {
       data: { id: "voice-1", transcript: [] },
       isPending: false,
     });
-    useRunTraces.mockReturnValue({
+    useCallTraces.mockReturnValue({
       projectId: "hidden-project",
       traces: ROWS,
       isError: false,
@@ -638,9 +638,7 @@ describe("CallDrawer — the call's traces", () => {
       />,
     );
 
-    expect(useRunTraces).toHaveBeenLastCalledWith("exec-1", {
-      callExecutionId: "voice-1",
-    });
+    expect(useCallTraces).toHaveBeenLastCalledWith("exec-1", "voice-1");
     expect(screen.getByTestId("voice-drawer")).toHaveAttribute(
       "data-left-tabs",
       "Traces",
@@ -652,7 +650,7 @@ describe("CallDrawer — the call's traces", () => {
       data: { id: "voice-1", transcript: [] },
       isPending: false,
     });
-    useRunTraces.mockReturnValue({ projectId: null, traces: [], isError: true });
+    useCallTraces.mockReturnValue({ projectId: null, traces: [], isError: true });
 
     render(
       <CallDrawer
@@ -683,9 +681,7 @@ describe("CallDrawer — the call's traces", () => {
       />,
     );
 
-    expect(useRunTraces).toHaveBeenLastCalledWith(null, {
-      callExecutionId: "voice-1",
-    });
+    expect(useCallTraces).toHaveBeenLastCalledWith(null, "voice-1");
     expect(screen.getByTestId("voice-drawer")).toHaveAttribute(
       "data-left-tabs",
       "",
@@ -695,7 +691,7 @@ describe("CallDrawer — the call's traces", () => {
   it("gives a chat a Traces tab beside the transcript that opens the call's traces", async () => {
     const user = userEvent.setup();
     useCallDetail.mockReturnValue({ callDetail: CHAT_DETAIL, isLoading: false });
-    useRunTraces.mockReturnValue({
+    useCallTraces.mockReturnValue({
       projectId: "hidden-project",
       traces: ROWS,
       isError: false,
@@ -710,9 +706,7 @@ describe("CallDrawer — the call's traces", () => {
       />,
     );
 
-    expect(useRunTraces).toHaveBeenLastCalledWith("exec-1", {
-      callExecutionId: "chat-1",
-    });
+    expect(useCallTraces).toHaveBeenLastCalledWith("exec-1", "chat-1");
     expect(screen.queryByTestId("call-traces")).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("tab", { name: "Traces" }));
