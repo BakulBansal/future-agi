@@ -23160,6 +23160,7 @@ export interface RunCallsV3ResponseApi {
   results: RunCallApi[];
   groups: RunGroupApi[];
   facets: RunFacetsApi;
+  status_counts: OutcomeCountsApi;
   evaluation_columns: EvaluationColumnApi[];
 }
 
