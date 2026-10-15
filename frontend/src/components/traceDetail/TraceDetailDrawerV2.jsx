@@ -237,7 +237,9 @@ const TraceDetailDrawerV2 = ({
   // ---------------------------------------------------------------------------
   // Saved Views — auto-save per tab
   // ---------------------------------------------------------------------------
-  const { data: savedViewsData } = useGetSavedViews(projectId);
+  const { data: savedViewsData } = useGetSavedViews(
+    readOnly ? null : projectId,
+  );
   const { mutate: createSavedView } = useCreateSavedView(projectId);
   const { mutate: updateSavedView } = useUpdateSavedView(projectId);
   const { mutate: deleteSavedView } = useDeleteSavedView(projectId);
@@ -930,6 +932,7 @@ const TraceDetailDrawerV2 = ({
       <DrawerToolbar
         tabs={drawerTabs}
         activeTabId={activeDrawerTab}
+        readOnly={readOnly}
         onTabChange={handleTabChange}
         onCloseTab={handleCloseTab}
         onCreateTab={handleCreateView}

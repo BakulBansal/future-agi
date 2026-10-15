@@ -50,16 +50,13 @@ describe("SpanDetailPane read-only", () => {
     ).toBeInTheDocument();
   });
 
-  it("hides the action menu, the tag input and the label button when read-only", async () => {
-    const user = userEvent.setup();
+  it("hides the action menu, the tag input and the Annotations tab when read-only", () => {
     renderPane({ readOnly: true });
 
     expect(screen.queryByRole("button", { name: "Actions" })).toBeNull();
     expect(screen.getByText("billing")).toBeInTheDocument();
     expect(screen.queryByText("tag")).toBeNull();
-
-    await user.click(screen.getByText("Annotations"));
-    expect(screen.getByTestId("scores-list")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Add Label" })).toBeNull();
+    expect(screen.queryByText("Annotations")).toBeNull();
+    expect(screen.queryByTestId("scores-list")).toBeNull();
   });
 });

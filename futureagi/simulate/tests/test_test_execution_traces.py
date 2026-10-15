@@ -9,31 +9,23 @@ from rest_framework import status
 from model_hub.models.ai_model import AIModel
 from simulate.models import (
     AgentDefinition,
+    CallExecution,
     HostedHarnessJob,
     RunTest,
+    Scenarios,
     SimulatorAgent,
     TestExecution,
 )
 from simulate.services import run_traces_v3
-from tracer.models.observability_provider import ObservabilityProvider, ProviderChoices
 from tracer.models.project import Project
 from tracer.services.clickhouse.client import CHError
 
 URL = "/simulate/v3/test-executions/{}/traces/"
-NOTHING = {
-    "observability": "unavailable",
-    "agent_id": None,
-    "project_id": None,
-    "count": 0,
-    "page": 1,
-    "page_size": 20,
-    "total_pages": 1,
-    "traces": [],
-}
+NOTHING = {"project_id": None, "traces": []}
 
 
 class FakeClickHouse:
-    """Rows keyed by the job id whose mark they carry; the read keeps only the job asked for."""
+    """Spans as (project id, job id, row); the read keeps one project's rows of one job."""
 
     def __init__(self):
         self.rows = []
@@ -46,12 +38,15 @@ class FakeClickHouse:
         )
         if self.error is not None:
             raise self.error
-        kept = [row for job_id, row in self.rows if job_id == params["job_id"]]
-        if query.startswith("SELECT uniqExact(trace_id)"):
-            return [(len(kept),)], [], 1.0
-        kept.sort(key=lambda row: (-row[2].timestamp(), row[0]))
-        offset = params["offset"]
-        return kept[offset : offset + params["limit"]], [], 1.0
+        kept = [
+            row
+            for project_id, job_id, row in self.rows
+            if project_id == params["project_id"] and job_id == params["job_id"]
+        ]
+        if "call_execution_id" in params:
+            kept = [row for row in kept if row[6] == params["call_execution_id"]]
+        kept.sort(key=lambda row: (bool(row[1]), -row[3].timestamp(), row[0]))
+        return kept[: params["limit"]], [], 1.0
 
 
 @pytest.fixture
@@ -95,6 +90,24 @@ def execution(db, organization, workspace, agent, simulator_agent):
     )
 
 
+@pytest.fixture
+def scenario(db, organization, workspace, agent):
+    return Scenarios.objects.create(
+        name="Book a ride",
+        description="Test scenario",
+        source="Test source",
+        scenario_type=Scenarios.ScenarioTypes.DATASET,
+        organization=organization,
+        workspace=workspace,
+        agent_definition=agent,
+    )
+
+
+@pytest.fixture
+def call(db, execution, scenario):
+    return CallExecution.objects.create(test_execution=execution, scenario=scenario)
+
+
 def _job(organization, workspace, **fields):
     return HostedHarnessJob.no_workspace_objects.create(
         organization=organization,
@@ -120,30 +133,26 @@ def job(db, organization, workspace, execution):
     )
 
 
-@pytest.fixture
-def project(db, organization, workspace, user):
+def _project(organization, workspace, user, name):
     return Project.objects.create(
         organization=organization,
         workspace=workspace,
         user=user,
         model_type=AIModel.ModelTypes.GENERATIVE_LLM,
-        name=f"Agent project {uuid.uuid4()}",
+        name=name,
         trace_type="observe",
     )
 
 
 @pytest.fixture
-def observability_row(db, organization, workspace, agent, project):
-    row = ObservabilityProvider.objects.create(
-        project=project,
-        provider=ProviderChoices.OTHERS,
-        enabled=True,
-        organization=organization,
-        workspace=workspace,
+def hidden_project(db, organization, workspace, user, agent, monkeypatch):
+    project = _project(organization, workspace, user, f"fi-simulation-{agent.id}")
+    monkeypatch.setattr(
+        run_traces_v3,
+        "simulation_project_id",
+        lambda of: str(project.id) if of.id == agent.id else None,
     )
-    agent.observability_provider = row
-    agent.save(update_fields=["observability_provider"])
-    return row
+    return project
 
 
 @pytest.fixture
@@ -164,157 +173,138 @@ def summary_kind(monkeypatch):
     return set_kind
 
 
-def _row(trace_id, name, start_time, status_text="OK", latency_ms=12.5):
-    return (trace_id, name, start_time, status_text, latency_ms)
+def _row(
+    trace_id, start_time, *, name="turn", status_text="OK", latency_ms=12, call_id=""
+):
+    return (trace_id, True, name, start_time, status_text, latency_ms, call_id)
+
+
+def _rootless(trace_id, start_time, call_id=""):
+    return (trace_id, False, "", start_time, "", 0, call_id)
 
 
 def _parsed(value):
     return datetime.fromisoformat(value.replace("Z", "+00:00"))
 
 
-def test_run_traces_listed_by_the_mark_for_a_bound_source_agent_with_observability_on(
-    auth_client, execution, job, observability_row, clickhouse, summary_kind
+def test_run_traces_listed_from_the_hidden_project_for_a_bound_source_agent(
+    auth_client,
+    execution,
+    job,
+    call,
+    hidden_project,
+    clickhouse,
+    summary_kind,
+    organization,
+    workspace,
+    user,
 ):
+    production = _project(organization, workspace, user, "Production")
     newest = timezone.now().replace(microsecond=0)
     older = newest - timedelta(minutes=3)
-    other_job = str(uuid.uuid4())
+    hidden, this_job = str(hidden_project.id), str(job.id)
     clickhouse.rows = [
-        (str(job.id), _row("trace-a", "verify_identity", older, "ERROR", 420.0)),
-        (other_job, _row("trace-x", "someone_elses", newest, "OK", 1.0)),
-        (str(job.id), _row("trace-b", "book_ride", newest, "OK", 1830.0)),
+        (
+            hidden,
+            this_job,
+            _row(
+                "trace-a",
+                older,
+                name="verify_identity",
+                status_text="ERROR",
+                latency_ms=420,
+            ),
+        ),
+        (hidden, str(uuid.uuid4()), _row("trace-x", newest)),
+        (
+            hidden,
+            this_job,
+            _row(
+                "trace-b",
+                newest,
+                name="book_ride",
+                latency_ms=1830,
+                call_id=str(call.id),
+            ),
+        ),
+        (str(production.id), this_job, _row("trace-p", newest)),
+        (hidden, this_job, _rootless("trace-r", older)),
     ]
 
     response = auth_client.get(URL.format(execution.id))
 
     assert response.status_code == status.HTTP_200_OK
     body = response.json()
-    assert body["project_id"] == str(observability_row.project_id)
-    assert (body["count"], body["page"], body["page_size"], body["total_pages"]) == (
-        2,
-        1,
-        20,
-        1,
-    )
-    assert [trace["trace_id"] for trace in body["traces"]] == ["trace-b", "trace-a"]
-    first = body["traces"][0]
-    assert first["name"] == "book_ride"
-    assert first["status"] == "OK"
-    assert first["latency_ms"] == 1830.0
-    assert _parsed(first["start_time"]) == newest
-
-    count_call, page_call = clickhouse.calls
-    for call in (count_call, page_call):
-        assert call.timeout_ms == 2000
-        assert call.params["project_id"] == str(observability_row.project_id)
-        assert call.params["job_id"] == str(job.id)
-        assert call.params["window_start"] == job.created_at
-        assert call.params["window_end"] == job.terminal_at
-        assert "WHERE project_id = %(project_id)s" in call.query
-        assert "resource_attrs.fi.simulation.job_id.:String = %(job_id)s" in call.query
-        assert "start_time >= %(window_start)s" in call.query
-        assert "start_time <= %(window_end)s" in call.query
-    assert count_call.query.startswith("SELECT uniqExact(trace_id) ")
-    assert "GROUP BY trace_id" in page_call.query
-    assert "ORDER BY started_at DESC, trace_id" in page_call.query
-    assert "LIMIT %(limit)s OFFSET %(offset)s" in page_call.query
-    assert (page_call.params["limit"], page_call.params["offset"]) == (20, 0)
-
-
-def _many(job, count):
-    newest = timezone.now().replace(microsecond=0)
-    return [
-        (
-            str(job.id),
-            _row(f"trace-{n:02d}", f"call_{n:02d}", newest - timedelta(minutes=n)),
-        )
-        for n in range(count)
-    ]
-
-
-def test_a_later_page_lists_the_next_traces_and_the_whole_count(
-    auth_client, execution, job, observability_row, clickhouse, summary_kind
-):
-    clickhouse.rows = _many(job, 7)
-
-    body = auth_client.get(URL.format(execution.id), {"page": 2, "page_size": 3}).json()
-
-    assert (body["count"], body["page"], body["page_size"], body["total_pages"]) == (
-        7,
-        2,
-        3,
-        3,
-    )
+    assert body["project_id"] == hidden
     assert [trace["trace_id"] for trace in body["traces"]] == [
-        "trace-03",
-        "trace-04",
-        "trace-05",
+        "trace-r",
+        "trace-b",
+        "trace-a",
     ]
-    assert (
-        clickhouse.calls[-1].params["limit"],
-        clickhouse.calls[-1].params["offset"],
-    ) == (3, 3)
+    rootless, linked, unlinked = body["traces"]
+    assert rootless == {
+        "trace_id": "trace-r",
+        "name": None,
+        "start_time": None,
+        "status": None,
+        "latency_ms": None,
+        "call_execution_id": None,
+    }
+    assert (linked["name"], linked["status"], linked["latency_ms"]) == (
+        "book_ride",
+        "OK",
+        1830,
+    )
+    assert _parsed(linked["start_time"]) == newest
+    assert linked["call_execution_id"] == str(call.id)
+    assert (unlinked["name"], unlinked["status"], unlinked["call_execution_id"]) == (
+        "verify_identity",
+        "ERROR",
+        None,
+    )
 
 
-def test_the_last_page_is_short(
-    auth_client, execution, job, observability_row, clickhouse, summary_kind
+def test_the_statement_is_bounded_to_the_project_the_job_and_its_window(
+    auth_client, execution, job, hidden_project, clickhouse, summary_kind
 ):
-    clickhouse.rows = _many(job, 7)
+    auth_client.get(URL.format(execution.id))
 
-    body = auth_client.get(URL.format(execution.id), {"page": 3, "page_size": 3}).json()
-
-    assert [trace["trace_id"] for trace in body["traces"]] == ["trace-06"]
-
-
-def test_a_page_past_the_end_reads_only_the_count(
-    auth_client, execution, job, observability_row, clickhouse, summary_kind
-):
-    clickhouse.rows = _many(job, 2)
-
-    body = auth_client.get(
-        URL.format(execution.id), {"page": 5, "page_size": 20}
-    ).json()
-
-    assert (body["count"], body["total_pages"], body["traces"]) == (2, 1, [])
-    assert len(clickhouse.calls) == 1
-
-
-def test_a_run_with_no_traces_reads_only_the_count(
-    auth_client, execution, job, observability_row, clickhouse, summary_kind
-):
-    body = auth_client.get(URL.format(execution.id)).json()
-
-    assert body["project_id"] == str(observability_row.project_id)
-    assert (body["count"], body["total_pages"], body["traces"]) == (0, 1, [])
-    assert len(clickhouse.calls) == 1
-
-
-@pytest.mark.parametrize("params", [{"page": 0}, {"page_size": 0}, {"page_size": 101}])
-def test_out_of_range_paging_is_refused(
-    auth_client, execution, job, observability_row, clickhouse, summary_kind, params
-):
-    response = auth_client.get(URL.format(execution.id), params)
-
-    assert response.status_code == status.HTTP_400_BAD_REQUEST
-    assert clickhouse.calls == []
+    (read,) = clickhouse.calls
+    assert "FROM spans FINAL" in read.query
+    assert "project_id = %(project_id)s" in read.query
+    assert "resource_attrs.fi.simulation.job_id.:String = %(job_id)s" in read.query
+    assert "GROUP BY trace_id" in read.query
+    assert "ORDER BY has_root ASC, root_start_time DESC, trace_id" in read.query
+    assert "HAVING" not in read.query
+    assert read.timeout_ms == 2000
+    assert read.params == {
+        "project_id": str(hidden_project.id),
+        "job_id": str(job.id),
+        "window_start": job.created_at,
+        "window_end": job.terminal_at,
+        "limit": 200,
+    }
 
 
 def test_a_first_launch_is_listed_by_the_job_id_alone(
-    auth_client, execution, job, observability_row, clickhouse, summary_kind
+    auth_client, execution, job, hidden_project, clickhouse, summary_kind
 ):
-    clickhouse.rows = [(str(job.id), _row("trace-a", "book_ride", timezone.now()))]
+    clickhouse.rows = [
+        (str(hidden_project.id), str(job.id), _row("trace-a", timezone.now()))
+    ]
 
     response = auth_client.get(URL.format(execution.id))
 
     assert [trace["trace_id"] for trace in response.json()["traces"]] == ["trace-a"]
-    for call in clickhouse.calls:
-        assert "test_execution" not in call.query
-        assert str(execution.id) not in {str(value) for value in call.params.values()}
+    (read,) = clickhouse.calls
+    assert "test_execution" not in read.query
+    assert str(execution.id) not in {str(value) for value in read.params.values()}
 
 
 def test_a_run_still_going_is_read_up_to_now(
     auth_client,
     execution,
-    observability_row,
+    hidden_project,
     clickhouse,
     summary_kind,
     organization,
@@ -329,8 +319,80 @@ def test_a_run_still_going_is_read_up_to_now(
     assert live_job.created_at <= before <= window_end <= timezone.now()
 
 
+def test_one_calls_traces(
+    auth_client,
+    execution,
+    job,
+    call,
+    scenario,
+    hidden_project,
+    clickhouse,
+    summary_kind,
+):
+    other_call = CallExecution.objects.create(
+        test_execution=execution, scenario=scenario
+    )
+    now = timezone.now()
+    hidden, this_job = str(hidden_project.id), str(job.id)
+    clickhouse.rows = [
+        (hidden, this_job, _row("trace-a", now, call_id=str(call.id))),
+        (hidden, this_job, _row("trace-b", now, call_id=str(other_call.id))),
+        (hidden, this_job, _row("trace-c", now)),
+    ]
+
+    response = auth_client.get(
+        URL.format(execution.id), {"call_execution_id": str(call.id)}
+    )
+
+    assert response.status_code == status.HTTP_200_OK
+    assert response.json()["project_id"] == hidden
+    assert [trace["trace_id"] for trace in response.json()["traces"]] == ["trace-a"]
+    (read,) = clickhouse.calls
+    assert "HAVING call_execution_id = %(call_execution_id)s" in read.query
+    assert read.params["call_execution_id"] == str(call.id)
+
+
+@pytest.mark.parametrize("value", ["not-a-uuid", "", str(uuid.uuid4())])
+def test_a_call_that_is_not_this_runs_lists_nothing(
+    auth_client, execution, job, hidden_project, clickhouse, summary_kind, value
+):
+    response = auth_client.get(URL.format(execution.id), {"call_execution_id": value})
+
+    assert response.status_code == status.HTTP_200_OK
+    assert response.json() == {"project_id": str(hidden_project.id), "traces": []}
+    assert clickhouse.calls == []
+
+
+def test_a_call_of_another_run_lists_nothing(
+    auth_client,
+    execution,
+    job,
+    scenario,
+    simulator_agent,
+    hidden_project,
+    clickhouse,
+    summary_kind,
+):
+    sibling = TestExecution.objects.create(
+        run_test=execution.run_test,
+        status=TestExecution.ExecutionStatus.COMPLETED,
+        simulator_agent=simulator_agent,
+        agent_definition=execution.agent_definition,
+    )
+    foreign_call = CallExecution.objects.create(
+        test_execution=sibling, scenario=scenario
+    )
+
+    response = auth_client.get(
+        URL.format(execution.id), {"call_execution_id": str(foreign_call.id)}
+    )
+
+    assert response.json()["traces"] == []
+    assert clickhouse.calls == []
+
+
 def test_an_unbound_run_lists_nothing(
-    auth_client, execution, observability_row, clickhouse, summary_kind
+    auth_client, execution, hidden_project, clickhouse, summary_kind
 ):
     response = auth_client.get(URL.format(execution.id))
 
@@ -339,78 +401,30 @@ def test_an_unbound_run_lists_nothing(
     assert clickhouse.calls == []
 
 
-def test_a_hosted_agent_lists_nothing(
-    auth_client, execution, job, observability_row, clickhouse, summary_kind
+@pytest.mark.parametrize("kind", ["hosted", None])
+def test_an_agent_that_is_not_source_lists_nothing(
+    auth_client, execution, job, hidden_project, clickhouse, summary_kind, kind
 ):
-    summary_kind("hosted")
-
-    response = auth_client.get(URL.format(execution.id))
-
-    assert response.json() == NOTHING
-    assert clickhouse.calls == []
-
-
-def test_an_agent_with_no_stored_summary_lists_nothing(
-    auth_client, execution, job, observability_row, clickhouse, summary_kind
-):
-    summary_kind(None)
+    summary_kind(kind)
 
     assert auth_client.get(URL.format(execution.id)).json() == NOTHING
     assert clickhouse.calls == []
 
 
-def _off(agent):
-    return {**NOTHING, "observability": "off", "agent_id": str(agent.id)}
-
-
-def test_observability_off_says_so_and_names_the_agent(
-    auth_client, execution, job, agent, observability_row, clickhouse, summary_kind
+def test_an_agent_with_no_hidden_project_lists_nothing(
+    auth_client, execution, job, clickhouse, summary_kind, monkeypatch
 ):
-    observability_row.enabled = False
-    observability_row.save(update_fields=["enabled"])
+    monkeypatch.setattr(run_traces_v3, "simulation_project_id", lambda agent: None)
 
-    assert auth_client.get(URL.format(execution.id)).json() == _off(agent)
+    assert auth_client.get(URL.format(execution.id)).json() == NOTHING
     assert clickhouse.calls == []
-
-
-def test_an_agent_never_switched_on_is_off(
-    auth_client, execution, job, agent, project, clickhouse, summary_kind
-):
-    assert auth_client.get(URL.format(execution.id)).json() == _off(agent)
-    assert clickhouse.calls == []
-
-
-def test_a_deleted_project_is_off(
-    auth_client,
-    execution,
-    job,
-    agent,
-    observability_row,
-    project,
-    clickhouse,
-    summary_kind,
-):
-    project.deleted = True
-    project.save(update_fields=["deleted"])
-
-    assert auth_client.get(URL.format(execution.id)).json() == _off(agent)
-    assert clickhouse.calls == []
-
-
-def test_a_traced_run_says_observability_is_on(
-    auth_client, execution, job, agent, observability_row, clickhouse, summary_kind
-):
-    body = auth_client.get(URL.format(execution.id)).json()
-
-    assert (body["observability"], body["agent_id"]) == ("on", str(agent.id))
-    assert body["project_id"] == str(observability_row.project_id)
 
 
 @pytest.mark.parametrize(
     "error", [CHError("boom"), TimeoutError("ClickHouse read deadline exhausted")]
 )
 def test_a_clickhouse_failure_is_the_views_error(
-    auth_client, execution, job, observability_row, clickhouse, summary_kind, error
+    auth_client, execution, job, hidden_project, clickhouse, summary_kind, error
 ):
     clickhouse.error = error
 
@@ -421,7 +435,7 @@ def test_a_clickhouse_failure_is_the_views_error(
 
 
 def test_a_run_of_another_organization_is_not_found(
-    auth_client, execution, job, observability_row, clickhouse, summary_kind
+    auth_client, execution, job, hidden_project, clickhouse, summary_kind
 ):
     assert (
         auth_client.get(URL.format(uuid.uuid4())).status_code

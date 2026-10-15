@@ -58163,21 +58163,10 @@
                 "description": "",
                 "parameters": [
                     {
-                        "name": "page",
+                        "name": "call_execution_id",
                         "in": "query",
                         "required": false,
-                        "type": "integer",
-                        "default": 1,
-                        "minimum": 1
-                    },
-                    {
-                        "name": "page_size",
-                        "in": "query",
-                        "required": false,
-                        "type": "integer",
-                        "default": 20,
-                        "maximum": 100,
-                        "minimum": 1
+                        "type": "string"
                     }
                 ],
                 "responses": {
@@ -138186,7 +138175,8 @@
                 "name",
                 "start_time",
                 "status",
-                "latency_ms"
+                "latency_ms",
+                "call_execution_id"
             ],
             "type": "object",
             "properties": {
@@ -138197,73 +138187,45 @@
                 },
                 "name": {
                     "title": "Name",
-                    "type": "string"
+                    "type": "string",
+                    "x-nullable": true
                 },
                 "start_time": {
                     "title": "Start time",
                     "type": "string",
-                    "format": "date-time"
+                    "format": "date-time",
+                    "x-nullable": true
                 },
                 "status": {
                     "title": "Status",
-                    "type": "string"
+                    "type": "string",
+                    "x-nullable": true
                 },
                 "latency_ms": {
                     "title": "Latency ms",
-                    "type": "number",
+                    "type": "integer",
+                    "x-nullable": true
+                },
+                "call_execution_id": {
+                    "title": "Call execution id",
+                    "type": "string",
+                    "format": "uuid",
                     "x-nullable": true
                 }
             }
         },
         "RunTracesV3Response": {
             "required": [
-                "observability",
-                "agent_id",
                 "project_id",
-                "count",
-                "page",
-                "page_size",
-                "total_pages",
                 "traces"
             ],
             "type": "object",
             "properties": {
-                "observability": {
-                    "title": "Observability",
-                    "type": "string",
-                    "enum": [
-                        "unavailable",
-                        "off",
-                        "on"
-                    ]
-                },
-                "agent_id": {
-                    "title": "Agent id",
-                    "type": "string",
-                    "format": "uuid",
-                    "x-nullable": true
-                },
                 "project_id": {
                     "title": "Project id",
                     "type": "string",
                     "format": "uuid",
                     "x-nullable": true
-                },
-                "count": {
-                    "title": "Count",
-                    "type": "integer"
-                },
-                "page": {
-                    "title": "Page",
-                    "type": "integer"
-                },
-                "page_size": {
-                    "title": "Page size",
-                    "type": "integer"
-                },
-                "total_pages": {
-                    "title": "Total pages",
-                    "type": "integer"
                 },
                 "traces": {
                     "type": "array",

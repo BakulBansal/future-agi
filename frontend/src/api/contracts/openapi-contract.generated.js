@@ -32119,21 +32119,10 @@ export const OPENAPI_CONTRACT = Object.freeze({
         runtimeResponseValidation: true,
         requestBody: null,
         queryParameters: {
-          page: {
+          call_execution_id: {
             required: false,
             schema: {
-              type: "integer",
-              minimum: 1,
-              default: 1,
-            },
-          },
-          page_size: {
-            required: false,
-            schema: {
-              type: "integer",
-              minimum: 1,
-              maximum: 100,
-              default: 20,
+              type: "string",
             },
           },
         },
@@ -73858,50 +73847,14 @@ export const OPENAPI_CONTRACT = Object.freeze({
       },
     },
     RunTracesV3Response: {
-      required: [
-        "observability",
-        "agent_id",
-        "project_id",
-        "count",
-        "page",
-        "page_size",
-        "total_pages",
-        "traces",
-      ],
+      required: ["project_id", "traces"],
       type: "object",
       properties: {
-        observability: {
-          title: "Observability",
-          type: "string",
-          enum: ["unavailable", "off", "on"],
-        },
-        agent_id: {
-          title: "Agent id",
-          type: "string",
-          format: "uuid",
-          "x-nullable": true,
-        },
         project_id: {
           title: "Project id",
           type: "string",
           format: "uuid",
           "x-nullable": true,
-        },
-        count: {
-          title: "Count",
-          type: "integer",
-        },
-        page: {
-          title: "Page",
-          type: "integer",
-        },
-        page_size: {
-          title: "Page size",
-          type: "integer",
-        },
-        total_pages: {
-          title: "Total pages",
-          type: "integer",
         },
         traces: {
           type: "array",
@@ -100036,7 +99989,14 @@ export const OPENAPI_CONTRACT = Object.freeze({
       },
     },
     RunTrace: {
-      required: ["trace_id", "name", "start_time", "status", "latency_ms"],
+      required: [
+        "trace_id",
+        "name",
+        "start_time",
+        "status",
+        "latency_ms",
+        "call_execution_id",
+      ],
       type: "object",
       properties: {
         trace_id: {
@@ -100047,19 +100007,28 @@ export const OPENAPI_CONTRACT = Object.freeze({
         name: {
           title: "Name",
           type: "string",
+          "x-nullable": true,
         },
         start_time: {
           title: "Start time",
           type: "string",
           format: "date-time",
+          "x-nullable": true,
         },
         status: {
           title: "Status",
           type: "string",
+          "x-nullable": true,
         },
         latency_ms: {
           title: "Latency ms",
-          type: "number",
+          type: "integer",
+          "x-nullable": true,
+        },
+        call_execution_id: {
+          title: "Call execution id",
+          type: "string",
+          format: "uuid",
           "x-nullable": true,
         },
       },

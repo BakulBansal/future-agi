@@ -13,8 +13,6 @@ import { fToNow } from "src/utils/format-time";
 import {
   useRunDetail,
   useOptimizationRuns,
-  useRunTraces,
-  RUN_TRACES_OBSERVABILITY,
 } from "src/api/simulate-environments/runDetail";
 import { exportRunResults } from "src/api/simulate-environments/runAnalytics";
 import {
@@ -36,8 +34,6 @@ import LaunchOptimizationDrawer from "./fixmyagent/LaunchOptimizationDrawer";
 import BetaChip from "./fixmyagent/BetaChip";
 import { useSelfImprovementOpen } from "./fixmyagent/selfImprovement";
 import RunAnalytics from "./RunAnalytics";
-import RunTracesSection from "./RunTracesSection";
-import { RUN_TRACES_COPY } from "./runTraces.constants";
 import useCallListNavigation from "./useCallListNavigation";
 import useOpenCallParam from "./useOpenCallParam";
 
@@ -100,10 +96,6 @@ export default function RunDetail({
   const { runs: optimizationRuns, isLoading: optimizationsLoading } =
     useOptimizationRuns(executionId);
   const hasTrials = optimizationRuns.length > 0;
-  const { observability: traceObservability, count: traceCount } =
-    useRunTraces(executionId, { enabled: backed });
-  const hasTraces =
-    backed && traceObservability !== RUN_TRACES_OBSERVABILITY.UNAVAILABLE;
   const selfImprovementOpen = useSelfImprovementOpen();
   // Keep the client bound: `useQueryClient().invalidateQueries` detached from
   // the client throws on `this.#queryCache` in react-query v5.
@@ -350,17 +342,6 @@ export default function RunDetail({
               />
             )}
             <Tab value="analytics" label="Analytics" sx={{ minHeight: 38 }} />
-            {hasTraces && (
-              <Tab
-                value="traces"
-                label={RUN_TRACES_COPY.tab(
-                  traceObservability === RUN_TRACES_OBSERVABILITY.ON
-                    ? traceCount
-                    : null,
-                )}
-                sx={{ minHeight: 38 }}
-              />
-            )}
           </CustomTabs>
 
           {tab === "tasks" && (
@@ -418,10 +399,6 @@ export default function RunDetail({
               onOpenCalls={openCallsWith}
             />
           )}
-
-          {tab === "traces" && hasTraces && (
-            <RunTracesSection executionId={executionId} />
-          )}
         </Box>
       </Box>
 
@@ -471,6 +448,7 @@ export default function RunDetail({
 
       <CallDrawer
         task={openCall?.task ?? null}
+        executionId={backed ? executionId : null}
         agentType={stats.agentType}
         onClose={() => showCall(null)}
         hasPrev={callNav.hasPrev}

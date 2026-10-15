@@ -46,11 +46,9 @@ from simulate.services.run_results_v3_queries import (
     run_calls_queryset,
 )
 from simulate.services.run_traces_v3 import (
-    OBSERVABILITY_OFF,
-    OBSERVABILITY_ON,
-    OBSERVABILITY_UNAVAILABLE,
+    is_call_of_run,
     read_run_traces,
-    run_traces_state,
+    run_traces_source,
 )
 from simulate.services.test_executor import build_eval_configs_map
 from simulate.views.scoping import run_test_workspace_filter
@@ -332,29 +330,19 @@ class RunCallsV3ResponseSerializer(serializers.Serializer):
 
 class RunTraceSerializer(serializers.Serializer):
     trace_id = serializers.CharField()
-    name = serializers.CharField(allow_blank=True)
-    start_time = serializers.DateTimeField()
-    status = serializers.CharField(allow_blank=True)
-    latency_ms = serializers.FloatField(allow_null=True)
+    name = serializers.CharField(allow_null=True, allow_blank=True)
+    start_time = serializers.DateTimeField(allow_null=True)
+    status = serializers.CharField(allow_null=True, allow_blank=True)
+    latency_ms = serializers.IntegerField(allow_null=True)
+    call_execution_id = serializers.UUIDField(allow_null=True)
 
 
 class RunTracesV3QuerySerializer(serializers.Serializer):
-    page = serializers.IntegerField(default=1, min_value=1, required=False)
-    page_size = serializers.IntegerField(
-        default=20, min_value=1, max_value=100, required=False
-    )
+    call_execution_id = serializers.CharField(required=False, allow_blank=True)
 
 
 class RunTracesV3ResponseSerializer(serializers.Serializer):
-    observability = serializers.ChoiceField(
-        choices=[OBSERVABILITY_UNAVAILABLE, OBSERVABILITY_OFF, OBSERVABILITY_ON]
-    )
-    agent_id = serializers.UUIDField(allow_null=True)
     project_id = serializers.UUIDField(allow_null=True)
-    count = serializers.IntegerField()
-    page = serializers.IntegerField()
-    page_size = serializers.IntegerField()
-    total_pages = serializers.IntegerField()
     traces = RunTraceSerializer(many=True)
 
 
@@ -575,15 +563,17 @@ class RunTracesV3View(APIView):
         operation_id="simulate_v3_test_execution_traces",
     )
     def get(self, request, test_execution_id, *args, **kwargs):
-        query = request.validated_query_data
-        page, page_size = query["page"], query["page_size"]
         execution = _execution_for_request(request, test_execution_id)
-        state = run_traces_state(execution)
-        source = state.source
+        source = run_traces_source(execution)
         if source is None:
-            return Response(_traces_payload(state, 0, page, page_size, []))
+            return Response({"project_id": None, "traces": []})
+        call_execution_id = request.validated_query_data.get("call_execution_id")
+        if call_execution_id is not None:
+            call_execution_id = _call_of_run(execution, call_execution_id)
+            if call_execution_id is None:
+                return Response({"project_id": source.project_id, "traces": []})
         try:
-            result = read_run_traces(source, page=page, page_size=page_size)
+            traces = read_run_traces(source, call_execution_id=call_execution_id)
         except (CHError, TimeoutError) as exc:
             logger.warning(
                 "run_traces_read_failed",
@@ -595,27 +585,24 @@ class RunTracesV3View(APIView):
                 {"detail": "Traces are unavailable right now"},
                 status=status.HTTP_503_SERVICE_UNAVAILABLE,
             )
-        payload = _traces_payload(
-            state,
-            result.count,
-            page,
-            page_size,
-            [asdict(trace) for trace in result.traces],
+        return Response(
+            RunTracesV3ResponseSerializer(
+                {
+                    "project_id": source.project_id,
+                    "traces": [asdict(trace) for trace in traces],
+                }
+            ).data
         )
-        return Response(RunTracesV3ResponseSerializer(payload).data)
 
 
-def _traces_payload(state, count, page, page_size, traces):
-    return {
-        "observability": state.observability,
-        "agent_id": state.agent_id,
-        "project_id": state.source.project_id if state.source else None,
-        "count": count,
-        "page": page,
-        "page_size": page_size,
-        "total_pages": max(1, -(-count // page_size)),
-        "traces": traces,
-    }
+def _call_of_run(execution, raw_id):
+    try:
+        call_execution_id = str(uuid.UUID(raw_id))
+    except ValueError:
+        return None
+    if not is_call_of_run(execution, call_execution_id):
+        return None
+    return call_execution_id
 
 
 class RunCallsV3View(APIView):

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { render, screen } from "src/utils/test-utils";
+import { render, screen, userEvent } from "src/utils/test-utils";
 
 import VoiceLeftPanel from "../VoiceLeftPanel";
 
@@ -24,5 +24,36 @@ describe("VoiceLeftPanel path tabs", () => {
     expect(screen.getByText("Transcript")).toBeInTheDocument();
     expect(screen.queryByText("Checklist")).not.toBeInTheDocument();
     expect(screen.queryByText("Graph")).not.toBeInTheDocument();
+  });
+});
+
+describe("VoiceLeftPanel extra tabs", () => {
+  it("adds a host's tab after Transcript and shows its content when picked", async () => {
+    const user = userEvent.setup();
+    render(
+      <VoiceLeftPanel
+        data={data}
+        hidePathTabs
+        extraTabs={[
+          {
+            label: "Traces",
+            value: "traces",
+            content: <div data-testid="traces-content" />,
+          },
+        ]}
+      />,
+    );
+
+    expect(screen.getByText("Transcript")).toBeInTheDocument();
+    expect(screen.queryByTestId("traces-content")).not.toBeInTheDocument();
+
+    await user.click(screen.getByText("Traces"));
+
+    expect(screen.getByTestId("traces-content")).toBeInTheDocument();
+  });
+
+  it("has no extra tab when the host passes none", () => {
+    render(<VoiceLeftPanel data={data} hidePathTabs />);
+    expect(screen.queryByText("Traces")).not.toBeInTheDocument();
   });
 });

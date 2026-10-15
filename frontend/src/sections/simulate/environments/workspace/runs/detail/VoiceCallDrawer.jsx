@@ -12,8 +12,11 @@ import Iconify from "src/components/iconify";
 import {
   callTranscript,
   useCallExecutionV3Detail,
+  useRunTraces,
 } from "src/api/simulate-environments/runDetail";
 import VoiceDetailDrawerV2 from "src/components/VoiceDetailDrawerV2";
+import CallTracesPanel from "./CallTracesPanel";
+import { CALL_TRACES_COPY } from "./callTraces.constants";
 
 // The annotate / queue / dataset / tags actions need project + annotation
 // context this embedded drawer doesn't wire; hide them rather than leave dead
@@ -58,6 +61,7 @@ StatePane.propTypes = { children: PropTypes.node, onClose: PropTypes.func };
 // (the fields the panels branch on) and hide the annotation actions.
 export default function VoiceCallDrawer({
   task,
+  executionId = null,
   onClose,
   onPrev,
   onNext,
@@ -80,6 +84,28 @@ export default function VoiceCallDrawer({
           }
         : null,
     [data],
+  );
+
+  const callTraces = useRunTraces(executionId, { callExecutionId: task.id });
+  const leftPanelTabs = useMemo(
+    () =>
+      callTraces.projectId || callTraces.isError
+        ? [
+            {
+              label: CALL_TRACES_COPY.tab,
+              value: "traces",
+              icon: "mdi:chart-gantt",
+              content: (
+                <CallTracesPanel
+                  traces={callTraces.traces}
+                  projectId={callTraces.projectId}
+                  isError={callTraces.isError}
+                />
+              ),
+            },
+          ]
+        : undefined,
+    [callTraces.projectId, callTraces.isError, callTraces.traces],
   );
 
   if (isError) {
@@ -120,6 +146,7 @@ export default function VoiceCallDrawer({
         // Annotation isn't either: no Annotations tab, so no "Add Label" to a
         // dead end.
         hideAnnotationTab
+        leftPanelTabs={leftPanelTabs}
         // The product header defaults both arrows to enabled, so always pass
         // real values.
         onPrev={onPrev}
@@ -132,6 +159,7 @@ export default function VoiceCallDrawer({
 }
 VoiceCallDrawer.propTypes = {
   task: PropTypes.shape({ id: PropTypes.string }).isRequired,
+  executionId: PropTypes.string,
   onClose: PropTypes.func,
   onPrev: PropTypes.func,
   onNext: PropTypes.func,

@@ -15,6 +15,8 @@ const TABS = {
   GRAPH: "graph",
 };
 
+const NO_EXTRA_TABS = [];
+
 const PATH_VIEW_MODE = {
   [TABS.CHECKLIST]: "checklist",
   [TABS.GRAPH]: "graph",
@@ -39,6 +41,7 @@ const VoiceLeftPanel = ({
   scenarioId,
   embedded = false,
   hidePathTabs = false,
+  extraTabs = NO_EXTRA_TABS,
 }) => {
   const isSimulate = data?.module === "simulate";
   const [currentTab, setCurrentTab] = useState(TABS.TRANSCRIPT);
@@ -82,10 +85,14 @@ const VoiceLeftPanel = ({
         icon: "mdi:graph-outline",
       });
     }
+    extraTabs.forEach(({ label, value, icon }) =>
+      t.push({ label, value, icon }),
+    );
     return t;
-  }, [showPathTabs]);
+  }, [showPathTabs, extraTabs]);
 
   const isTranscriptTab = currentTab === TABS.TRANSCRIPT;
+  const activeExtraTab = extraTabs.find((tab) => tab.value === currentTab);
   const isPathTab = currentTab === TABS.CHECKLIST || currentTab === TABS.GRAPH;
 
   return (
@@ -195,6 +202,7 @@ const VoiceLeftPanel = ({
                 onRequestTranscript={() => setCurrentTab(TABS.TRANSCRIPT)}
               />
             </ShowComponent>
+            {activeExtraTab?.content}
           </>
         </ShowComponent>
       </Box>
@@ -207,6 +215,14 @@ VoiceLeftPanel.propTypes = {
   scenarioId: PropTypes.string,
   embedded: PropTypes.bool,
   hidePathTabs: PropTypes.bool,
+  extraTabs: PropTypes.arrayOf(
+    PropTypes.shape({
+      label: PropTypes.string.isRequired,
+      value: PropTypes.string.isRequired,
+      icon: PropTypes.string,
+      content: PropTypes.node,
+    }),
+  ),
 };
 
 export default VoiceLeftPanel;
