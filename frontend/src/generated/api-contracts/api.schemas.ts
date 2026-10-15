@@ -34455,6 +34455,13 @@ export type Saml2AuthAuthReadParams = {
   state?: string;
 };
 
+export type Saml2AuthCompleteListParams = {
+  /**
+   * One-time SAML response candidate key.
+   */
+  c: string;
+};
+
 export type Saml2AuthGithubCallbackListParams = {
   code?: string;
   state?: string;
