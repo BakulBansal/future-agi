@@ -333,6 +333,8 @@ class OrgApiKey(BaseModel):
         null=True,
         blank=True,
     )
+    # A plain column: ``accounts`` cannot depend on ``simulate``, which depends on it.
+    simulation_agent_id = models.UUIDField(null=True, blank=True)
 
     class Meta:
         constraints = [
@@ -342,13 +344,13 @@ class OrgApiKey(BaseModel):
                 name="unique_system_api_key_per_org_not_deleted",
                 violation_error_message="Only one system API key is allowed per organization.",
             ),
-            # Every agent of a workspace exports through one shared ingest key,
-            # so concurrent first launches must converge on a single row.
+            # Each agent's sandbox key names that agent, so concurrent first
+            # launches of one agent must converge on a single row.
             models.UniqueConstraint(
-                fields=["organization", "workspace"],
+                fields=["organization", "workspace", "simulation_agent_id"],
                 condition=models.Q(type="ingest", deleted=False),
-                name="unique_ingest_api_key_per_org_workspace_not_deleted",
-                violation_error_message="Only one ingest API key is allowed per organization and workspace.",
+                name="unique_ingest_api_key_per_org_workspace_agent_not_deleted",
+                violation_error_message="Only one ingest API key is allowed per organization, workspace and agent.",
             ),
         ]
 

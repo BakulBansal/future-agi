@@ -1,10 +1,12 @@
 """The ``ingest`` key writes spans to the collector and nothing else.
 
 It is handed to a customer's own, untrusted process, so every pair
-authentication of the platform must refuse it, and one workspace holds one.
+authentication of the platform must refuse it, and each agent of a workspace
+holds one.
 """
 
 import base64
+import uuid
 from unittest.mock import MagicMock
 
 import pytest
@@ -19,13 +21,14 @@ from accounts.models.workspace import Workspace
 USER_INFO_URL = "/accounts/user-info/"
 
 
-def _ingest_key(organization, workspace, **extra):
+def _ingest_key(organization, workspace, *, agent_id=None, **extra):
     return OrgApiKey.no_workspace_objects.create(
         name="simulation_export_key",
         organization=organization,
         workspace=workspace,
         type="ingest",
         user=None,
+        simulation_agent_id=uuid.uuid4() if agent_id is None else agent_id,
         **extra,
     )
 
@@ -108,11 +111,18 @@ def test_ingest_key_is_refused_by_langfuse_basic_and_mcp(user, organization, wor
 
 @pytest.mark.integration
 @pytest.mark.django_db
-def test_one_ingest_key_per_organisation_and_workspace(user, organization, workspace):
-    first = _ingest_key(organization, workspace)
+def test_one_ingest_key_per_organisation_workspace_and_agent(
+    user, organization, workspace
+):
+    agent_id = uuid.uuid4()
+    first = _ingest_key(organization, workspace, agent_id=agent_id)
 
     with pytest.raises(IntegrityError), transaction.atomic():
-        _ingest_key(organization, workspace)
+        _ingest_key(organization, workspace, agent_id=agent_id)
+
+    # A second agent of the same workspace gets its own key.
+    second_agent = _ingest_key(organization, workspace, agent_id=uuid.uuid4())
+    assert second_agent.id != first.id
 
     # Other key types in the same workspace are untouched by the constraint.
     _system_key(organization, workspace)
@@ -127,14 +137,35 @@ def test_one_ingest_key_per_organisation_and_workspace(user, organization, works
         is_active=True,
         created_by=user,
     )
-    _ingest_key(organization, other_workspace)
+    _ingest_key(organization, other_workspace, agent_id=agent_id)
 
     OrgApiKey.no_workspace_objects.filter(id=first.id).update(deleted=True)
-    replacement = _ingest_key(organization, workspace)
+    replacement = _ingest_key(organization, workspace, agent_id=agent_id)
     assert replacement.id != first.id
     assert (
         OrgApiKey.all_objects.filter(
-            organization=organization, workspace=workspace, type="ingest"
+            organization=organization,
+            workspace=workspace,
+            type="ingest",
+            simulation_agent_id=agent_id,
         ).count()
         == 2
     )
+
+
+@pytest.mark.integration
+@pytest.mark.django_db
+def test_ingest_keys_without_an_agent_do_not_block_each_other(
+    organization, workspace
+):
+    # Keys from before the column existed carry no agent; NULLs never collide.
+    first = OrgApiKey.no_workspace_objects.create(
+        organization=organization, workspace=workspace, type="ingest"
+    )
+    second = OrgApiKey.no_workspace_objects.create(
+        organization=organization, workspace=workspace, type="ingest"
+    )
+    with_agent = _ingest_key(organization, workspace)
+
+    assert len({first.id, second.id, with_agent.id}) == 3
+    assert first.simulation_agent_id is None

@@ -1,21 +1,28 @@
 """The export key a simulated run's own process sends its spans with."""
 
+import uuid
 from unittest.mock import patch
 
 import pytest
-from django.db import IntegrityError, connection
+from django.db import connection
+from django.db.models.query import QuerySet
 
 from accounts.models.user import OrgApiKey
 from accounts.models.workspace import Workspace
+from simulate.models.agent_definition import AgentDefinition
 from tracer.services.collector_ingest import (
     ExportCredentials,
     resolve_export_credentials,
 )
 
-# fi-collector/pkg/auth/pgresolver.go, ValidateKey, with psycopg placeholders.
+# The collector's key lookup (fi-collector/pkg/auth/pgresolver.go, ValidateKey)
+# with psycopg placeholders, extended with the join that routes a key to its
+# agent. No collector runs this shape yet; it pins what the columns must answer.
 COLLECTOR_VALIDATE_KEY_SQL = """
-    SELECT k.organization_id, k.workspace_id, k.user_id, k.type
+    SELECT k.organization_id, k.workspace_id, k.user_id, k.type,
+           k.simulation_agent_id, a.organization_id, a.deleted
     FROM accounts_orgapikey k
+    LEFT JOIN simulate_agent_definition a ON a.id = k.simulation_agent_id
     WHERE k.api_key = %s AND k.secret_key = %s
       AND k.enabled = true AND k.deleted = false
     LIMIT 1
@@ -32,46 +39,111 @@ def _second_workspace(organization, user):
     )
 
 
-def _ingest_rows(organization, workspace=None):
+def _agent_definition(organization, workspace):
+    return AgentDefinition.objects.create(
+        agent_name="Export Key Agent",
+        agent_type=AgentDefinition.AgentTypeChoices.TEXT,
+        inbound=True,
+        description="Agent that owns a sandbox key",
+        organization=organization,
+        workspace=workspace,
+        languages=["en"],
+    )
+
+
+def _ingest_rows(organization, workspace=None, agent_id=None):
     rows = OrgApiKey.no_workspace_objects.filter(
         organization=organization, type="ingest"
     )
     if workspace is not None:
         rows = rows.filter(workspace=workspace)
+    if agent_id is not None:
+        rows = rows.filter(simulation_agent_id=agent_id)
     return rows
+
+
+def _seed_ingest_key(organization, workspace, agent_id, **extra):
+    return OrgApiKey.no_workspace_objects.create(
+        name=f"simulation_export_key {agent_id}",
+        organization=organization,
+        workspace=workspace,
+        type="ingest",
+        user=None,
+        simulation_agent_id=agent_id,
+        **extra,
+    )
 
 
 @pytest.mark.integration
 @pytest.mark.django_db
-def test_resolve_export_credentials_creates_once_per_organisation_and_workspace(
+def test_resolve_export_credentials_creates_once_per_agent(
     user, organization, workspace
 ):
     system = OrgApiKey.no_workspace_objects.create(
         organization=organization, workspace=workspace, type="system"
     )
+    agent_a, agent_b = uuid.uuid4(), uuid.uuid4()
 
-    first = resolve_export_credentials(str(organization.id), str(workspace.id))
+    first = resolve_export_credentials(
+        str(organization.id), str(workspace.id), str(agent_a)
+    )
 
     assert isinstance(first, ExportCredentials)
     assert first.enabled is True
     assert first.api_key != system.api_key
-    row = _ingest_rows(organization, workspace).get()
-    assert row.name == "simulation_export_key"
+    row = _ingest_rows(organization, workspace, agent_a).get()
+    assert row.name == f"simulation_export_key {agent_a}"
     assert row.type == "ingest"
     assert row.user_id is None
     assert row.workspace_id == workspace.id
     assert (first.api_key, first.secret_key) == (row.api_key, row.secret_key)
 
-    again = resolve_export_credentials(str(organization.id), str(workspace.id))
+    again = resolve_export_credentials(
+        str(organization.id), str(workspace.id), str(agent_a)
+    )
     assert again == first
     assert _ingest_rows(organization, workspace).count() == 1
 
+    # A second agent of the same workspace gets its own key.
+    second = resolve_export_credentials(
+        str(organization.id), str(workspace.id), str(agent_b)
+    )
+    assert second is not None
+    assert second.api_key != first.api_key
+    second_row = _ingest_rows(organization, workspace, agent_b).get()
+    assert second_row.name == f"simulation_export_key {agent_b}"
+    assert second_row.user_id is None
+    assert _ingest_rows(organization, workspace).count() == 2
+
+    # The same agent id in another workspace is a separate key.
     other_workspace = _second_workspace(organization, user)
-    other = resolve_export_credentials(str(organization.id), str(other_workspace.id))
+    other = resolve_export_credentials(
+        str(organization.id), str(other_workspace.id), str(agent_a)
+    )
     assert other is not None
-    assert other.api_key != first.api_key
+    assert other.api_key not in {first.api_key, second.api_key}
     assert _ingest_rows(organization, other_workspace).get().api_key == other.api_key
-    assert _ingest_rows(organization).count() == 2
+    assert _ingest_rows(organization).count() == 3
+
+
+@pytest.mark.integration
+@pytest.mark.django_db
+def test_resolve_export_credentials_normalises_the_agent_id(
+    organization, workspace
+):
+    agent_id = uuid.uuid4()
+
+    first = resolve_export_credentials(
+        str(organization.id), str(workspace.id), agent_id.hex.upper()
+    )
+    again = resolve_export_credentials(
+        str(organization.id), str(workspace.id), agent_id
+    )
+
+    assert first == again
+    row = _ingest_rows(organization, workspace).get()
+    assert row.simulation_agent_id == agent_id
+    assert row.name == f"simulation_export_key {agent_id}"
 
 
 @pytest.mark.integration
@@ -79,31 +151,45 @@ def test_resolve_export_credentials_creates_once_per_organisation_and_workspace(
 def test_resolve_export_credentials_survives_a_create_race(
     user, organization, workspace
 ):
-    winner = OrgApiKey(
-        name="simulation_export_key",
-        organization=organization,
-        workspace=workspace,
-        type="ingest",
-        user=None,
-        api_key=OrgApiKey.generate_api_key(),
-        secret_key=OrgApiKey.generate_secret_key(),
-    )
+    agent_a, agent_b = uuid.uuid4(), uuid.uuid4()
+    winner = _seed_ingest_key(organization, workspace, agent_a)
+    # A neighbour agent in the same workspace: a lookup that drops the agent
+    # finds two rows instead of the winner.
+    neighbour = _seed_ingest_key(organization, workspace, agent_b)
 
-    def losing_insert(self, **kwargs):
-        # The other launch's row lands first; this insert then hits the constraint.
-        OrgApiKey.no_workspace_objects.bulk_create([winner])
-        raise IntegrityError("duplicate key value")
+    real_get = QuerySet.get
+    real_create = QuerySet.create
+    missed = []
 
-    with patch(
-        "django.db.models.query.QuerySet.create",
-        autospec=True,
-        side_effect=losing_insert,
-    ) as create:
-        result = resolve_export_credentials(str(organization.id), str(workspace.id))
+    def first_read_misses(queryset, *args, **kwargs):
+        # The read this launch made before the other launch committed its row.
+        if not missed:
+            missed.append(True)
+            raise OrgApiKey.DoesNotExist
+        return real_get(queryset, *args, **kwargs)
 
+    with (
+        patch(
+            "django.db.models.query.QuerySet.get",
+            autospec=True,
+            side_effect=first_read_misses,
+        ),
+        patch(
+            "django.db.models.query.QuerySet.create",
+            autospec=True,
+            side_effect=real_create,
+        ) as create,
+    ):
+        result = resolve_export_credentials(
+            str(organization.id), str(workspace.id), str(agent_a)
+        )
+
+    assert missed == [True]
     create.assert_called_once()
     assert result == ExportCredentials(winner.api_key, winner.secret_key, True)
-    assert _ingest_rows(organization, workspace).count() == 1
+    assert _ingest_rows(organization, workspace, agent_a).count() == 1
+    assert _ingest_rows(organization, workspace, agent_b).get().id == neighbour.id
+    assert _ingest_rows(organization, workspace).count() == 2
 
 
 @pytest.mark.integration
@@ -111,16 +197,12 @@ def test_resolve_export_credentials_survives_a_create_race(
 def test_resolve_export_credentials_returns_a_disabled_key_as_disabled(
     user, organization, workspace
 ):
-    disabled = OrgApiKey.no_workspace_objects.create(
-        name="simulation_export_key",
-        organization=organization,
-        workspace=workspace,
-        type="ingest",
-        user=None,
-        enabled=False,
-    )
+    agent_id = uuid.uuid4()
+    disabled = _seed_ingest_key(organization, workspace, agent_id, enabled=False)
 
-    result = resolve_export_credentials(str(organization.id), str(workspace.id))
+    result = resolve_export_credentials(
+        str(organization.id), str(workspace.id), str(agent_id)
+    )
 
     assert result == ExportCredentials(disabled.api_key, disabled.secret_key, False)
     assert _ingest_rows(organization).count() == 1
@@ -131,10 +213,18 @@ def test_resolve_export_credentials_returns_a_disabled_key_as_disabled(
 @pytest.mark.integration
 @pytest.mark.django_db
 def test_resolve_export_credentials_refuses_empty_ids(user, organization, workspace):
-    assert resolve_export_credentials("", str(workspace.id)) is None
-    assert resolve_export_credentials(str(organization.id), "") is None
-    assert resolve_export_credentials(None, str(workspace.id)) is None
-    assert resolve_export_credentials(str(organization.id), None) is None
+    org_id, ws_id, agent_id = str(organization.id), str(workspace.id), str(uuid.uuid4())
+
+    assert resolve_export_credentials("", ws_id, agent_id) is None
+    assert resolve_export_credentials(org_id, "", agent_id) is None
+    assert resolve_export_credentials(org_id, ws_id, "") is None
+    assert resolve_export_credentials(None, ws_id, agent_id) is None
+    assert resolve_export_credentials(org_id, None, agent_id) is None
+    assert resolve_export_credentials(org_id, ws_id, None) is None
+    assert not _ingest_rows(organization).exists()
+
+    with pytest.raises(ValueError):
+        resolve_export_credentials(org_id, ws_id, "not-a-uuid")
     assert not _ingest_rows(organization).exists()
 
 
@@ -143,7 +233,10 @@ def test_resolve_export_credentials_refuses_empty_ids(user, organization, worksp
 def test_collector_validate_key_query_accepts_the_ingest_row(
     user, organization, workspace
 ):
-    credentials = resolve_export_credentials(str(organization.id), str(workspace.id))
+    agent = _agent_definition(organization, workspace)
+    credentials = resolve_export_credentials(
+        str(organization.id), str(workspace.id), str(agent.id)
+    )
 
     with connection.cursor() as cursor:
         cursor.execute(
@@ -153,8 +246,49 @@ def test_collector_validate_key_query_accepts_the_ingest_row(
         rows = cursor.fetchall()
 
     assert len(rows) == 1
-    organization_id, workspace_id, user_id, key_type = rows[0]
+    (
+        organization_id,
+        workspace_id,
+        user_id,
+        key_type,
+        agent_id,
+        agent_organization_id,
+        agent_deleted,
+    ) = rows[0]
     assert str(organization_id) == str(organization.id)
     assert str(workspace_id) == str(workspace.id)
     assert user_id is None
     assert key_type == "ingest"
+    assert str(agent_id) == str(agent.id)
+    assert str(agent_organization_id) == str(organization.id)
+    assert agent_deleted is False
+
+
+@pytest.mark.integration
+@pytest.mark.django_db
+def test_collector_validate_key_query_keeps_the_row_of_a_hard_deleted_agent(
+    user, organization, workspace
+):
+    missing_agent = uuid.uuid4()
+    credentials = resolve_export_credentials(
+        str(organization.id), str(workspace.id), str(missing_agent)
+    )
+
+    with connection.cursor() as cursor:
+        cursor.execute(
+            COLLECTOR_VALIDATE_KEY_SQL,
+            [credentials.api_key, credentials.secret_key],
+        )
+        rows = cursor.fetchall()
+
+    assert len(rows) == 1
+    key_type, agent_id, agent_organization_id, agent_deleted = (
+        rows[0][3],
+        rows[0][4],
+        rows[0][5],
+        rows[0][6],
+    )
+    assert key_type == "ingest"
+    assert str(agent_id) == str(missing_agent)
+    assert agent_organization_id is None
+    assert agent_deleted is None
