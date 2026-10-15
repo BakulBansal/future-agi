@@ -8,7 +8,6 @@ endpoints assume CH is reachable; if it's down, the request fails loudly.
 """
 
 import time
-from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum
@@ -315,12 +314,8 @@ class AnalyticsQueryService:
         window_start: datetime | None = None,
         window_end: datetime | None = None,
         exact_key: str | None = None,
-        hide_simulated: bool = False,
     ) -> AttributeKeyInventory:
         """Return the bounded CH25 key inventory for one or more projects.
-
-        ``hide_simulated`` leaves the spans of marked traces out of the
-        inventory; the caller decides it once for its request.
 
         This compatibility facade intentionally does *not* call
         :meth:`execute_ch_query`: that method is bound to the legacy ClickHouse
@@ -333,7 +328,6 @@ class AnalyticsQueryService:
         selector = AttributeReadSelector(
             wall_timeout_ms=timeout_ms,
             typed_only=True,
-            hide_simulated=hide_simulated,
         )
         read = selector.discover_keys(
             project_ids,
@@ -347,11 +341,7 @@ class AnalyticsQueryService:
         return AttributeKeyInventory(read, include_counts=include_counts)
 
     def get_span_attribute_keys_ch(
-        self,
-        project_id: str,
-        *,
-        exact_key: str | None = None,
-        hide_simulated: bool = False,
+        self, project_id: str, *, exact_key: str | None = None
     ) -> AttributeKeyInventory:
         """Get distinct span attribute keys with types from ClickHouse.
 
@@ -370,7 +360,7 @@ class AnalyticsQueryService:
         #     and wide `attrs_*` maps hit Code: 307 (max_bytes_to_read)
         #     because every row's Map gets exploded.
         return self.get_span_attribute_keys_ch_for_projects(
-            [project_id], exact_key=exact_key, hide_simulated=hide_simulated
+            [project_id], exact_key=exact_key
         )
 
     @staticmethod
@@ -412,7 +402,6 @@ class AnalyticsQueryService:
         candidate_config_ids: list[str] | None = None,
         *,
         eval_logger_table: str | None = None,
-        hide_simulated: bool = False,
     ) -> list[str]:
         """Distinct eval config IDs that have data for a project.
 
@@ -435,9 +424,6 @@ class AnalyticsQueryService:
           OOM-killing the server. The previous version was unbounded + used
           ``FINAL`` — the primary OOM source. Pass ``window_days=None`` to
           restore the unbounded window.
-
-        ``hide_simulated`` applies to the fast path only, which is the one
-        every caller reaches: the trace-join path has no caller that sets it.
         """
         eval_table, eval_nd = eval_logger_source(table=eval_logger_table)
         params: dict[str, Any] = {}
@@ -453,8 +439,6 @@ class AnalyticsQueryService:
                 timeout_ms=timeout_ms,
                 window_days=window_days,
                 eval_logger_table=eval_logger_table,
-                hide_simulated=hide_simulated,
-                project_ids=(project_id,),
             )
 
         params["project_id"] = project_id
@@ -487,8 +471,6 @@ class AnalyticsQueryService:
         window_days: int | None = 30,
         *,
         eval_logger_table: str | None = None,
-        hide_simulated: bool = False,
-        project_ids: Sequence[str] | None = None,
     ) -> list[str]:
         """Return candidate config ids that have direct eval rows.
 
@@ -496,10 +478,6 @@ class AnalyticsQueryService:
         scope from ``CustomEvalConfig``.  Keeping this operation explicitly
         project-free allows one leading-key lookup for a multi-project metrics
         catalog instead of serial scans or an incorrect first-project scope.
-
-        With ``hide_simulated`` a config is kept only if it has an eval row
-        whose trace is not marked, so ``project_ids`` must name the projects
-        the candidates belong to: they bound the read of the marked spans.
         """
 
         if not candidate_config_ids:
@@ -510,56 +488,13 @@ class AnalyticsQueryService:
         if window_days is not None:
             params["window_days"] = int(window_days)
             window_sql = "AND created_at >= now() - toIntervalDay(%(window_days)s)"
-        marked_hidden = ""
-        if hide_simulated:
-            scope = tuple(
-                dict.fromkeys(str(value) for value in project_ids or () if value)
-            )
-            if not scope:
-                raise ValueError(
-                    "Hiding simulated traces from the eval config list needs the "
-                    "project ids the configs belong to; none were given."
-                )
-            params["project_ids"] = scope
-            from tracer.services.simulation_visibility import row_exclusion_sql
-
-            # A negative test, so a row with no trace id stays and a config
-            # whose rows all belong to marked traces drops out. The lookup reads
-            # only the spans of the traces these rows name, with no time bound:
-            # an eval can be written long after its trace, and a mark is only
-            # ever added, so any stored version of a span carries it. Textual
-            # forms are compared because eval trace ids are UUID-typed and span
-            # trace ids are strings.
-            marked_hidden = (
-                "AND ifNull(toString(trace_id), '') NOT IN ("
-                "SELECT trace_id FROM spans "
-                "WHERE project_id IN %(project_ids)s AND is_deleted = 0 "
-                "AND trace_id IN ("
-                "SELECT DISTINCT toString(trace_id) "
-                f"FROM {eval_table} "
-                f"WHERE {eval_nd} {window_sql} "
-                "AND custom_eval_config_id IN %(config_ids)s) "
-                f"AND NOT ({row_exclusion_sql(map_column='attrs_string')}))"
-            )
         query = (
             "SELECT DISTINCT toString(custom_eval_config_id) AS config_id "
             f"FROM {eval_table} "
             f"WHERE {eval_nd} {window_sql} "
             "AND custom_eval_config_id IN %(config_ids)s"
         )
-        if marked_hidden:
-            query = f"{query} {marked_hidden}"
-            # The lookup of marked spans has no time bound of its own, so the
-            # statement gets a real deadline; a read that runs past it fails the
-            # request as unavailable instead of scanning the project's history.
-            result = self.execute_ch_query(
-                query,
-                params,
-                timeout_ms=timeout_ms,
-                server_execution_cap_ms=timeout_ms,
-            )
-        else:
-            result = self.execute_ch_query(query, params, timeout_ms=timeout_ms)
+        result = self.execute_ch_query(query, params, timeout_ms=timeout_ms)
         return [row["config_id"] for row in result.data]
 
     def get_eval_config_ids_for_traces_ch(

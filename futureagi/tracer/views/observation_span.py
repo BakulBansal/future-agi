@@ -172,10 +172,6 @@ from tracer.services.filter_principal_context import (
     FilterPrincipalContextError,
     bind_request_my_annotations_principal,
 )
-from tracer.services.simulation_visibility import MarkedLookupFailed, holding_projects
-from tracer.services.simulation_visibility import (
-    hide_simulated as project_hides_simulated,
-)
 from tracer.utils.annotations import build_annotation_subqueries
 from tracer.utils.bounded_csv import (
     BOUNDED_SPAN_EXPORT_PAGE_SIZE,
@@ -1649,11 +1645,7 @@ class ObservationSpanView(BaseModelViewSetMixin, ModelViewSet):
         except FilterPrincipalContextError as exc:
             return self._gm.bad_request(str(exc))
         except Exception as exc:
-            if (
-                is_read_budget_error(exc)
-                or is_clickhouse_query_error(exc)
-                or isinstance(exc, MarkedLookupFailed)
-            ):
+            if is_read_budget_error(exc) or is_clickhouse_query_error(exc):
                 logger.warning(
                     "span_list_query_unavailable",
                     project_version_id=str(project_version_id),
@@ -1989,9 +1981,7 @@ class ObservationSpanView(BaseModelViewSetMixin, ModelViewSet):
         except FilterPrincipalContextError as exc:
             return self._gm.bad_request(str(exc))
         except Exception as exc:
-            if is_clickhouse_api_read_unavailable_error(exc) or isinstance(
-                exc, MarkedLookupFailed
-            ):
+            if is_clickhouse_api_read_unavailable_error(exc):
                 logger.warning(
                     "observe_span_list_query_unavailable",
                     project_id=str(
@@ -2140,19 +2130,11 @@ class ObservationSpanView(BaseModelViewSetMixin, ModelViewSet):
         # Labels can be project-local or org/shared labels referenced by span
         # scores. Completeness is project-local, so retain that mapping for the
         # residual classifier instead of feeding it an org-wide union.
-        # One read for the request: when any project of an organization-wide
-        # read holds, the whole read leaves marked spans out.
-        hide_simulated = (
-            bool(holding_projects(scope_project_ids))
-            if org_scope
-            else project_hides_simulated(str(project_id))
-        )
         annotation_label_ids_by_project = None
         if org_scope:
             labels_by_project = get_annotation_labels_by_project(
                 [str(project_id) for project_id in org_project_ids],
                 organization=org,
-                hide_simulated=hide_simulated,
             )
             annotation_label_ids_by_project = {
                 project_key: [str(label.id) for label in labels]
@@ -2166,11 +2148,7 @@ class ObservationSpanView(BaseModelViewSetMixin, ModelViewSet):
                 }.values()
             )
         else:
-            annotation_labels = list(
-                get_annotation_labels_for_project(
-                    project_id, hide_simulated=hide_simulated
-                )
-            )
+            annotation_labels = list(get_annotation_labels_for_project(project_id))
         annotation_label_ids = [str(lbl.id) for lbl in annotation_labels]
         label_types = {str(lbl.id): lbl.type for lbl in annotation_labels}
 
@@ -2194,7 +2172,6 @@ class ObservationSpanView(BaseModelViewSetMixin, ModelViewSet):
             annotation_label_ids=annotation_label_ids,
             annotation_label_ids_by_project=annotation_label_ids_by_project,
             bounded_internal_scan=cursor_enabled,
-            hide_simulated=hide_simulated,
         )
         requires_cursor = builder.requires_cursor_for_long_filtered_read()
         if requires_cursor and not cursor_supported:
@@ -3007,11 +2984,7 @@ class ObservationSpanView(BaseModelViewSetMixin, ModelViewSet):
         # Labels can be project-local or org/shared labels that are referenced
         # by span scores. Use the score-backed helper so span columns and
         # annotation filters match the actual data returned from ClickHouse.
-        # One read for the request, shared by the label list and the builder.
-        hide_simulated = project_hides_simulated(project_id)
-        annotation_labels = get_annotation_labels_for_project(
-            project_id, hide_simulated=hide_simulated
-        )
+        annotation_labels = get_annotation_labels_for_project(project_id)
         annotation_label_ids = [str(lbl.id) for lbl in annotation_labels]
         label_types = {str(lbl.id): lbl.type for lbl in annotation_labels}
 
@@ -3023,7 +2996,6 @@ class ObservationSpanView(BaseModelViewSetMixin, ModelViewSet):
             eval_config_ids=eval_config_ids,
             annotation_label_ids=annotation_label_ids,
             project_version_id=str(project_version_id),
-            hide_simulated=hide_simulated,
         )
 
         # Phase 1: Paginated spans (light columns — no input/output). Filtered
@@ -3330,10 +3302,6 @@ class ObservationSpanView(BaseModelViewSetMixin, ModelViewSet):
                         id=project_id,
                         organization=_get_request_organization(request),
                     )
-                    # One read per request, shared by whichever chart read runs
-                    # below. It follows the lookup, so a project that does not
-                    # exist costs no read.
-                    hide_simulated = project_hides_simulated(project_id)
             except Project.DoesNotExist:
                 return finish(
                     self._gm.bad_request("Project not found or access denied")
@@ -3409,7 +3377,6 @@ class ObservationSpanView(BaseModelViewSetMixin, ModelViewSet):
                         ),
                         workspace_id=str(workspace_id) if workspace_id else None,
                         timeout_ms=graph_action_remaining_ms(deadline),
-                        hide_simulated=hide_simulated,
                     )
                 elif metric_type == "EVAL":
                     graph = fetch_eval_graph_ch(
@@ -3427,7 +3394,6 @@ class ObservationSpanView(BaseModelViewSetMixin, ModelViewSet):
                         ),
                         workspace_id=str(workspace_id) if workspace_id else None,
                         timeout_ms=graph_action_remaining_ms(deadline),
-                        hide_simulated=hide_simulated,
                     )
                 else:
                     graph = fetch_annotation_graph_ch(
@@ -3445,7 +3411,6 @@ class ObservationSpanView(BaseModelViewSetMixin, ModelViewSet):
                         ),
                         workspace_id=str(workspace_id) if workspace_id else None,
                         timeout_ms=graph_action_remaining_ms(deadline),
-                        hide_simulated=hide_simulated,
                     )
                 graph.update(
                     graph_query_evidence(
@@ -3543,14 +3508,11 @@ class ObservationSpanView(BaseModelViewSetMixin, ModelViewSet):
         if not self._attribute_project_for_request(request, project_id):
             return self._gm.not_found("Project not found")
 
+        selector = AttributeReadSelector(
+            typed_only=True,
+            json_attribute_mode="structured",
+        )
         try:
-            # Decided inside the guarded block, so a database error here is
-            # answered like any other failure of this read.
-            selector = AttributeReadSelector(
-                typed_only=True,
-                json_attribute_mode="structured",
-                hide_simulated=project_hides_simulated(str(project_id)),
-            )
             keys, metadata = self._get_span_attribute_inventory(
                 project_id,
                 selector=selector,
@@ -3621,17 +3583,14 @@ class ObservationSpanView(BaseModelViewSetMixin, ModelViewSet):
         if not self._attribute_project_for_request(request, project_id):
             return self._gm.not_found("Project not found")
 
+        selector = AttributeReadSelector(
+            typed_only=True,
+            # Eval field mapping can resolve arbitrary JSON values.  Unlike a
+            # filter picker it needs the key even when the value is an object,
+            # null, or a JSON-only scalar.
+            json_attribute_mode="all",
+        )
         try:
-            # Decided inside the guarded block, so a database error here is
-            # answered like any other failure of this read.
-            selector = AttributeReadSelector(
-                typed_only=True,
-                # Eval field mapping can resolve arbitrary JSON values.  Unlike a
-                # filter picker it needs the key even when the value is an object,
-                # null, or a JSON-only scalar.
-                json_attribute_mode="all",
-                hide_simulated=project_hides_simulated(str(project_id)),
-            )
             span_attribute_keys, discovery_metadata = (
                 self._get_span_attribute_inventory(
                     project_id,
@@ -4423,7 +4382,6 @@ class ObservationSpanView(BaseModelViewSetMixin, ModelViewSet):
             end_user_id=str(end_user_id) if end_user_id is not None else None,
             bounded_internal_scan=True,
             bounded_identity_only=True,
-            hide_simulated=project_hides_simulated(str(project_id)),
         )
         error_code = builder.bounded_filter_degraded_error_code()
         if error_code or not builder.supports_bounded_filter_scan():

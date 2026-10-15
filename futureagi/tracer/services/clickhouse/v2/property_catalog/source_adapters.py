@@ -8,7 +8,6 @@ from uuid import UUID
 
 from tracer.constants.dashboard import TEXT_ANNOTATION_AGGREGATIONS
 from tracer.services.configured_value_options import configured_value_options
-from tracer.services.simulation_visibility import MarkedLookupFailed, holding_projects
 from tracer.utils.property_registry import canonical_system_attribute_name
 
 from .codec import combine_search_text
@@ -812,10 +811,6 @@ class CurrentDefinitionSource:
 
     def __init__(self, deadline):
         self.deadline = deadline
-        # A request asks for counts and for a page from this one instance, so
-        # the holding flag and the label walk are decided once per scope.
-        self._holding_among: dict[tuple[str, ...], frozenset[str]] = {}
-        self._labels_with_unmarked_scores: dict[tuple[str, ...], set[str]] = {}
 
     def _read(self, read):
         from django.db import connection, transaction
@@ -1015,10 +1010,7 @@ class CurrentDefinitionSource:
             organization_id=org,
         )
         if not dataset_labels and not scope.get("workspace_scope"):
-            labels = labels.filter(
-                Q(project_id__in=projects)
-                | self._label_has_scores(projects, scores, query)
-            )
+            labels = labels.filter(Q(project_id__in=projects) | Exists(scores))
         yield (
             2,
             0,
@@ -1046,80 +1038,6 @@ class CurrentDefinitionSource:
             ("id", "name", "data_type"),
             _dataset_column_definition,
         )
-
-    def _label_has_scores(self, projects, scores, query):
-        """The condition that keeps a label because its project has scored it.
-
-        A scope that holds marked traces cannot use the EXISTS test: whether a
-        score sits on a marked trace is only known from ClickHouse. That scope
-        (and only that scope) lists the labels that have a score on a trace
-        that is not marked, found before the queryset is built.
-        """
-        from django.db.models import Exists, Q
-
-        if not self._lists_labels(query) or not self._holding(projects):
-            return Exists(scores)
-        return Q(id__in=self._labels_with_an_unmarked_score(projects))
-
-    @staticmethod
-    def _lists_labels(query):
-        # The label family is built before a query's category and kind filters
-        # drop it, so a read that will drop it must not pay for the walk.
-        return (
-            query.get("category", "") in ("", "annotation_metric")
-            and query.get("property_kind", "") in ("", "annotation")
-            and query.get("role") != "dimension"
-        )
-
-    def _holding(self, projects):
-        key = tuple(sorted(str(project) for project in projects))
-        if key not in self._holding_among:
-            self._holding_among[key] = frozenset(
-                self._read(lambda: holding_projects(key))
-            )
-        return self._holding_among[key]
-
-    def _labels_with_an_unmarked_score(self, projects):
-        key = tuple(sorted(str(project) for project in projects))
-        if key not in self._labels_with_unmarked_scores:
-            from tracer.services.annotation_label_source import (
-                AnnotationLabelScoresProjectPG,
-            )
-            from tracer.utils.helper import (
-                _label_ids_scored_off_trace_and_span,
-                _label_ids_with_an_unmarked_score,
-            )
-
-            from .reader import PropertyCatalogUnavailable
-
-            source = AnnotationLabelScoresProjectPG()
-            holding = self._holding(projects)
-
-            def read():
-                found: set[str] = set()
-                for project in key:
-                    found.update(
-                        _label_ids_with_an_unmarked_score(
-                            project,
-                            source.label_ids_for_project(project),
-                            holding=holding,
-                        )
-                    )
-                    # The picker has always listed a label scored on a session,
-                    # and a session is never simulated, so it stays whatever
-                    # its trace scores are and for every project of the scope.
-                    found.update(
-                        _label_ids_scored_off_trace_and_span(project, on_a_session=True)
-                    )
-                return found
-
-            try:
-                self._labels_with_unmarked_scores[key] = self._read(read)
-            except MarkedLookupFailed as exc:
-                # A list that guessed would offer a label whose only data is
-                # simulated, so the read fails and the picker answers unavailable.
-                raise PropertyCatalogUnavailable("marked_lookup_failed") from exc
-        return self._labels_with_unmarked_scores[key]
 
     def _matching_families(self, scope, query):
         """Share scope, search and role predicates between pages and counts."""
