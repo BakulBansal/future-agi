@@ -269,7 +269,44 @@ class CreateAgentVersionView(APIView):
                     livekit_max_concurrency=validated.get("livekit_max_concurrency"),
                     provider_was_provided="provider" in request.data,
                 )
-                sync_provider_credentials(version, creds_input)
+                # The page always sends the provider and LiveKit settings, so a code
+                # agent saved with every credential blank would get an empty row.
+                # A request with no credential fields writes no row, so the agent is
+                # only read when fields were sent.
+                sent_fields = creds_input.provider_was_provided or any(
+                    value is not None
+                    for value in (
+                        creds_input.api_key,
+                        creds_input.assistant_id,
+                        creds_input.livekit_url,
+                        creds_input.livekit_api_key,
+                        creds_input.livekit_api_secret,
+                        creds_input.livekit_agent_name,
+                        creds_input.livekit_config_json,
+                        creds_input.livekit_max_concurrency,
+                    )
+                )
+                # Only the fields the provider's row would save count, so a LiveKit
+                # agent's leftover key or assistant id does not make a blank row.
+                if (creds_input.provider or "").strip() in (
+                    "livekit",
+                    "livekit_bridge",
+                ):
+                    saved_values = (
+                        creds_input.livekit_url,
+                        creds_input.livekit_api_key,
+                        creds_input.livekit_api_secret,
+                        creds_input.livekit_agent_name,
+                    )
+                else:
+                    saved_values = (creds_input.api_key, creds_input.assistant_id)
+                has_credential_value = any(
+                    (value or "").strip() for value in saved_values
+                )
+                if not (
+                    sent_fields and not has_credential_value and agent_is_source(agent)
+                ):
+                    sync_provider_credentials(version, creds_input)
 
                 if observability_enabled is None:
                     # An absent field leaves a code agent's switch as it is.
