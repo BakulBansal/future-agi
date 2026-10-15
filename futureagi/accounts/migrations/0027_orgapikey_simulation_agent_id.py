@@ -21,6 +21,14 @@ class Migration(migrations.Migration):
         ),
         migrations.AddConstraint(
             model_name='orgapikey',
-            constraint=models.UniqueConstraint(condition=models.Q(('deleted', False), ('type', 'ingest')), fields=('organization', 'workspace', 'simulation_agent_id'), name='unique_ingest_api_key_per_org_workspace_agent_not_deleted', violation_error_message='Only one ingest API key is allowed per organization, workspace and agent.'),
+            constraint=models.UniqueConstraint(
+                condition=models.Q(('deleted', False), ('type', 'ingest')),
+                fields=('organization', 'workspace', 'simulation_agent_id'),
+                name='unique_ingest_api_key_per_org_workspace_agent_not_deleted',
+                violation_error_message=(
+                    'Only one ingest API key is allowed per organization, '
+                    'workspace and agent.'
+                ),
+            ),
         ),
     ]

@@ -269,10 +269,23 @@ def test_collector_validate_key_query_accepts_the_ingest_row(
 def test_collector_validate_key_query_keeps_the_row_of_a_hard_deleted_agent(
     user, organization, workspace
 ):
-    missing_agent = uuid.uuid4()
+    # The column is a plain UUID, not a relation: deleting the agent for good
+    # must leave the key in place, still naming the agent.
+    assert OrgApiKey._meta.get_field("simulation_agent_id").is_relation is False
+    agent = _agent_definition(organization, workspace)
     credentials = resolve_export_credentials(
-        str(organization.id), str(workspace.id), str(missing_agent)
+        str(organization.id), str(workspace.id), str(agent.id)
     )
+
+    AgentDefinition.all_objects.filter(id=agent.id).delete()
+    assert not AgentDefinition.all_objects.filter(id=agent.id).exists()
+    survivor = _ingest_rows(organization, workspace, agent.id).get()
+    assert (survivor.api_key, survivor.secret_key) == (
+        credentials.api_key,
+        credentials.secret_key,
+    )
+    assert survivor.simulation_agent_id == agent.id
+    assert survivor.deleted is False
 
     with connection.cursor() as cursor:
         cursor.execute(
@@ -282,13 +295,8 @@ def test_collector_validate_key_query_keeps_the_row_of_a_hard_deleted_agent(
         rows = cursor.fetchall()
 
     assert len(rows) == 1
-    key_type, agent_id, agent_organization_id, agent_deleted = (
-        rows[0][3],
-        rows[0][4],
-        rows[0][5],
-        rows[0][6],
-    )
+    _, _, _, key_type, agent_id, agent_organization_id, agent_deleted = rows[0]
     assert key_type == "ingest"
-    assert str(agent_id) == str(missing_agent)
+    assert str(agent_id) == str(agent.id)
     assert agent_organization_id is None
     assert agent_deleted is None

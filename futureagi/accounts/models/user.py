@@ -350,7 +350,10 @@ class OrgApiKey(BaseModel):
                 fields=["organization", "workspace", "simulation_agent_id"],
                 condition=models.Q(type="ingest", deleted=False),
                 name="unique_ingest_api_key_per_org_workspace_agent_not_deleted",
-                violation_error_message="Only one ingest API key is allowed per organization, workspace and agent.",
+                violation_error_message=(
+                    "Only one ingest API key is allowed per organization, "
+                    "workspace and agent."
+                ),
             ),
         ]
 

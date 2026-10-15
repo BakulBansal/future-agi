@@ -2,7 +2,9 @@
 
 The collector's ClickHouse exporter is the sole writer of CH ``spans`` (legacy
 PG->CH CDC chain dropped by default), so any span that must appear in observe
-exports through it. Resolves the org's system ingest key and ships OTLP spans.
+exports through it. Resolves the org's system key for the platform's own
+emission, and an agent's write-only ``ingest`` key for its sandbox, and ships
+OTLP spans.
 """
 
 from __future__ import annotations

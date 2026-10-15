@@ -124,11 +124,17 @@ def test_one_ingest_key_per_organisation_workspace_and_agent(
     second_agent = _ingest_key(organization, workspace, agent_id=uuid.uuid4())
     assert second_agent.id != first.id
 
-    # Other key types in the same workspace are untouched by the constraint.
+    # Other key types are untouched by the constraint: two of them naming the
+    # same agent in the same workspace, beside the ingest key, do not collide.
     _system_key(organization, workspace)
-    OrgApiKey.no_workspace_objects.create(
-        organization=organization, workspace=workspace, type="user", user=user
-    )
+    for _ in range(2):
+        OrgApiKey.no_workspace_objects.create(
+            organization=organization,
+            workspace=workspace,
+            type="user",
+            user=user,
+            simulation_agent_id=agent_id,
+        )
 
     other_workspace = Workspace.objects.create(
         name="Second Workspace",
