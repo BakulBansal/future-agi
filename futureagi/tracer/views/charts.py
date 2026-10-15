@@ -32,9 +32,6 @@ from tracer.services.filter_principal_context import (
     FilterPrincipalContextError,
     bind_request_my_annotations_principal,
 )
-from tracer.services.simulation_visibility import (
-    hide_simulated as project_hides_simulated,
-)
 from tracer.utils.graphs_optimized import (
     EvalGraphConfigurationError,
     EvalGraphReadError,
@@ -172,9 +169,6 @@ class ChartsView(GenericViewSet):
                         workspace=request.workspace,
                         deleted=False,
                     )
-                    # One read per request, shared by whichever chart read
-                    # runs below.
-                    hide_simulated = project_hides_simulated(str(project.id))
             except Project.DoesNotExist:
                 return finish(self._gm.bad_request("Project does not exist"))
 
@@ -194,7 +188,6 @@ class ChartsView(GenericViewSet):
                         refresh=refresh,
                         organization_id=organization_id,
                         workspace_id=workspace_id,
-                        hide_simulated=hide_simulated,
                     )
 
             elif data_type == "SYSTEM_METRICS":
@@ -206,7 +199,6 @@ class ChartsView(GenericViewSet):
                     refresh=refresh,
                     organization_id=organization_id,
                     workspace_id=workspace_id,
-                    hide_simulated=hide_simulated,
                 )
                 if isinstance(metric_data, dict):
                     metric_data = {
@@ -225,7 +217,6 @@ class ChartsView(GenericViewSet):
                     refresh=refresh,
                     organization_id=organization_id,
                     workspace_id=workspace_id,
-                    hide_simulated=hide_simulated,
                 )
 
             else:

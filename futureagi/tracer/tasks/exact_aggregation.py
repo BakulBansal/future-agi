@@ -144,20 +144,12 @@ def _observe_payload(namespace: str, identity: dict[str, Any]) -> Any:
     )
 
     _reauthorize_exact_observe_project(identity)
-    # The rule comes from the identity being refreshed and from nowhere else.
-    # The snapshot is stored under that key, so the key has to say what the
-    # statement did; the project's holding state today may have moved since
-    # the refresh was scheduled, and an identity written before it held is
-    # computed, like its interactive read, without the rule. It is passed
-    # only when set, so every other refresh is called exactly as it was.
-    hiding = {"hide_simulated": True} if identity.get("hide_simulated") else {}
     with _exact_observe_analytics() as analytics:
         if namespace == "observe-agent-graph":
             return read_exact_agent_graph(
                 analytics=analytics,
                 project_id=str(identity["project_id"]),
                 filters=list(identity.get("filters") or []),
-                **hiding,
             )
         common = {
             "analytics": analytics,
@@ -174,10 +166,9 @@ def _observe_payload(namespace: str, identity: dict[str, Any]) -> Any:
                 **common,
                 metric_id=str(identity.get("metric_id") or ""),
                 observe_type=str(identity.get("observe_type") or "trace"),
-                **hiding,
             )
         if namespace == "observe-all-system-graphs":
-            return read_exact_all_system_metrics(**common, **hiding)
+            return read_exact_all_system_metrics(**common)
         if namespace == "observe-user-system-graph":
             return read_exact_user_system_graph(
                 **common,
@@ -195,7 +186,6 @@ def _observe_payload(namespace: str, identity: dict[str, Any]) -> Any:
                 observe_type=str(identity.get("observe_type") or "trace"),
                 all_series=namespace == "observe-eval-chart-series",
                 aggregation_context=str(identity.get("aggregation_context") or "trace"),
-                **hiding,
             )
         if namespace == "observe-annotation-graph":
             return read_exact_annotation_graph(
@@ -203,7 +193,6 @@ def _observe_payload(namespace: str, identity: dict[str, Any]) -> Any:
                 req_data_config=dict(identity.get("req_data_config") or {}),
                 observe_type=str(identity.get("observe_type") or "trace"),
                 aggregation_context=str(identity.get("aggregation_context") or "trace"),
-                **hiding,
             )
         raise ValueError("unsupported exact Observe refresh namespace")
 

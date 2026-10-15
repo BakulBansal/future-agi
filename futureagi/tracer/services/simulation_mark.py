@@ -44,7 +44,7 @@ def customer_code_environment(
     test_execution_id: str | None,
     project_name: str | None = None,
     collector_url: str | None = None,
-    export: Literal["our_keys", "customer_keys"] | None = None,
+    export: Literal["our_keys"] | None = None,
     instrumentation: str | None = None,
 ) -> dict[str, str]:
     """Return the variables to set in the customer's process for this run.
@@ -52,13 +52,16 @@ def customer_code_environment(
     ``organization_id`` is accepted because the launcher passes it, and is never written:
     the run ids already identify the run.
     """
+    # The sandbox always exports with the agent's ingest key; no other mode exists.
+    if export is not None and export != "our_keys":
+        raise ValueError("export must be our_keys")
+
     # Without a run there is nothing to mark, so nothing is written at all.
     if not run_id:
         return {}
 
-    # An export is all or nothing: without both a project name and a collector URL (the
-    # customer_keys entries never write the URL, but it must still be given) the run is
-    # marked only, exactly as a run that does not export.
+    # An export is all or nothing: without both a project name and a collector URL the
+    # run is marked only, exactly as a run that does not export.
     if export is None or not project_name or not collector_url:
         project_pairs: list[str] = []
         export_entries: dict[str, str] = {}
@@ -66,15 +69,14 @@ def customer_code_environment(
         # The project pair leads so the sandbox's merge keeps the order it documents:
         # the customer's own pairs, then our project, then the mark.
         project_pairs = [_pair(_PROJECT_NAME_KEY, project_name)]
-        export_entries = {_EXPORT_VARIABLE: export}
-        # With the customer's own keys, traceAI's default host already serves both the
-        # collector route and the API those keys call, so nothing is pointed elsewhere.
-        if export == "our_keys":
+        export_entries = {
+            _EXPORT_VARIABLE: export,
             # The traces-only name, so a metrics or logs exporter never follows it.
-            export_entries[_TRACES_ENDPOINT_VARIABLE] = f"{collector_url}{_TRACES_PATH}"
-            # traceAI reads its own base URL, not the OpenTelemetry endpoint.
-            if instrumentation == "traceai":
-                export_entries[_TRACEAI_BASE_URL_VARIABLE] = collector_url
+            _TRACES_ENDPOINT_VARIABLE: f"{collector_url}{_TRACES_PATH}",
+        }
+        # traceAI reads its own base URL, not the OpenTelemetry endpoint.
+        if instrumentation == "traceai":
+            export_entries[_TRACEAI_BASE_URL_VARIABLE] = collector_url
 
     pairs = [*project_pairs, _pair(RESOURCE_MARK_KEY, _MARK_VALUE)]
     for name, value in (

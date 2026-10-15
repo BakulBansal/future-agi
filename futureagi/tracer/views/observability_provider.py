@@ -1,7 +1,6 @@
 import math
 
 import structlog
-from django.db import transaction
 from rest_framework.decorators import action
 from rest_framework.exceptions import ValidationError
 from rest_framework.permissions import IsAuthenticated
@@ -17,10 +16,7 @@ from tfc.utils.api_serializers import ApiErrorResponseSerializer
 from tfc.utils.base_viewset import BaseModelViewSetMixinWithUserOrg
 from tfc.utils.error_codes import get_error_message
 from tfc.utils.general_methods import GeneralMethods
-from tracer.models.observability_provider import (
-    ObservabilityProvider,
-    ProviderChoices,
-)
+from tracer.models.observability_provider import ProviderChoices
 from tracer.models.project import ProjectSourceChoices
 from tracer.serializers.observability_provider import (
     ObservabilityProviderSerializer,
@@ -29,7 +25,6 @@ from tracer.serializers.observability_provider import (
     VerifyResponseSerializer,
 )
 from tracer.services.observability_providers import ObservabilityService
-from tracer.services.simulation_visibility import HOLDING_FLAG
 from tracer.utils.otel import get_or_create_project
 
 logger = structlog.get_logger(__name__)
@@ -129,36 +124,11 @@ class ObservabilityProviderViewSet(BaseModelViewSetMixinWithUserOrg, ModelViewSe
 
     def update(self, request, *args, **kwargs):
         try:
-            found = self.get_object()
-            # The holding flag is written by another process at any moment, and
-            # a save writes every column. Saving the row get_object() read could
-            # put back a metadata that predates the flag, and a project that has
-            # received simulated spans must never stop holding them. Re-reading
-            # under a row lock makes the flag writer wait for this save instead.
-            with transaction.atomic():
-                instance = (
-                    ObservabilityProvider.no_workspace_objects.select_for_update().get(
-                        pk=found.pk
-                    )
-                )
-                serializer = self.get_serializer(
-                    instance, data=request.data, partial=True
-                )
-                if not serializer.is_valid():
-                    return self._gm.bad_request(serializer.errors)
-                if self._row_holds_simulated(instance):
-                    metadata = serializer.validated_data.get(
-                        "metadata", instance.metadata
-                    )
-                    if not isinstance(metadata, dict):
-                        return self._gm.bad_request(
-                            {"metadata": ["metadata must be an object"]}
-                        )
-                    serializer.validated_data["metadata"] = {
-                        **metadata,
-                        HOLDING_FLAG: True,
-                    }
-                self.perform_update(serializer)
+            instance = self.get_object()
+            serializer = self.get_serializer(instance, data=request.data, partial=True)
+            if not serializer.is_valid():
+                return self._gm.bad_request(serializer.errors)
+            self.perform_update(serializer)
             return self._gm.success_response(serializer.data)
         except ValidationError as e:
             return self._gm.bad_request(e.detail)
@@ -167,11 +137,6 @@ class ObservabilityProviderViewSet(BaseModelViewSetMixinWithUserOrg, ModelViewSe
             return self._gm.bad_request(
                 get_error_message("FAILED_TO_UPDATE_OBSERVABILITY_PROVIDER")
             )
-
-    @staticmethod
-    def _row_holds_simulated(row):
-        metadata = row.metadata
-        return isinstance(metadata, dict) and metadata.get(HOLDING_FLAG) is True
 
     def destroy(self, request, *args, **kwargs):
         try:

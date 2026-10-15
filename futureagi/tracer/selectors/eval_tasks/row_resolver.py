@@ -30,9 +30,6 @@ from tracer.services.clickhouse.read_budget import (
 )
 from tracer.services.clickhouse.v2 import get_reader
 from tracer.services.eval_tasks.cursor_policy import CONTINUOUS_MIN_PROOF_WINDOW
-from tracer.services.simulation_visibility import (
-    hide_simulated as project_hides_simulated,
-)
 from tracer.utils.filter_operators import split_comma_joined_uuid_members
 
 if TYPE_CHECKING:
@@ -45,10 +42,6 @@ _BUILDER_BY_ROW_TYPE = {
     "traces": ("TRACE_LIST", "trace_id"),
     "sessions": ("SESSION_LIST", "session_id"),
 }
-
-# Only these lists take the argument that leaves marked traces out. A marked
-# trace creates no session, so the session list has nothing to leave out.
-_HIDING_ROW_TYPES = frozenset({RowType.SPANS, RowType.TRACES, RowType.VOICE_CALLS})
 
 # Historical reconciliation is background workflow work. Give its completely
 # buffered proof a two-minute aggregate envelope while keeping every
@@ -558,15 +551,6 @@ def iter_desired_rows(
     yield from _iter_id_batches(list(resolved.matched_ids), batch_size=batch_size)
 
 
-def _task_hides_simulated(task: EvalTask) -> bool:
-    """Whether the task's project leaves marked traces out of the rows it selects."""
-
-    return bool(
-        task.row_type in _HIDING_ROW_TYPES
-        and project_hides_simulated(str(task.project_id))
-    )
-
-
 def resolve_desired_rows(
     task: EvalTask, *, ceiling: datetime | None = None
 ) -> ResolvedRowSet:
@@ -581,7 +565,6 @@ def resolve_desired_rows(
             task,
             ceiling=ceiling,
             sampling_rate=float(sampling_rate),
-            hide_simulated=_task_hides_simulated(task),
         )
 
     # A strict datetime complement can make the requested interval provably
@@ -607,11 +590,6 @@ def resolve_desired_rows(
         if float(sampling_rate) <= 0:
             return ResolvedRowSet((), (), True)
 
-        # The decision is read where a builder is certain to be built, so the
-        # returns above, which build nothing, cost no Postgres read. This branch
-        # returns before the sampled path below, so a resolution reads once.
-        hide_simulated = _task_hides_simulated(task)
-
         from tracer.services.clickhouse.v2.query_service import (
             V2AnalyticsQueryService,
         )
@@ -628,7 +606,6 @@ def resolve_desired_rows(
             batch_size=_EVAL_TASK_BUFFERED_ID_LIMIT,
             row_type=task.row_type,
             include_trace_filter_witnesses=True,
-            hide_simulated=hide_simulated,
         )
         if not isinstance(bounded_result, _BoundedHistoricalResult):
             # Preserve compatibility with test/fallback selectors that return
@@ -650,7 +627,6 @@ def resolve_desired_rows(
         sampling_rate=float(sampling_rate),
         filters=task.filters or {},
         limit=limit,
-        hide_simulated=_task_hides_simulated(task),
     )
     resolved_ids = _resolve_buffered_legacy_ids(
         sql,
@@ -751,7 +727,6 @@ def _resolve_continuous_rows(
     *,
     ceiling: datetime | None,
     sampling_rate: float,
-    hide_simulated: bool = False,
 ) -> ResolvedRowSet:
     """Resolve an arrival delta C, then classify C against complete latest M."""
 
@@ -863,8 +838,6 @@ def _resolve_continuous_rows(
             builder_kwargs["bounded_identity_only"] = True
         if task.row_type == RowType.TRACES:
             builder_kwargs["bounded_bulk_scan"] = True
-        if task.row_type in _HIDING_ROW_TYPES:
-            builder_kwargs["hide_simulated"] = hide_simulated
         builder = get_v2_class(query_type)(**builder_kwargs)
         if not builder.supports_bounded_filter_scan():
             raise EvalTaskSelectionRejected(_SAFE_UNSUPPORTED_FILTER_MESSAGE)
@@ -1016,7 +989,6 @@ def _resolve_bounded_historical_span_ids(
     row_type: str = RowType.SPANS,
     include_trace_filter_witnesses: bool = False,
     workflow_exact: bool = False,
-    hide_simulated: bool = False,
 ) -> list[str] | _BoundedHistoricalResult:
     """Resolve a complete historical span/trace/session/voice set with bounded reads.
 
@@ -1121,8 +1093,6 @@ def _resolve_bounded_historical_span_ids(
         # prefix. A workflow task switches this flag below after the exact
         # envelope cutover has been calculated from the same safe batch shape.
         builder_kwargs["bounded_include_filter_witnesses"] = False
-    if row_type in _HIDING_ROW_TYPES:
-        builder_kwargs["hide_simulated"] = hide_simulated
     builder = get_v2_class(query_type)(
         **builder_kwargs,
     )
@@ -1349,7 +1319,6 @@ def _resolve_bounded_historical_span_ids(
             row_type=row_type,
             include_trace_filter_witnesses=include_trace_filter_witnesses,
             workflow_exact=True,
-            hide_simulated=hide_simulated,
         )
     if not page.complete and page.error_code in _EVAL_TASK_STATEMENT_BUDGET_ERROR_CODES:
         # These codes mean the selector's fixed statement envelope cannot prove
@@ -1629,7 +1598,6 @@ def _build_sample_query(
     limit: int | None,
     created_at_floor: datetime | None = None,
     created_at_ceiling: datetime | None = None,
-    hide_simulated: bool = False,
 ) -> tuple[str, dict[str, Any]]:
     """Sampled-row-ids SQL for the row_type: take the UI list builder's filtered
     id set and wrap it with deterministic hash sampling, a stable order, and the
@@ -1701,13 +1669,7 @@ def _build_sample_query(
     # Continuous bounds are passed directly to ``build_id_query`` so they bind
     # on arrival time (``created_at``). Injecting the floor into ``ui_filters``
     # would make ``parse_time_range`` apply it to historical ``start_time``.
-    builder_kwargs: dict[str, Any] = {
-        "project_id": str(project_id),
-        "filters": ui_filters,
-    }
-    if row_type in _HIDING_ROW_TYPES:
-        builder_kwargs["hide_simulated"] = hide_simulated
-    builder = get_v2_class(query_type)(**builder_kwargs)
+    builder = get_v2_class(query_type)(project_id=str(project_id), filters=ui_filters)
     inner_sql, params = builder.build_id_query(
         created_at_floor=created_at_floor, created_at_ceiling=created_at_ceiling
     )

@@ -1116,7 +1116,6 @@ def _enumerate_exact_trace_ids(
     filters: list[dict[str, Any]],
     annotation_label_ids: tuple[str, ...] | None,
     started: float,
-    hide_simulated: bool = False,
 ) -> tuple[list[str], int, int]:
     """Exhaust canonical roots and classify every candidate against latest state.
 
@@ -1144,7 +1143,6 @@ def _enumerate_exact_trace_ids(
         bounded_bulk_scan=True,
         bounded_include_filter_witnesses=False,
         bounded_global_span_witnesses=True,
-        hide_simulated=hide_simulated,
     )
     if not builder.supports_bounded_filter_scan():
         raise ExactGraphReadError(
@@ -1735,7 +1733,6 @@ def _read_exact_filtered_trace_graph(
     filters: list[dict[str, Any]],
     annotation_label_ids: tuple[str, ...] | None,
     started: float,
-    hide_simulated: bool = False,
 ) -> tuple[dict[str, list[dict[str, Any]]], int, int]:
     trace_ids, query_count, rows_returned = _enumerate_exact_trace_ids(
         analytics=analytics,
@@ -1743,7 +1740,6 @@ def _read_exact_filtered_trace_graph(
         filters=filters,
         annotation_label_ids=annotation_label_ids,
         started=started,
-        hide_simulated=hide_simulated,
     )
     batches: list[tuple[list[Any], list[str]]] = []
 
@@ -1897,7 +1893,6 @@ def read_exact_system_graph(
     interval: str,
     metric_id: str,
     observe_type: str,
-    hide_simulated: bool = False,
 ) -> dict[str, Any]:
     started = monotonic()
     start_date, end_date, empty = _snapshot_window(filters)
@@ -1936,10 +1931,7 @@ def read_exact_system_graph(
         start_date=start_date,
         end_date=end_date,
         annotation_label_ids=annotation_label_ids,
-        hide_simulated=hide_simulated,
     )
-    # Routing reads the request's own plan. The builder adds the hide rule to
-    # the plan it builds from, so the choice of lane does not move with it.
     exact_filter_plan = compile_exact_graph_row_predicates(
         filters,
         project_id=str(project_id),
@@ -1960,7 +1952,6 @@ def read_exact_system_graph(
             filters=frozen_filters,
             annotation_label_ids=annotation_label_ids,
             started=started,
-            hide_simulated=hide_simulated,
         )
         return _finalize_exact_graph_payload(
             _system_metric_payload(
@@ -2025,7 +2016,6 @@ def read_exact_agent_graph(
     analytics: Any,
     project_id: str,
     filters: list[dict[str, Any]],
-    hide_simulated: bool = False,
 ) -> dict[str, Any]:
     """Compute exact node and recorded parent-topology projections.
 
@@ -2040,7 +2030,6 @@ def read_exact_agent_graph(
         project_id=str(project_id),
         filters=list(filters or []),
         annotation_label_ids=_annotation_label_ids_for_filters(project_id, filters),
-        hide_simulated=hide_simulated,
     )
     if builder.empty_window:
         return _finalize_exact_graph_payload(
@@ -2087,7 +2076,6 @@ def read_exact_all_system_metrics(
     project_id: str,
     filters: list[dict[str, Any]],
     interval: str,
-    hide_simulated: bool = False,
 ) -> dict[str, Any]:
     started = monotonic()
     start_date, end_date, empty = _snapshot_window(filters)
@@ -2122,7 +2110,6 @@ def read_exact_all_system_metrics(
         start_date=start_date,
         end_date=end_date,
         annotation_label_ids=_annotation_label_ids_for_filters(project_id, filters),
-        hide_simulated=hide_simulated,
     )
     query, params = builder.build()
     result = _execute_direct_exact_graph_query(
@@ -2297,7 +2284,6 @@ def read_exact_eval_graph(
     observe_type: str,
     all_series: bool = False,
     aggregation_context: str = "trace",
-    hide_simulated: bool = False,
 ) -> dict[str, Any] | list[dict[str, Any]]:
     started = monotonic()
     aggregation_context = str(aggregation_context or "trace").strip().lower()
@@ -2380,7 +2366,6 @@ def read_exact_eval_graph(
             if aggregation_context == "trace" and not empty
             else ()
         ),
-        hide_simulated=hide_simulated,
     )
     if empty:
         formatted = builder.format_result([], [])
@@ -2459,7 +2444,6 @@ def _compile_membership_filter(
     filters: list[dict[str, Any]],
     observe_type: str,
     annotation_label_ids: tuple[str, ...] | None = None,
-    hide_simulated: bool = False,
 ) -> tuple[str, dict[str, Any]]:
     return compile_exact_graph_filter_predicates(
         filters,
@@ -2470,7 +2454,6 @@ def _compile_membership_filter(
             if annotation_label_ids is None
             else annotation_label_ids
         ),
-        hide_simulated=hide_simulated,
     )
 
 
@@ -2592,7 +2575,6 @@ def read_exact_annotation_graph(
     req_data_config: dict[str, Any],
     observe_type: str,
     aggregation_context: str = "trace",
-    hide_simulated: bool = False,
 ) -> dict[str, Any]:
     started = monotonic()
 
@@ -2701,14 +2683,12 @@ def read_exact_annotation_graph(
             filters=filters,
             observe_type="trace",
             annotation_label_ids=annotation_label_ids,
-            hide_simulated=hide_simulated,
         )
         span_predicate, span_params = _compile_membership_filter(
             project_id=project_id,
             filters=filters,
             observe_type="span",
             annotation_label_ids=annotation_label_ids,
-            hide_simulated=hide_simulated,
         )
     bucket_values: dict[datetime, list[float]] = defaultdict(list)
     query_count = 0

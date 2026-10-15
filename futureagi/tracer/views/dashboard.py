@@ -172,7 +172,6 @@ from tracer.services.exact_aggregation_cache import (
     read_or_schedule_exact_snapshot,
 )
 from tracer.services.postgres_read_policy import application_postgres_reads
-from tracer.services.simulation_visibility import holding_projects
 from tracer.utils.helper import get_annotation_labels_by_project
 from tracer.utils.property_registry import (
     names_a_stored_definition,
@@ -382,23 +381,6 @@ def _materialize_dashboard_query_scope(
         scoped["dataset_ids"] = dataset_ids
 
     return scoped
-
-
-def _scope_holds_simulated(project_ids):
-    """One read: does any project of this dashboard hold marked traces?
-
-    A dashboard without trace metrics keeps its ``project_ids`` as sent, so an
-    id that is not a UUID is left out here instead of failing the whole read in
-    Postgres; such an id could not name a holding project anyway.
-    """
-
-    scope = []
-    for value in project_ids or []:
-        try:
-            scope.append(str(UUID(str(value))))
-        except (TypeError, ValueError):
-            continue
-    return bool(holding_projects(scope))
 
 
 # Exact dashboards may hydrate wide attribute Maps. Do not impose a row-count
@@ -1498,17 +1480,13 @@ def _read_dashboard_rollup_fast_path(
     *,
     refresh_state=None,
     deadline=None,
-    hide_simulated=False,
 ):
     """Read simple trace metrics from bounded materialized hourly states."""
 
-    # The hourly states carry no attribute, so they cannot leave a marked
-    # trace out: a holding project is answered by the exact read instead.
     if (
         query_config.get("filters")
         or query_config.get("breakdowns")
         or query_config.get("granularity") == "minute"
-        or hide_simulated
     ):
         return _dashboard_refresh_or_degraded(
             query_config,
@@ -1792,7 +1770,6 @@ def _read_public_dashboard_query(
     refresh,
     deadline=None,
     try_rollup=True,
-    hide_simulated=False,
 ):
     """Serve cached data or dispatch one deduplicated heavy refresh."""
 
@@ -1851,7 +1828,6 @@ def _read_public_dashboard_query(
         query_config,
         refresh_state=snapshot if isinstance(snapshot, dict) else None,
         deadline=deadline,
-        hide_simulated=hide_simulated,
     )
 
 
@@ -6228,12 +6204,6 @@ class DashboardWidgetViewSet(BaseModelViewSetMixin, ModelViewSet):
         except DashboardQueryScopeError as exc:
             return self._gm.bad_request(str(exc))
 
-        # Decided from the concrete scope, once: the snapshot key, every trace
-        # statement and the fast-path refusal below must agree on it. The
-        # exact worker recomputes it rather than trusting the stored identity,
-        # which may predate the project holding.
-        hide_simulated = _scope_holds_simulated(query_config.get("project_ids"))
-
         try:
             query_config = _bind_dashboard_annotation_completeness(
                 query_config,
@@ -6262,11 +6232,6 @@ class DashboardWidgetViewSet(BaseModelViewSetMixin, ModelViewSet):
             cache_identity["trace_snapshot_semantics"] = (
                 "physical-latest-complete-series-v2"
             )
-        if hide_simulated and cache_identity_override is None:
-            # A snapshot stored before the project held has no such key, so it
-            # is never served to a holding project. A replayed identity is
-            # written under the key it was scheduled with.
-            cache_identity["hide_simulated"] = True
 
         def _schedule_heavy_dashboard_read():
             payload = _read_public_dashboard_query(
@@ -6275,7 +6240,6 @@ class DashboardWidgetViewSet(BaseModelViewSetMixin, ModelViewSet):
                 refresh=True,
                 deadline=read_deadline,
                 try_rollup=False,
-                hide_simulated=hide_simulated,
             )
             return self._gm.success_response(payload)
 
@@ -6310,7 +6274,6 @@ class DashboardWidgetViewSet(BaseModelViewSetMixin, ModelViewSet):
                 else _read_dashboard_rollup_fast_path(
                     query_config,
                     deadline=read_deadline,
-                    hide_simulated=hide_simulated,
                 )
             )
             if _dashboard_snapshot_is_renderable(rollup_payload):
@@ -6362,8 +6325,6 @@ class DashboardWidgetViewSet(BaseModelViewSetMixin, ModelViewSet):
                 # public CH25 path resolves the latest physical span state.
                 "require_versioned_snapshot": True,
             }
-            if hide_simulated:
-                trace_config["hide_simulated"] = True
             project_ids = trace_config.get("project_ids", [])
             # Reuse the exact same scope helper as cache-key materialization.
             # Default workspaces deliberately include legacy workspace-null

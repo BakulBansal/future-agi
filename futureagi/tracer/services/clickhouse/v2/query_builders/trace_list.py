@@ -2443,8 +2443,7 @@ class _TraceListQueryBuilderV2Core(_TraceRootReplayV2, TraceListQueryBuilder):
 
         Slow path (with filters): fall back to v1's uniq over spans. The
         rollup can't answer filtered counts because it doesn't know about
-        attribute-level filter predicates. Hiding simulated traces is such a
-        predicate, so it takes the slow path as well.
+        attribute-level filter predicates.
         """
         # Fast-path: rollup-backed count is safe whenever the only filters
         # the caller supplied are time bounds (the rollup is itself keyed by
@@ -2456,12 +2455,7 @@ class _TraceListQueryBuilderV2Core(_TraceRootReplayV2, TraceListQueryBuilder):
             if (f.get("column_id") or f.get("columnId"))
             not in ("created_at", "start_time")
         ]
-        if (
-            not non_time_filters
-            and not self.search
-            and not self.project_version_id
-            and not self.hide_simulated
-        ):
+        if not non_time_filters and not self.search and not self.project_version_id:
             # Ensure start_date / end_date are bound even if build() wasn't
             # called first (count is sometimes invoked standalone, e.g. for
             # pagination prefetch). parse_time_range honours any time filter
@@ -2484,13 +2478,6 @@ class _TraceListQueryBuilderV2Core(_TraceRootReplayV2, TraceListQueryBuilder):
             # V2RewriteMixin appends the v2 SETTINGS to the returned SQL.
             return sql, params
 
-        if self.hide_simulated:
-            # The raw count reads its window from the params that build() sets,
-            # and an unfiltered caller may count without having built a page.
-            # Without hiding that caller took the rollup above, which binds them.
-            self.params["start_date"], self.params["end_date"] = self.parse_time_range(
-                self.filters or []
-            )
         # Slow path: v1's raw uniq over spans; the mixin rewrites + applies SETTINGS.
         return super().build_count_query()
 

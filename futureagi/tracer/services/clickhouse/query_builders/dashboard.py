@@ -64,7 +64,6 @@ from tracer.services.clickhouse.v2.id_remap_sql import (
     bounded_survivor_map_subquery,
     resolved_id_expr,
 )
-from tracer.services.simulation_visibility import row_exclusion_sql
 
 logger = logging.getLogger(__name__)
 
@@ -704,10 +703,6 @@ class DashboardQueryBuilder:
         self.metrics = query_config.get("metrics", [])
         self.global_filters = query_config.get("filters", [])
         self.breakdowns = query_config.get("breakdowns", [])
-        # Decided once per request by the view, over every project of the
-        # read: the builder runs one statement per metric, so deciding here
-        # would cost a database read each and could split a request.
-        self.hide_simulated = bool(query_config.get("hide_simulated", False))
         self._legacy_annotation_aggregations = {}
         raw_annotation_labels = query_config.get("annotation_label_ids_by_project")
         self.annotation_label_ids_by_project = (
@@ -3441,11 +3436,6 @@ class DashboardQueryBuilder:
         # (created_at >= start_time always holds), so no in-window row drops.
         if time_col != "created_at" and self._spans_partitioned_by_created_at:
             clauses.append("created_at >= %(start_date)s - INTERVAL 1 DAY")
-
-        # The system-metric and custom-attribute statements share these base
-        # clauses, so a holding project's marked spans leave both here.
-        if self.hide_simulated:
-            clauses.append(row_exclusion_sql(map_column="span_attr_str"))
 
         # Apply global + per-metric system_metric filters directly
         # For string-comparable system metrics, use toString() to avoid UUID parse errors

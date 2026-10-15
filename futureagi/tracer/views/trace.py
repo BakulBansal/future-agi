@@ -170,10 +170,6 @@ from tracer.services.filter_principal_context import (
     bind_request_my_annotations_principal,
 )
 from tracer.services.observability_providers import ObservabilityService
-from tracer.services.simulation_visibility import SIMULATION_MARK_KEY, holding_projects
-from tracer.services.simulation_visibility import (
-    hide_simulated as project_hides_simulated,
-)
 from tracer.services.users_list_manager import USER_EXPORT_PAGE_SIZE, UsersListManager
 from tracer.utils.annotations import (
     build_annotation_subqueries as _build_annotation_subqueries_impl,
@@ -576,7 +572,7 @@ def _decode_projected_trace_attribute_value(raw_value: Any) -> Any:
 
 
 _SIMULATOR_CALL_EXECUTION_KEYS = (
-    SIMULATION_MARK_KEY,
+    "fi.simulator.call_execution_id",
     "fi.simulator.callExecutionId",
     "call_execution_id",
     "callExecutionId",
@@ -2782,11 +2778,6 @@ class TraceView(BaseModelViewSetMixin, ModelViewSet):
                     .filter(id=project_id)
                     .first()
                 )
-                # One read per request, shared by whichever chart read runs
-                # below. A project that does not exist costs no read.
-                hide_simulated = project is not None and project_hides_simulated(
-                    project_id
-                )
 
             if not project_id or not project or project.trace_type != "observe":
                 return finish(
@@ -2877,7 +2868,6 @@ class TraceView(BaseModelViewSetMixin, ModelViewSet):
                         ),
                         workspace_id=str(workspace_id) if workspace_id else None,
                         timeout_ms=graph_action_remaining_ms(deadline),
-                        hide_simulated=hide_simulated,
                     )
                 elif metric_type == "EVAL":
                     graph = fetch_eval_graph_ch(
@@ -2895,7 +2885,6 @@ class TraceView(BaseModelViewSetMixin, ModelViewSet):
                         ),
                         workspace_id=str(workspace_id) if workspace_id else None,
                         timeout_ms=graph_action_remaining_ms(deadline),
-                        hide_simulated=hide_simulated,
                     )
                 else:
                     graph = fetch_annotation_graph_ch(
@@ -2913,7 +2902,6 @@ class TraceView(BaseModelViewSetMixin, ModelViewSet):
                         ),
                         workspace_id=str(workspace_id) if workspace_id else None,
                         timeout_ms=graph_action_remaining_ms(deadline),
-                        hide_simulated=hide_simulated,
                     )
                 graph.update(
                     graph_query_evidence(
@@ -4297,7 +4285,6 @@ class TraceView(BaseModelViewSetMixin, ModelViewSet):
             # Omitting physical filter witnesses raises the exact classifier's
             # safe batch from 20 to 100 without changing filter membership.
             bounded_include_filter_witnesses=False,
-            hide_simulated=project_hides_simulated(str(project_id)),
         )
         error_code = builder.bounded_filter_degraded_error_code()
         if error_code or not builder.supports_bounded_filter_scan():
@@ -4694,15 +4681,6 @@ class TraceView(BaseModelViewSetMixin, ModelViewSet):
                 "Cursor pagination is unavailable for this query shape.",
             )
         cursor_enabled = cursor_requested and cursor_supported
-        # One read for the request: when any project of an organization-wide
-        # read holds, the whole read leaves marked traces out. An organization
-        # with no observe project reaches here with an empty scope and no
-        # project id; that is an empty read, not a lookup of a missing id.
-        hide_simulated = (
-            bool(holding_projects(scope_project_ids))
-            if org_scope or not project_id
-            else project_hides_simulated(str(project_id))
-        )
         builder = TraceListQueryBuilderV2(
             project_id=None if org_scope else str(project_id),
             project_ids=[str(p) for p in org_project_ids] if org_scope else None,
@@ -4712,7 +4690,6 @@ class TraceView(BaseModelViewSetMixin, ModelViewSet):
             eval_config_ids=eval_config_ids,
             annotation_label_ids=annotation_label_ids,
             annotation_label_ids_by_project=annotation_label_ids_by_project,
-            hide_simulated=hide_simulated,
         )
         pin_filter_seed_witness_slack(builder, cursor_state)
         requires_cursor = builder.requires_cursor_for_long_filtered_read()
@@ -5769,14 +5746,9 @@ class TraceView(BaseModelViewSetMixin, ModelViewSet):
             remove_simulation_calls
         ).lower() not in ("false", "0", "")
 
-        # One read for the request, shared by the depth preflight and the page
-        # builder below.
-        hide_simulated = project_hides_simulated(str(project_id))
-
-        # Reject unsupported numbered-page depths before the eval and annotation
-        # lookups and any ClickHouse work.  The builder's scan recommendations
-        # depend only on the request shape; eval and annotation projections do
-        # not affect this bound.
+        # Reject unsupported numbered-page depths before any PG or ClickHouse
+        # work.  The builder's scan recommendations depend only on the request
+        # shape; eval and annotation projections do not affect this bound.
         preflight_builder = VoiceCallListQueryBuilderV2(
             project_id=str(project_id),
             filters=filters,
@@ -5785,7 +5757,6 @@ class TraceView(BaseModelViewSetMixin, ModelViewSet):
             eval_config_ids=[],
             remove_simulation_calls=sim_flag,
             annotation_label_ids=[],
-            hide_simulated=hide_simulated,
         )
         preflight_classify_batch_size = int(
             preflight_builder.recommended_filter_classify_batch_size() or 50
@@ -5840,7 +5811,6 @@ class TraceView(BaseModelViewSetMixin, ModelViewSet):
             eval_config_ids=eval_config_ids,
             remove_simulation_calls=sim_flag,
             annotation_label_ids=annotation_label_ids,
-            hide_simulated=hide_simulated,
         )
         pin_filter_seed_witness_slack(builder, cursor_state)
         voice_request_start, voice_request_end = builder.parse_time_range(filters)
@@ -6655,7 +6625,6 @@ class TraceView(BaseModelViewSetMixin, ModelViewSet):
             eval_config_ids=eval_config_ids,
             annotation_label_ids=annotation_label_ids,
             project_version_id=str(project_version_id),
-            hide_simulated=project_hides_simulated(project_id),
         )
 
         # Phase 1: Get paginated traces. Project-version-scoped task/eval
@@ -7102,7 +7071,6 @@ class TraceView(BaseModelViewSetMixin, ModelViewSet):
                 project_id=project_id,
                 filters=filters,
                 refresh=refresh,
-                hide_simulated=project_hides_simulated(project_id),
                 **tenant_scope,
             )
             return self._gm.success_response(result)

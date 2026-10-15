@@ -22,9 +22,6 @@ from tracer.services.clickhouse.query_builders.base import BaseQueryBuilder
 from tracer.services.clickhouse.query_builders.exact_graph_predicates import (
     compile_exact_graph_row_predicates,
 )
-from tracer.services.clickhouse.query_builders.time_series import (
-    plan_hiding_simulated,
-)
 
 AGENT_GRAPH_MAX_VISIBLE_NODES = 64
 AGENT_GRAPH_OTHER_NODE_ID = "aggregate:__other_nodes__"
@@ -53,12 +50,9 @@ class AgentGraphQueryBuilder(BaseQueryBuilder):
         project_id: str,
         filters: list[dict] | None = None,
         annotation_label_ids: list[str] | tuple[str, ...] | None = None,
-        *,
-        hide_simulated: bool = False,
         **kwargs: Any,
     ) -> None:
         super().__init__(project_id, **kwargs)
-        self.hide_simulated = bool(hide_simulated)
         self.filters = list(filters or [])
         self.annotation_label_ids = (
             None if annotation_label_ids is None else tuple(annotation_label_ids)
@@ -155,11 +149,6 @@ class AgentGraphQueryBuilder(BaseQueryBuilder):
             observe_type="trace",
             annotation_label_ids=self.annotation_label_ids,
         )
-        # Counted before the hide rule joins the plan: the physical window below
-        # follows what the request asked for, not what the rule adds.
-        request_predicates = len(plan.predicates)
-        if self.hide_simulated:
-            plan = plan_hiding_simulated(plan, observe_type="trace")
         self.params.update(plan.params)
 
         tuple_sql, projection_sql, tombstone_index = self._latest_projection(
@@ -222,11 +211,9 @@ class AgentGraphQueryBuilder(BaseQueryBuilder):
         # arbitrarily far from its in-window root. The single-snapshot collapse
         # must then replay candidate membership across all child timestamps;
         # ``groupArrayIf`` below still prevents those remote witnesses from
-        # becoming graph nodes or edges. The hide rule is not such a predicate:
-        # a graphed trace needs its root inside the output window, and the mark
-        # sits on the root or on every span, so the window already shows it.
+        # becoming graph nodes or edges.
         physical_window = ""
-        if not request_predicates:
+        if not plan.predicates:
             physical_window = (
                 "\n                  AND start_time >= %(start_date)s"
                 "\n                  AND start_time < %(end_date)s"

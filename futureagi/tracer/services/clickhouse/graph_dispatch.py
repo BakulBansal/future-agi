@@ -45,7 +45,6 @@ from tracer.services.clickhouse.graph_metric_statistic import (
     stamps_metric_statistic,
 )
 from tracer.services.clickhouse.graph_read_cost import (
-    _RAW_SCAN_ROWS_PER_MS,
     estimate_raw_graph_scan_rows,
     estimate_raw_log_graph_scan,
     estimate_user_graph_scan_rows,
@@ -950,17 +949,6 @@ def _read_or_refresh_exact_graph(
     )
 
 
-def _hide_simulated_identity(hide_simulated: bool) -> dict[str, bool]:
-    """The one key a hiding read adds to a snapshot identity.
-
-    Present only when true: every other project keeps the identity, and so the
-    cache entry and refresh claim, it has today, while a snapshot stored before
-    its project held can never answer a read that hides.
-    """
-
-    return {"hide_simulated": True} if hide_simulated else {}
-
-
 def _pending_graph_payload(metric_id: str, **extra: Any) -> dict[str, Any]:
     return {
         "metric_name": str(metric_id or ""),
@@ -1503,7 +1491,6 @@ def _fetch_direct_raw_system_metric_graph(
     observe_type: str,
     timeout_ms: int,
     seed: tuple[_GraphRawTraceCandidate | None, int] | None = None,
-    hide_simulated: bool = False,
 ) -> dict[str, Any]:
     """Run one complete append-only filtered graph statement.
 
@@ -1567,7 +1554,6 @@ def _fetch_direct_raw_system_metric_graph(
         raw_trace_candidate_params=(
             seed_candidate.params if seed_candidate is not None else None
         ),
-        hide_simulated=hide_simulated,
     )
     empty_window = start_date >= end_date
     if empty_window:
@@ -1866,7 +1852,6 @@ def fetch_background_raw_system_metric_graph(
     interval: str,
     metric_id: str,
     observe_type: str,
-    hide_simulated: bool = False,
 ) -> dict[str, Any]:
     """Run one filtered graph statement on the BACKGROUND wall, cost-gated.
 
@@ -1929,7 +1914,6 @@ def fetch_background_raw_system_metric_graph(
         observe_type=observe_type,
         timeout_ms=bounded_analytics.remaining_read_ms(GRAPH_WALL_DEADLINE_MS),
         seed=seed,
-        hide_simulated=hide_simulated,
     )
 
 
@@ -1947,7 +1931,6 @@ def fetch_system_metric_graph_ch(
     refresh: bool = False,
     organization_id: str | None = None,
     workspace_id: str | None = None,
-    hide_simulated: bool = False,
 ) -> dict[str, Any]:
     """Read an unfiltered rollup or an exact synchronous filtered graph.
 
@@ -1960,9 +1943,6 @@ def fetch_system_metric_graph_ch(
     matches every span, and its Traffic bars come from the same statement.
     Every other metric keeps the rollup (its Traffic series still counts
     every physical version, a known over-count of re-versioned rows).
-
-    A read that hides marked spans takes the exact path whatever its filters:
-    the rollup's states carry no attribute, so they cannot leave a span out.
     """
 
     project_id = _validated_project_id(project_id)
@@ -1970,11 +1950,7 @@ def fetch_system_metric_graph_ch(
     normalized_observe_type = str(observe_type or "trace").strip().lower()
     if normalized_observe_type not in {"trace", "span"}:
         raise ValueError("observe_type must be trace or span")
-    if (
-        not hide_simulated
-        and not _active_filters(filters)
-        and not publishes_latency("trace", metric_id)
-    ):
+    if not _active_filters(filters) and not publishes_latency("trace", metric_id):
         if not bool(getattr(analytics, "supports_per_query_read_settings", True)):
             return degraded_graph_response(
                 str(metric_id or ""),
@@ -2003,7 +1979,6 @@ def fetch_system_metric_graph_ch(
             metric_id=str(metric_id or ""),
             observe_type=normalized_observe_type,
             timeout_ms=timeout_ms,
-            hide_simulated=hide_simulated,
         )
     # Observe charts are interactive. Compile all filters into one raw physical
     # spans scan and fold trace membership in ClickHouse, instead of running the
@@ -2018,7 +1993,6 @@ def fetch_system_metric_graph_ch(
         "metric_id": str(metric_id or ""),
         "observe_type": normalized_observe_type,
         "payload_version": OBSERVE_SYSTEM_GRAPH_PAYLOAD_VERSION,
-        **_hide_simulated_identity(hide_simulated),
     }
     pending_payload = _pending_graph_payload(str(metric_id or ""))
     cached = _read_or_refresh_exact_graph(
@@ -2099,7 +2073,6 @@ def fetch_system_metric_graph_ch(
             observe_type=normalized_observe_type,
             timeout_ms=interactive_deadline_ms,
             seed=seed,
-            hide_simulated=hide_simulated,
         )
         return response
     except ExactGraphReadError as exc:
@@ -2136,7 +2109,6 @@ def fetch_agent_graph_ch(
     refresh: bool = False,
     organization_id: str | None = None,
     workspace_id: str | None = None,
-    hide_simulated: bool = False,
 ) -> dict[str, Any]:
     """Read or schedule one exact Agent Graph snapshot.
 
@@ -2153,7 +2125,6 @@ def fetch_agent_graph_ch(
             "project_id": project_id,
             "filters": normalized_filters,
             "payload_version": AGENT_GRAPH_PAYLOAD_VERSION,
-            **_hide_simulated_identity(hide_simulated),
         },
         refresh=bool(refresh),
         pending_payload={
@@ -2184,7 +2155,6 @@ def fetch_all_system_metrics_ch(
     refresh: bool = False,
     organization_id: str | None = None,
     workspace_id: str | None = None,
-    hide_simulated: bool = False,
 ) -> dict[str, Any]:
     """Read the complete exact project-chart metric bundle synchronously."""
 
@@ -2207,7 +2177,6 @@ def fetch_all_system_metrics_ch(
             project_id=project_id,
             filters=filters,
             interval=interval,
-            hide_simulated=hide_simulated,
         )
         response.update(
             {
@@ -2304,28 +2273,18 @@ def _affordable_raw_log_membership_read(
     project_id: str,
     filters: list[dict[str, Any]],
     interactive_deadline_ms: int,
-    hide_simulated: bool = False,
-    hide_scans: int = 1,
 ) -> _GraphReadUnaffordable | None:
-    """Decide whether this wall can run an eval/annotation read's membership scan.
+    """Decide whether this wall can run an eval/annotation read's raw_log parse.
 
     Those charts compile the Voice simulator toggle into a ``spans FINAL``
     membership over the whole window that parses every span's raw_log - see
-    ``_RAW_LOG_MEMBERSHIP_GRANULE_SCAN_MS``. A read that hides marked spans adds
-    a ``spans FINAL`` membership over the window, a day wider either side, with
-    no filter to announce it; it reads span rows, not raw_log granules, so it is
-    priced by rows at the rate of the one worker it runs on
-    (``_hiding_scan_rows_per_ms``), once for each of the ``hide_scans`` full
-    scans the statement makes. A read that also parses raw_log is priced for
-    that parse alone.
-    ``None`` means the read carries no such scan, or is proven to fit, and the
-    path continues exactly as before; the sentinel sends it to the bounded
-    worker, as ``_affordable_user_graph_read`` does for the users graph. An
-    unbounded or empty window is left to the reader.
+    ``_RAW_LOG_MEMBERSHIP_GRANULE_SCAN_MS``. ``None`` means the read carries no
+    such parse, or is proven to fit, and the path continues exactly as before;
+    the sentinel sends it to the bounded worker, as ``_affordable_user_graph_read``
+    does for the users graph. An unbounded or empty window is left to the reader.
     """
 
-    parses_raw_log = _graph_parses_raw_log(filters)
-    if not parses_raw_log and not hide_simulated:
+    if not _graph_parses_raw_log(filters):
         return None
     try:
         analyzed = BaseQueryBuilder.analyze_bounded_datetime_filters(
@@ -2335,107 +2294,29 @@ def _affordable_raw_log_membership_read(
         return None
     if analyzed.empty or analyzed.start is None or analyzed.end is None:
         return None
-    if parses_raw_log:
-        # The membership reads complete identity hours, the users graph's window.
-        scan_window = user_graph_scan_window(analyzed.start, analyzed.end)
-    else:
-        # The hide rule looks for marked rows a day either side of the window.
-        scan_window = raw_graph_scan_window(analyzed.start, analyzed.end)
-        if scan_window is None:
-            return None
-    scan_start, scan_end = scan_window
+    # The membership reads complete identity hours, the users graph's window.
+    scan_start, scan_end = user_graph_scan_window(analyzed.start, analyzed.end)
     estimated_rows: int | None = None
     raw_log_marks: int | None = None
     try:
-        if parses_raw_log:
-            estimate = estimate_raw_log_graph_scan(
-                analytics=analytics,
-                project_id=project_id,
-                scan_start=scan_start,
-                scan_end=scan_end,
-                timeout_ms=analytics.remaining_read_ms(interactive_deadline_ms),
-            )
-            if estimate is not None:
-                estimated_rows, raw_log_marks = estimate
-            fits = raw_log_membership_fits_wall(
-                estimated_rows,
-                remaining_ms=analytics.remaining_read_ms(interactive_deadline_ms),
-                raw_log_marks=raw_log_marks,
-            )
-        else:
-            estimated_rows = estimate_raw_graph_scan_rows(
-                analytics=analytics,
-                project_id=project_id,
-                scan_start=scan_start,
-                scan_end=scan_end,
-                timeout_ms=analytics.remaining_read_ms(interactive_deadline_ms),
-            )
-            fits = _hiding_scan_fits_wall(hide_scans)(
-                estimated_rows,
-                remaining_ms=analytics.remaining_read_ms(interactive_deadline_ms),
-            )
-        if fits:
+        estimate = estimate_raw_log_graph_scan(
+            analytics=analytics,
+            project_id=project_id,
+            scan_start=scan_start,
+            scan_end=scan_end,
+            timeout_ms=analytics.remaining_read_ms(interactive_deadline_ms),
+        )
+        if estimate is not None:
+            estimated_rows, raw_log_marks = estimate
+        if raw_log_membership_fits_wall(
+            estimated_rows,
+            remaining_ms=analytics.remaining_read_ms(interactive_deadline_ms),
+            raw_log_marks=raw_log_marks,
+        ):
             return None
     except ReadDeadlineExceeded:
         return _GraphReadUnaffordable(estimated_rows, raw_log_marks)
     return _GraphReadUnaffordable(estimated_rows, raw_log_marks)
-
-
-def _hiding_scan_rows_per_ms() -> int:
-    """Span rows per millisecond one worker covers in the rule's ``FINAL`` scan.
-
-    PROVISIONAL: derived from a measurement of another statement, not measured
-    on this one. ``_RAW_SCAN_ROWS_PER_MS`` is the unfiltered trace statement
-    without ``FINAL`` at ``DASHBOARD_TRACE_READ_MAX_THREADS`` workers. The
-    rule's membership runs at ``FILTER_SELECTOR_MAX_THREADS`` workers, with
-    ``FINAL``, over ``attrs_string``, a map of several KiB a row on the
-    heaviest tenants, so the four-worker rate is not its rate. One worker's
-    share of that rate is the starting point, and the statement is probably
-    slower per row than that. Replace this with a rate timed on the statement
-    itself.
-    """
-
-    return max(
-        1,
-        _RAW_SCAN_ROWS_PER_MS
-        * settings.FILTER_SELECTOR_MAX_THREADS
-        // settings.DASHBOARD_TRACE_READ_MAX_THREADS,
-    )
-
-
-def _hiding_scan_fits_wall(scans: int) -> Any:
-    """The affordability rule for a read whose rule scans the window ``scans`` times.
-
-    It has ``raw_graph_scan_fits_wall``'s shape so ``_schedule_unaffordable_graph_read``
-    can ask it about the background wall. Unknown never fits, as there.
-    """
-
-    scans = max(1, int(scans))
-
-    def fits_wall(estimated_rows: int | None, *, remaining_ms: int) -> bool:
-        if estimated_rows is None:
-            return raw_graph_scan_fits_wall(None, remaining_ms=remaining_ms)
-        affordable_rows = max(0, int(remaining_ms)) * _hiding_scan_rows_per_ms()
-        return int(estimated_rows) * scans <= affordable_rows
-
-    return fits_wall
-
-
-def _membership_wall_rule(
-    verdict: _GraphReadUnaffordable, *, hide_scans: int = 1
-) -> Any:
-    """The affordability rule for the statement a membership verdict was priced for.
-
-    A verdict that carries granules was priced as a raw_log parse; one that
-    carries only span rows was priced as the hide rule's membership scan,
-    ``hide_scans`` times over.
-    """
-
-    return (
-        _hiding_scan_fits_wall(hide_scans)
-        if verdict.raw_log_marks is None
-        else raw_log_membership_fits_wall
-    )
 
 
 @stamps_metric_statistic("users", lambda call: call.get("metric_id") or "")
@@ -2884,7 +2765,6 @@ def fetch_eval_graph_ch(
     aggregation_context: str = "trace",
     organization_id: str | None = None,
     workspace_id: str | None = None,
-    hide_simulated: bool = False,
 ) -> dict[str, Any]:
     project_id = _validated_project_id(project_id)
     filters = list(filters or [])
@@ -2902,19 +2782,11 @@ def fetch_eval_graph_ch(
         analytics,
         ReadDeadline.start(interactive_deadline_ms),
     )
-    # A trace-grain request that already needs a membership read carries the
-    # rule as a second full-window scan nested in it; without one the rule is
-    # the only scan, and a span-grain rule rides the scan the membership makes.
-    hide_scans = (
-        2 if normalized_observe_type == "trace" and _active_filters(filters) else 1
-    )
     unaffordable = _affordable_raw_log_membership_read(
         analytics=bounded_analytics,
         project_id=project_id,
         filters=filters,
         interactive_deadline_ms=interactive_deadline_ms,
-        hide_simulated=hide_simulated,
-        hide_scans=hide_scans,
     )
     if unaffordable is not None:
         metric_id = str(req_data_config.get("id") or "")
@@ -2928,14 +2800,13 @@ def fetch_eval_graph_ch(
                 "req_data_config": req_data_config,
                 "observe_type": normalized_observe_type,
                 "aggregation_context": normalized_aggregation_context,
-                **_hide_simulated_identity(hide_simulated),
             },
             pending_payload=_pending_graph_payload(metric_id),
             refresh=refresh,
             organization_id=organization_id,
             workspace_id=workspace_id,
             namespace="observe-eval-graph",
-            fits_wall=_membership_wall_rule(unaffordable, hide_scans=hide_scans),
+            fits_wall=raw_log_membership_fits_wall,
         )
     try:
         response = read_exact_eval_graph(
@@ -2946,7 +2817,6 @@ def fetch_eval_graph_ch(
             req_data_config=req_data_config,
             observe_type=normalized_observe_type,
             aggregation_context=normalized_aggregation_context,
-            hide_simulated=hide_simulated,
         )
     except ExactGraphReadError as exc:
         return degraded_graph_response(
@@ -2979,7 +2849,6 @@ def fetch_eval_chart_series_ch(
     refresh: bool = False,
     organization_id: str | None = None,
     workspace_id: str | None = None,
-    hide_simulated: bool = False,
 ) -> list[dict[str, Any]]:
     """Return a cached complete exact eval-chart series bundle."""
 
@@ -2991,7 +2860,6 @@ def fetch_eval_chart_series_ch(
         "interval": interval,
         "req_data_config": req_data_config,
         "eval_name": eval_name,
-        **_hide_simulated_identity(hide_simulated),
     }
     return _read_or_refresh_exact_graph(
         namespace="observe-eval-chart-series",
@@ -3228,7 +3096,6 @@ def fetch_annotation_graph_ch(
     aggregation_context: str = "trace",
     organization_id: str | None = None,
     workspace_id: str | None = None,
-    hide_simulated: bool = False,
 ) -> dict[str, Any]:
     project_id = _validated_project_id(project_id)
     filters = list(filters or [])
@@ -3249,18 +3116,11 @@ def fetch_annotation_graph_ch(
         analytics,
         ReadDeadline.start(interactive_deadline_ms),
     )
-    # At trace grain every batch of Score rows asks twice, for its traces and
-    # for its spans, and each ask nests a full-window scan for the rule. How
-    # many batches there are is not known here, so one batch is priced; a span
-    # chart's rule is a row test on a candidate-scoped read and is priced once.
-    hide_scans = 2 if normalized_observe_type == "trace" else 1
     unaffordable = _affordable_raw_log_membership_read(
         analytics=bounded_analytics,
         project_id=project_id,
         filters=filters,
         interactive_deadline_ms=interactive_deadline_ms,
-        hide_simulated=hide_simulated,
-        hide_scans=hide_scans,
     )
     if unaffordable is not None:
         return _schedule_unaffordable_graph_read(
@@ -3273,14 +3133,13 @@ def fetch_annotation_graph_ch(
                 "req_data_config": req_data_config,
                 "observe_type": normalized_observe_type,
                 "aggregation_context": normalized_aggregation_context,
-                **_hide_simulated_identity(hide_simulated),
             },
             pending_payload=_pending_graph_payload(label_id),
             refresh=refresh,
             organization_id=organization_id,
             workspace_id=workspace_id,
             namespace="observe-annotation-graph",
-            fits_wall=_membership_wall_rule(unaffordable, hide_scans=hide_scans),
+            fits_wall=raw_log_membership_fits_wall,
         )
     try:
         response = read_exact_annotation_graph(
@@ -3291,7 +3150,6 @@ def fetch_annotation_graph_ch(
             req_data_config=req_data_config,
             observe_type=normalized_observe_type,
             aggregation_context=normalized_aggregation_context,
-            hide_simulated=hide_simulated,
         )
     except ExactGraphReadError as exc:
         return degraded_graph_response(label_id, exc, provenance="exact_snapshot")
