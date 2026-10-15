@@ -18,13 +18,16 @@ from unittest.mock import patch
 
 import pytest
 from django.db import connection
+from django.db.models import QuerySet
 from structlog.testing import capture_logs
 
 import tracer.services.observability_switch as switch
+from accounts.models.workspace import Workspace
 from model_hub.models.ai_model import AIModel
 from simulate.models import AgentDefinition
 from simulate.services import agent_setup
 from simulate.tests.test_agent_setup_service import source_agent
+from tfc.middleware.workspace_context import set_workspace_context
 from tfc.utils.api_errors import build_error_envelope
 from tfc.utils.general_methods import GeneralMethods
 from tracer.models.observability_provider import (
@@ -483,25 +486,6 @@ def test_on_list_complete_creates_project_and_row(organization, workspace, user)
     )
     assert _stored_agent(agent).observability_provider_id == row.pk
     assert _events(logs) == []
-
-
-def test_turn_on_reuses_the_project_named_after_the_agent(
-    organization, workspace, user
-):
-    agent = _agent(organization, workspace)
-    existing = Project.no_workspace_objects.create(
-        name=agent.agent_name,
-        organization=organization,
-        workspace=workspace,
-        model_type=AIModel.ModelTypes.GENERATIVE_LLM,
-        trace_type="observe",
-    )
-    projects_before = Project.no_workspace_objects.count()
-    with seams(make_summary(agent_definition_id=agent.id)):
-        row = _turn(agent, True, user, organization, workspace)
-
-    assert row.project_id == existing.pk
-    assert Project.no_workspace_objects.count() == projects_before
 
 
 @pytest.mark.parametrize(
@@ -1028,3 +1012,308 @@ def test_source_agent_with_an_unknown_instrumentation_word_is_refused(
             _turn(agent, True, user, organization, workspace)
     assert raised.value.missing == (switch.PREREQUISITES["instrumentation"],)
     assert _created() == before
+
+
+def _short_tag(agent):
+    return str(agent.id).replace("-", "")[:8]
+
+
+def _turn_on(agent, user, organization, workspace):
+    with seams(make_summary(agent_definition_id=agent.id)):
+        return _turn(agent, True, user, organization, workspace)
+
+
+def _project(organization, workspace, name, *, trace_type="observe", deleted=False):
+    project = Project.no_workspace_objects.create(
+        name=name,
+        organization=organization,
+        workspace=workspace,
+        model_type=AIModel.ModelTypes.GENERATIVE_LLM,
+        trace_type=trace_type,
+    )
+    if deleted:
+        Project._base_manager.filter(pk=project.pk).update(deleted=True)
+    return project
+
+
+def _other_workspace(organization, user):
+    return Workspace.objects.create(
+        name=f"Other {uuid.uuid4().hex[:8]}",
+        organization=organization,
+        is_default=False,
+        is_active=True,
+        created_by=user,
+    )
+
+
+def _project_name(row):
+    return Project.no_workspace_objects.get(pk=row.project_id).name
+
+
+def test_two_agents_with_one_name_get_two_projects(organization, workspace, user):
+    name = f"Shared {uuid.uuid4().hex[:8]}"
+    first = _agent(organization, workspace, agent_name=name)
+    second = _agent(organization, workspace, agent_name=name)
+
+    first_row = _turn_on(first, user, organization, workspace)
+    second_row = _turn_on(second, user, organization, workspace)
+
+    assert first_row.pk != second_row.pk
+    assert first_row.project_id != second_row.project_id
+    assert _project_name(first_row) == name
+    assert _project_name(second_row) == f"{name} {_short_tag(second)}"
+    assert _stored_agent(second).observability_provider_id == second_row.pk
+
+
+def test_toggle_reuses_the_agents_own_project(organization, workspace, user):
+    # The agent's own project holds its name, so a toggle that went through the
+    # name check again would tag it.
+    name = f"Toggled {uuid.uuid4().hex[:8]}"
+    first = _agent(organization, workspace, agent_name=name)
+    second = _agent(organization, workspace, agent_name=name)
+    first_row = _turn_on(first, user, organization, workspace)
+    second_row = _turn_on(second, user, organization, workspace)
+    created = _created()
+
+    for agent, row, expected in (
+        (first, first_row, name),
+        (second, second_row, f"{name} {_short_tag(second)}"),
+    ):
+        agent = _stored_agent(agent)
+        with seams(make_summary(agent_definition_id=agent.id)):
+            _turn(agent, False, user, organization, workspace)
+            again = _turn(agent, True, user, organization, workspace)
+        assert (again.pk, again.project_id) == (row.pk, row.project_id)
+        assert _project_name(again) == expected
+    assert _created() == created
+
+
+def test_second_turn_on_of_the_same_agent_reuses_the_row(organization, workspace, user):
+    # A request that loaded the agent before another one committed its row.
+    name = f"Twice {uuid.uuid4().hex[:8]}"
+    agent = _agent(organization, workspace, agent_name=name)
+    first = _turn_on(_stored_agent(agent), user, organization, workspace)
+    created = _created()
+
+    second = _turn_on(agent, user, organization, workspace)
+
+    assert (second.pk, second.project_id) == (first.pk, first.project_id)
+    assert second.enabled
+    assert ObservabilityProvider.no_workspace_objects.get(pk=first.pk).enabled
+    assert _project_name(second) == name
+    assert _created() == created
+    assert _stored_agent(agent).observability_provider_id == first.pk
+
+
+def test_project_no_row_uses_still_forces_the_tag(organization, workspace, user):
+    # Made by an Observe-only user; it may belong to another agent.
+    name = f"Customer {uuid.uuid4().hex[:8]}"
+    own = _project(organization, workspace, name)
+    agent = _agent(organization, workspace, agent_name=name)
+
+    row = _turn_on(agent, user, organization, workspace)
+
+    assert row.project_id != own.pk
+    assert _project_name(row) == f"{name} {_short_tag(agent)}"
+
+
+def test_project_of_another_trace_type_does_not_force_the_tag(
+    organization, workspace, user
+):
+    name = f"Experiment {uuid.uuid4().hex[:8]}"
+    _project(organization, workspace, name, trace_type="experiment")
+    agent = _agent(organization, workspace, agent_name=name)
+
+    row = _turn_on(agent, user, organization, workspace)
+
+    assert _project_name(row) == name
+
+
+def test_name_of_a_deleted_project_is_free(organization, workspace, user):
+    name = f"Removed {uuid.uuid4().hex[:8]}"
+    old = _project(organization, workspace, name, deleted=True)
+    agent = _agent(organization, workspace, agent_name=name)
+
+    row = _turn_on(agent, user, organization, workspace)
+
+    assert row.project_id != old.pk
+    assert _project_name(row) == name
+
+
+def test_name_in_another_workspace_does_not_force_the_tag(
+    organization, workspace, user
+):
+    name = f"Elsewhere {uuid.uuid4().hex[:8]}"
+    _project(organization, _other_workspace(organization, user), name)
+    agent = _agent(organization, workspace, agent_name=name)
+
+    assert _project_name(_turn_on(agent, user, organization, workspace)) == name
+
+
+def test_tag_is_stable(organization, workspace):
+    name = f"Stable {uuid.uuid4().hex[:8]}"
+    _project(organization, workspace, name)
+    agent = _agent(organization, workspace, agent_name=name)
+
+    first = switch._project_name_for_new_row(agent, organization, workspace)
+    second = switch._project_name_for_new_row(agent, organization, workspace)
+
+    assert first == second == f"{name} {_short_tag(agent)}"
+
+
+@pytest.mark.parametrize("length", [255, 255 - 9, 255 - 8])
+def test_truncation_keeps_the_longest_prefix_that_fits(organization, workspace, length):
+    # The tag is a space and 8 characters: a name of 246 characters fits whole.
+    name = "n" * length
+    _project(organization, workspace, name)
+    agent = _agent(organization, workspace, agent_name=name)
+
+    chosen = switch._project_name_for_new_row(agent, organization, workspace)
+
+    suffix = f" {_short_tag(agent)}"
+    assert len(chosen) == 255
+    assert chosen == name[: 255 - len(suffix)] + suffix
+
+
+def test_tagged_name_taken_too_uses_the_longer_tag(organization, workspace, user):
+    name = f"Crowded {uuid.uuid4().hex[:8]}"
+    agent = _agent(organization, workspace, agent_name=name)
+    _project(organization, workspace, name)
+    _project(organization, workspace, f"{name} {_short_tag(agent)}")
+
+    row = _turn_on(agent, user, organization, workspace)
+
+    assert _project_name(row) == f"{name} {str(agent.id).replace('-', '')}"
+
+
+def test_every_name_taken_is_a_project_error_and_writes_nothing(
+    organization, workspace, user
+):
+    name = f"Full {uuid.uuid4().hex[:8]}"
+    agent = _agent(organization, workspace, agent_name=name)
+    _project(organization, workspace, name)
+    _project(organization, workspace, f"{name} {_short_tag(agent)}")
+    _project(organization, workspace, f"{name} {str(agent.id).replace('-', '')}")
+    before = _created()
+
+    with seams(make_summary(agent_definition_id=agent.id)):
+        with pytest.raises(
+            switch.ObservabilityProjectError,
+            match="^observability project could not be created$",
+        ):
+            _turn(agent, True, user, organization, workspace)
+
+    assert _created() == before
+    assert _stored_agent(agent).observability_provider_id is None
+
+
+def test_no_workspace_is_checked_in_the_default_workspace(
+    organization, workspace, user
+):
+    other = _other_workspace(organization, user)
+    taken = f"Default taken {uuid.uuid4().hex[:8]}"
+    elsewhere = f"Elsewhere {uuid.uuid4().hex[:8]}"
+    _project(organization, workspace, taken)
+    _project(organization, other, elsewhere)
+    first = _agent(organization, workspace, agent_name=taken)
+    second = _agent(organization, workspace, agent_name=elsewhere)
+
+    row = _turn_on(first, user, organization, None)
+    free = _turn_on(second, user, organization, None)
+
+    assert _project_name(row) == f"{taken} {_short_tag(first)}"
+    assert _project_name(free) == elsewhere
+    assert Project.no_workspace_objects.get(pk=row.project_id).workspace_id == (
+        workspace.pk
+    )
+
+
+def test_malformed_workspace_id_is_a_project_error(organization, workspace):
+    agent = _agent(organization, workspace)
+
+    with pytest.raises(
+        switch.ObservabilityProjectError,
+        match="^observability project could not be created$",
+    ):
+        switch._project_name_for_new_row(agent, organization, "not-a-workspace-id")
+
+
+def test_name_check_ignores_the_requests_workspace(organization, workspace, user):
+    # The scope is the agent's workspace, not the one the request runs in.
+    name = f"Scoped {uuid.uuid4().hex[:8]}"
+    _project(organization, workspace, name)
+    agent = _agent(organization, workspace, agent_name=name)
+    set_workspace_context(
+        workspace=_other_workspace(organization, user),
+        organization=organization,
+        user=user,
+    )
+    try:
+        chosen = switch._project_name_for_new_row(agent, organization, workspace)
+    finally:
+        set_workspace_context(workspace=workspace, organization=organization, user=user)
+
+    assert chosen == f"{name} {_short_tag(agent)}"
+
+
+def test_name_check_reads_the_primary(organization, workspace):
+    with patch.object(
+        QuerySet, "using", autospec=True, side_effect=QuerySet.using
+    ) as using:
+        switch._project_name_taken(organization, str(workspace.id), "any name")
+
+    assert "default" in [call.args[1] for call in using.call_args_list]
+
+
+def test_workspace_is_locked_once_inside_the_switchs_own_savepoint(
+    organization, workspace, user
+):
+    # Taken before the first project read, and still held when the row is
+    # created: the lock, the checks of every candidate and the inserts share one
+    # savepoint that the switch opens, so a caller outside a transaction is
+    # covered too.
+    name = f"Locked {uuid.uuid4().hex[:8]}"
+    _project(organization, workspace, name)
+    agent = _agent(organization, workspace, agent_name=name)
+    seen = []
+
+    def spy(execute, sql, params, many, context):
+        seen.append((sql, params))
+        return execute(sql, params, many, context)
+
+    with connection.execute_wrapper(spy):
+        _turn_on(agent, user, organization, workspace)
+
+    sqls = [sql for sql, _ in seen]
+
+    def first(match):
+        return next(i for i, sql in enumerate(sqls) if match(sql))
+
+    agent_locked = first(
+        lambda sql: "simulate_agent_definition" in sql and " FOR NO KEY UPDATE" in sql
+    )
+    locks = [i for i, sql in enumerate(sqls) if "pg_advisory_xact_lock" in sql]
+    project_read = first(
+        lambda sql: sql.startswith("SELECT") and '"tracer_project"' in sql
+    )
+    project_insert = first(lambda sql: sql.startswith('INSERT INTO "tracer_project"'))
+    row_insert = first(
+        lambda sql: sql.startswith('INSERT INTO "tracer_observability_provider"')
+    )
+    assert len(locks) == 1
+    lock = locks[0]
+    assert agent_locked < lock < project_read < project_insert < row_insert
+    assert seen[lock][1] == [
+        switch._workspace_lock_key(organization, str(workspace.id))
+    ]
+    assert _depth_at(sqls, agent_locked) == _depth_at(sqls, lock) == 1
+    assert _depth_at(sqls, row_insert) >= 1
+
+
+def test_lock_key_follows_organization_and_workspace(organization, workspace):
+    key = switch._workspace_lock_key(organization, str(workspace.id))
+    assert key == switch._workspace_lock_key(organization, str(workspace.id))
+    assert key != switch._workspace_lock_key(organization, str(uuid.uuid4()))
+    other_org = SimpleNamespace(id=uuid.uuid4())
+    assert key != switch._workspace_lock_key(other_org, str(workspace.id))
+    assert -(2**63) <= key < 2**63
