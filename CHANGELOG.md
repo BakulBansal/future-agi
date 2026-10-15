@@ -1,5 +1,28 @@
 # Changelog
 
+## [1.51.0](https://github.com/future-agi/future-agi/compare/v1.50.0...v1.51.0) (2026-10-15)
+
+
+### Features
+
+* **error-feed:** exact grouping retrieval and the unrecovered-finding gate ([#3503](https://github.com/future-agi/future-agi/issues/3503)) ([c4f633d](https://github.com/future-agi/future-agi/commit/c4f633d561dc97086ae6ce4ce04a6e3480df0027))
+* **simulate:** reach every hosted model through AgentCC ([c4ff1b6](https://github.com/future-agi/future-agi/commit/c4ff1b686a6bf633dd1f1d572d3c76033405d97e))
+
+
+### Bug Fixes
+
+* **agentic_eval:** sandbox JsonValidation LLM prompt rendering with SandboxedEnvironment ([#3436](https://github.com/future-agi/future-agi/issues/3436)) ([d5a318c](https://github.com/future-agi/future-agi/commit/d5a318cb3fb71003e24b5f67a8db2081407bd384))
+* **feedback:** tie feedback vector lifecycle to Feedback record [agent] ([c0fb3bb](https://github.com/future-agi/future-agi/commit/c0fb3bb1d73fd5400243cdcf3d8c4a3dd57cd324))
+* **gateway:** fix the native, audio and translated routes simulation traffic uses ([9066a7c](https://github.com/future-agi/future-agi/commit/9066a7cc437d8d1b072179637ef9593d136d282a))
+* **saml:** tenant isolation and session boundary (TH-8356) ([ecdbe24](https://github.com/future-agi/future-agi/commit/ecdbe2442ab91ad90c20492f7a3c4c5792f49300))
+* **tests:** point feedback vector lifecycle tests at the CH sidecar ([c9e8f75](https://github.com/future-agi/future-agi/commit/c9e8f75d95684da3f510a8d8ed4cfc17201521c6))
+* **tests:** point feedback vector lifecycle tests at the CH sidecar ([c2a9220](https://github.com/future-agi/future-agi/commit/c2a92208331654b10eda670fc530cd7452a0bfa2))
+
+
+### Performance Improvements
+
+* **simulate:** speed up uncached run calls v3 listing ([e1fc145](https://github.com/future-agi/future-agi/commit/e1fc1452b7907f72631fc7ad78871bd4034a9eb4))
+
 ## [1.50.0](https://github.com/future-agi/future-agi/compare/v1.49.0...v1.50.0) (2026-10-14)
 
 
