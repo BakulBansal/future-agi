@@ -16,15 +16,15 @@ class AudioMetrics:
 def analyze_audio(audio_bytes: bytes) -> AudioMetrics:
     """Measure mean voiced pitch and estimate SNR from short-time energy.
 
-    The SNR estimate treats the lowest-energy 20% of non-silent frames
-    as a background-noise proxy and the highest-energy 20% as speech plus
+    The SNR estimate treats the lowest-energy 10% of non-silent frames
+    as a background-noise proxy and the highest-energy 10% as speech plus
     noise. We subtract estimated noise power before taking their ratio.
     This is not ground-truth SNR and assumes a reasonably stationary noise
     floor with both quieter and voiced portions present.
     """
     try:
         waveform, sample_rate = librosa.load(BytesIO(audio_bytes), sr=None, mono=True)
-    except Exception as exc:  # decoding backends raise format-specific exceptions
+    except (ValueError, RuntimeError, EOFError, OSError) as exc:
         raise ValueError("Unable to decode audio bytes") from exc
 
     samples = np.asarray(waveform, dtype=np.float64)
@@ -36,10 +36,7 @@ def analyze_audio(audio_bytes: bytes) -> AudioMetrics:
     pitch = None
     try:
         frame_length = 2048
-        if (
-            samples.size >= frame_length
-            and sample_rate > 2 * librosa.note_to_hz("C2")
-        ):
+        if samples.size >= frame_length and sample_rate > 2 * librosa.note_to_hz("C2"):
             f0, voiced, _ = librosa.pyin(
                 samples,
                 sr=sample_rate,
@@ -53,7 +50,7 @@ def analyze_audio(audio_bytes: bytes) -> AudioMetrics:
     except (ValueError, librosa.ParameterError):
         pass
 
-    frame_length = max(256, min(2048, samples.size))
+    frame_length = min(2048, samples.size)
     hop_length = max(1, frame_length // 4)
     rms = librosa.feature.rms(
         y=samples, frame_length=frame_length, hop_length=hop_length, center=False

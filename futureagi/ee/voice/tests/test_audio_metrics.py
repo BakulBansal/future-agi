@@ -56,3 +56,13 @@ def test_stereo_is_supported_and_results_are_repeatable():
     assert first.average_pitch_hz is not None
     for value in (first.average_pitch_hz, first.estimated_snr_db):
         assert value is None or np.isfinite(value)
+
+
+def test_short_audio_returns_missing_metrics_without_raising():
+    buffer = BytesIO()
+    sf.write(buffer, np.array([0.2, 0.1, 0.0]), 16000, format="WAV")
+
+    result = analyze_audio(buffer.getvalue())
+
+    assert result.average_pitch_hz is None
+    assert result.estimated_snr_db is None
