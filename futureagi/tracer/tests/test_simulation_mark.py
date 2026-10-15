@@ -84,7 +84,7 @@ def test_mark_is_bounded_and_total():
         for project_name, collector_url, export, instrumentation in itertools.product(
             (None, "Support Bot, prod=1 ü"),
             (None, COLLECTOR),
-            (None, "our_keys", "customer_keys"),
+            (None, "our_keys"),
             (None, "traceai", "opentelemetry"),
         ):
             result = _environment(
@@ -115,7 +115,7 @@ def test_mark_is_bounded_and_total():
 
     exporting = {
         "collector_url": COLLECTOR,
-        "export": "customer_keys",
+        "export": "our_keys",
         "instrumentation": "traceai",
     }
     long_name = "a" * (2048 - _attributes_length(project_name="a", **exporting) + 1)
@@ -159,7 +159,7 @@ def test_exact_value_and_order():
     )
 
     # An export without a project or a collector stays the mark alone.
-    for export in ("our_keys", "customer_keys"):
+    for export in ("our_keys",):
         for project_name, collector_url in (
             (None, COLLECTOR),
             ("", COLLECTOR),
@@ -198,23 +198,22 @@ def test_exact_value_and_order():
         "FI_SIMULATION_EXPORT": "our_keys",
         "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT": "https://collector.example/v1/traces",
     }
-    for instrumentation in ("traceai", "opentelemetry"):
-        assert environment(
-            project_name="Support Bot",
-            collector_url=COLLECTOR,
-            export="customer_keys",
-            instrumentation=instrumentation,
-        ) == {
-            "OTEL_RESOURCE_ATTRIBUTES": with_project,
-            "FI_SIMULATION_EXPORT": "customer_keys",
-        }
+    # The sandbox always exports with the agent's ingest key: no other mode exists.
+    for export in ("customer_keys", ""):
+        with pytest.raises(ValueError, match=r"^export must be our_keys$"):
+            _environment(
+                project_name="Support Bot",
+                collector_url=COLLECTOR,
+                export=export,
+                instrumentation="traceai",
+            )
 
     # ",", "=", "/" and non-ASCII text are percent-encoded, in the name and in an id.
     assert environment(
         project_name="Café, a=b/c",
         run_test_id="rt,1=x",
         collector_url=COLLECTOR,
-        export="customer_keys",
+        export="our_keys",
         instrumentation="traceai",
     )["OTEL_RESOURCE_ATTRIBUTES"] == (
         f"project_name=Caf%C3%A9%2C%20a%3Db%2Fc,{MARK},"
@@ -335,12 +334,12 @@ def test_signature_and_written_names_match_the_contract():
         "test_execution_id": str | None,
         "project_name": str | None,
         "collector_url": str | None,
-        "export": Literal["our_keys", "customer_keys"] | None,
+        "export": Literal["our_keys"] | None,
         "instrumentation": str | None,
         "return": dict[str, str],
     }
 
-    # The names and words the function writes; the mark's key is the hiding module's
+    # The names and words the function writes; the mark's key is the marks module's
     # constant, under the prefix the sandbox's hook keeps.
     result = customer_code_environment(
         organization_id="o",
