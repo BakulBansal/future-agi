@@ -48236,6 +48236,46 @@ export const SimulateV3TestExecutionExportBody = zod.object({
     .default(simulateV3TestExecutionExportBodyOrderingDefault),
 });
 
+export const SimulateV3TestExecutionTracesParams = zod.object({
+  test_execution_id: zod.string(),
+});
+
+export const simulateV3TestExecutionTracesQueryPageDefault = 1;
+
+export const simulateV3TestExecutionTracesQueryPageSizeDefault = 20;
+export const simulateV3TestExecutionTracesQueryPageSizeMax = 100;
+
+export const SimulateV3TestExecutionTracesQueryParams = zod.object({
+  page: zod
+    .number()
+    .min(1)
+    .default(simulateV3TestExecutionTracesQueryPageDefault),
+  page_size: zod
+    .number()
+    .min(1)
+    .max(simulateV3TestExecutionTracesQueryPageSizeMax)
+    .default(simulateV3TestExecutionTracesQueryPageSizeDefault),
+});
+
+export const SimulateV3TestExecutionTracesResponse = zod.object({
+  observability: zod.enum(["unavailable", "off", "on"]),
+  agent_id: zod.string().uuid(),
+  project_id: zod.string().uuid(),
+  count: zod.number(),
+  page: zod.number(),
+  page_size: zod.number(),
+  total_pages: zod.number(),
+  traces: zod.array(
+    zod.object({
+      trace_id: zod.string().min(1),
+      name: zod.string(),
+      start_time: zod.string().datetime({ offset: true }),
+      status: zod.string(),
+      latency_ms: zod.number(),
+    }),
+  ),
+});
+
 export const telemetryHeartbeatCreateBodySchemaVersionDefault = 1;
 export const telemetryHeartbeatCreateBodyVersionMax = 100;
 

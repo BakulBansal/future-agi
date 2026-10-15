@@ -7,9 +7,11 @@ import functools
 import json
 import uuid
 from collections.abc import Iterator
+from dataclasses import asdict
 from itertools import islice
 from typing import Any
 
+import structlog
 from django.http import StreamingHttpResponse
 from django.shortcuts import get_object_or_404
 from drf_yasg import openapi
@@ -43,9 +45,19 @@ from simulate.services.run_results_v3_queries import (
     run_call_rows_queryset,
     run_calls_queryset,
 )
+from simulate.services.run_traces_v3 import (
+    OBSERVABILITY_OFF,
+    OBSERVABILITY_ON,
+    OBSERVABILITY_UNAVAILABLE,
+    read_run_traces,
+    run_traces_state,
+)
 from simulate.services.test_executor import build_eval_configs_map
 from simulate.views.scoping import run_test_workspace_filter
 from tfc.utils.api_contracts import validated_request
+from tracer.services.clickhouse.client import CHError
+
+logger = structlog.get_logger(__name__)
 
 
 class JsonObjectField(serializers.JSONField):
@@ -318,6 +330,34 @@ class RunCallsV3ResponseSerializer(serializers.Serializer):
     evaluation_columns = EvaluationColumnSerializer(many=True)
 
 
+class RunTraceSerializer(serializers.Serializer):
+    trace_id = serializers.CharField()
+    name = serializers.CharField(allow_blank=True)
+    start_time = serializers.DateTimeField()
+    status = serializers.CharField(allow_blank=True)
+    latency_ms = serializers.FloatField(allow_null=True)
+
+
+class RunTracesV3QuerySerializer(serializers.Serializer):
+    page = serializers.IntegerField(default=1, min_value=1, required=False)
+    page_size = serializers.IntegerField(
+        default=20, min_value=1, max_value=100, required=False
+    )
+
+
+class RunTracesV3ResponseSerializer(serializers.Serializer):
+    observability = serializers.ChoiceField(
+        choices=[OBSERVABILITY_UNAVAILABLE, OBSERVABILITY_OFF, OBSERVABILITY_ON]
+    )
+    agent_id = serializers.UUIDField(allow_null=True)
+    project_id = serializers.UUIDField(allow_null=True)
+    count = serializers.IntegerField()
+    page = serializers.IntegerField()
+    page_size = serializers.IntegerField()
+    total_pages = serializers.IntegerField()
+    traces = RunTraceSerializer(many=True)
+
+
 class AnalyticsExecutionSerializer(serializers.Serializer):
     id = serializers.UUIDField()
     name = serializers.CharField()
@@ -523,6 +563,58 @@ def _execution_payload(
         ),
         "trials": execution.trials or 1,
         "summary": summary,
+    }
+
+
+class RunTracesV3View(APIView):
+    permission_classes = [IsAuthenticated]
+
+    @validated_request(
+        query_serializer=RunTracesV3QuerySerializer,
+        responses={200: RunTracesV3ResponseSerializer},
+        operation_id="simulate_v3_test_execution_traces",
+    )
+    def get(self, request, test_execution_id, *args, **kwargs):
+        query = request.validated_query_data
+        page, page_size = query["page"], query["page_size"]
+        execution = _execution_for_request(request, test_execution_id)
+        state = run_traces_state(execution)
+        source = state.source
+        if source is None:
+            return Response(_traces_payload(state, 0, page, page_size, []))
+        try:
+            result = read_run_traces(source, page=page, page_size=page_size)
+        except (CHError, TimeoutError) as exc:
+            logger.warning(
+                "run_traces_read_failed",
+                test_execution_id=str(execution.id),
+                job_id=str(source.job.id),
+                error=type(exc).__name__,
+            )
+            return Response(
+                {"detail": "Traces are unavailable right now"},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+        payload = _traces_payload(
+            state,
+            result.count,
+            page,
+            page_size,
+            [asdict(trace) for trace in result.traces],
+        )
+        return Response(RunTracesV3ResponseSerializer(payload).data)
+
+
+def _traces_payload(state, count, page, page_size, traces):
+    return {
+        "observability": state.observability,
+        "agent_id": state.agent_id,
+        "project_id": state.source.project_id if state.source else None,
+        "count": count,
+        "page": page,
+        "page_size": page_size,
+        "total_pages": max(1, -(-count // page_size)),
+        "traces": traces,
     }
 
 

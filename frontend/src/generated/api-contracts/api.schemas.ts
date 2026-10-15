@@ -23292,6 +23292,35 @@ export interface RunExportV3RequestApi {
   ordering?: RunExportV3RequestApiOrdering;
 }
 
+export type RunTracesV3ResponseApiObservability =
+  (typeof RunTracesV3ResponseApiObservability)[keyof typeof RunTracesV3ResponseApiObservability];
+
+export const RunTracesV3ResponseApiObservability = {
+  unavailable: "unavailable",
+  off: "off",
+  on: "on",
+} as const;
+
+export interface RunTraceApi {
+  /** @minLength 1 */
+  trace_id: string;
+  name: string;
+  start_time: string;
+  status: string;
+  latency_ms: number;
+}
+
+export interface RunTracesV3ResponseApi {
+  observability: RunTracesV3ResponseApiObservability;
+  agent_id: string;
+  project_id: string;
+  count: number;
+  page: number;
+  page_size: number;
+  total_pages: number;
+  traces: RunTraceApi[];
+}
+
 export interface DeploymentHeartbeatApi {
   schema_version?: number;
   instance_id: string;
@@ -35007,6 +35036,18 @@ export const SimulateV3TestExecutionCallsGroupBy = {
   task: "task",
   status: "status",
 } as const;
+
+export type SimulateV3TestExecutionTracesParams = {
+  /**
+   * @minimum 1
+   */
+  page?: number;
+  /**
+   * @minimum 1
+   * @maximum 100
+   */
+  page_size?: number;
+};
 
 export type TracerChartsFetchGraphParams = {
   /**

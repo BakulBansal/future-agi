@@ -58157,6 +58157,58 @@
                 }
             ]
         },
+        "/simulate/v3/test-executions/{test_execution_id}/traces/": {
+            "get": {
+                "operationId": "simulate_v3_test_execution_traces",
+                "description": "",
+                "parameters": [
+                    {
+                        "name": "page",
+                        "in": "query",
+                        "required": false,
+                        "type": "integer",
+                        "default": 1,
+                        "minimum": 1
+                    },
+                    {
+                        "name": "page_size",
+                        "in": "query",
+                        "required": false,
+                        "type": "integer",
+                        "default": 20,
+                        "maximum": 100,
+                        "minimum": 1
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "",
+                        "schema": {
+                            "$ref": "#/definitions/RunTracesV3Response"
+                        }
+                    },
+                    "default": {
+                        "description": "Default error response",
+                        "schema": {
+                            "$ref": "#/definitions/ManagementAPIErrorResponse"
+                        }
+                    }
+                },
+                "tags": [
+                    "simulate"
+                ],
+                "x-runtime-request-validation": true,
+                "x-runtime-response-validation": true
+            },
+            "parameters": [
+                {
+                    "name": "test_execution_id",
+                    "in": "path",
+                    "required": true,
+                    "type": "string"
+                }
+            ]
+        },
         "/telemetry/heartbeat/": {
             "post": {
                 "operationId": "telemetry_heartbeat_create",
@@ -138125,6 +138177,99 @@
                         "-outcome"
                     ],
                     "default": "-started_at"
+                }
+            }
+        },
+        "RunTrace": {
+            "required": [
+                "trace_id",
+                "name",
+                "start_time",
+                "status",
+                "latency_ms"
+            ],
+            "type": "object",
+            "properties": {
+                "trace_id": {
+                    "title": "Trace id",
+                    "type": "string",
+                    "minLength": 1
+                },
+                "name": {
+                    "title": "Name",
+                    "type": "string"
+                },
+                "start_time": {
+                    "title": "Start time",
+                    "type": "string",
+                    "format": "date-time"
+                },
+                "status": {
+                    "title": "Status",
+                    "type": "string"
+                },
+                "latency_ms": {
+                    "title": "Latency ms",
+                    "type": "number",
+                    "x-nullable": true
+                }
+            }
+        },
+        "RunTracesV3Response": {
+            "required": [
+                "observability",
+                "agent_id",
+                "project_id",
+                "count",
+                "page",
+                "page_size",
+                "total_pages",
+                "traces"
+            ],
+            "type": "object",
+            "properties": {
+                "observability": {
+                    "title": "Observability",
+                    "type": "string",
+                    "enum": [
+                        "unavailable",
+                        "off",
+                        "on"
+                    ]
+                },
+                "agent_id": {
+                    "title": "Agent id",
+                    "type": "string",
+                    "format": "uuid",
+                    "x-nullable": true
+                },
+                "project_id": {
+                    "title": "Project id",
+                    "type": "string",
+                    "format": "uuid",
+                    "x-nullable": true
+                },
+                "count": {
+                    "title": "Count",
+                    "type": "integer"
+                },
+                "page": {
+                    "title": "Page",
+                    "type": "integer"
+                },
+                "page_size": {
+                    "title": "Page size",
+                    "type": "integer"
+                },
+                "total_pages": {
+                    "title": "Total pages",
+                    "type": "integer"
+                },
+                "traces": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/RunTrace"
+                    }
                 }
             }
         },

@@ -5,7 +5,7 @@
 export const OPENAPI_CONTRACT = Object.freeze({
   generatedFrom: "api_contracts/openapi/swagger.json",
   swaggerVersion: "2.0",
-  endpointCount: 1059,
+  endpointCount: 1060,
   endpoints: {
     "/accounts/2fa/recovery-codes/": {
       get: {
@@ -32106,6 +32106,41 @@ export const OPENAPI_CONTRACT = Object.freeze({
         },
         queryParameters: {},
         responses: {
+          default: {
+            $ref: "#/definitions/ManagementAPIErrorResponse",
+          },
+        },
+      },
+    },
+    "/simulate/v3/test-executions/{test_execution_id}/traces/": {
+      get: {
+        operationId: "simulate_v3_test_execution_traces",
+        runtimeRequestValidation: true,
+        runtimeResponseValidation: true,
+        requestBody: null,
+        queryParameters: {
+          page: {
+            required: false,
+            schema: {
+              type: "integer",
+              minimum: 1,
+              default: 1,
+            },
+          },
+          page_size: {
+            required: false,
+            schema: {
+              type: "integer",
+              minimum: 1,
+              maximum: 100,
+              default: 20,
+            },
+          },
+        },
+        responses: {
+          200: {
+            $ref: "#/definitions/RunTracesV3Response",
+          },
           default: {
             $ref: "#/definitions/ManagementAPIErrorResponse",
           },
@@ -73822,6 +73857,60 @@ export const OPENAPI_CONTRACT = Object.freeze({
         },
       },
     },
+    RunTracesV3Response: {
+      required: [
+        "observability",
+        "agent_id",
+        "project_id",
+        "count",
+        "page",
+        "page_size",
+        "total_pages",
+        "traces",
+      ],
+      type: "object",
+      properties: {
+        observability: {
+          title: "Observability",
+          type: "string",
+          enum: ["unavailable", "off", "on"],
+        },
+        agent_id: {
+          title: "Agent id",
+          type: "string",
+          format: "uuid",
+          "x-nullable": true,
+        },
+        project_id: {
+          title: "Project id",
+          type: "string",
+          format: "uuid",
+          "x-nullable": true,
+        },
+        count: {
+          title: "Count",
+          type: "integer",
+        },
+        page: {
+          title: "Page",
+          type: "integer",
+        },
+        page_size: {
+          title: "Page size",
+          type: "integer",
+        },
+        total_pages: {
+          title: "Total pages",
+          type: "integer",
+        },
+        traces: {
+          type: "array",
+          items: {
+            $ref: "#/definitions/RunTrace",
+          },
+        },
+      },
+    },
     SAMLErrorResponse: {
       required: ["status"],
       type: "object",
@@ -99943,6 +100032,35 @@ export const OPENAPI_CONTRACT = Object.freeze({
           title: "Run test name",
           type: "string",
           minLength: 1,
+        },
+      },
+    },
+    RunTrace: {
+      required: ["trace_id", "name", "start_time", "status", "latency_ms"],
+      type: "object",
+      properties: {
+        trace_id: {
+          title: "Trace id",
+          type: "string",
+          minLength: 1,
+        },
+        name: {
+          title: "Name",
+          type: "string",
+        },
+        start_time: {
+          title: "Start time",
+          type: "string",
+          format: "date-time",
+        },
+        status: {
+          title: "Status",
+          type: "string",
+        },
+        latency_ms: {
+          title: "Latency ms",
+          type: "number",
+          "x-nullable": true,
         },
       },
     },
