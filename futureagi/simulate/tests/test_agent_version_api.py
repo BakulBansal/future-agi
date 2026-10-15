@@ -41,7 +41,9 @@ from tracer.tests.test_observability_switch import (
     _agent,
     _agent_with_row,
     _created,
+    _row,
     _stored,
+    _stored_code_agent,
     make_summary,
     seams,
 )
@@ -1276,3 +1278,18 @@ class TestCreateAgentVersionObservability:
 
         assert response.status_code == status.HTTP_201_CREATED
         assert _stored(row) == ({"assistant_id": "a1", HOLDING_FLAG: True}, True)
+
+    def test_version_without_the_field_keeps_a_stored_code_agents_switch_on(
+        self, auth_client, organization, workspace
+    ):
+        # Through the real reader: the new version has no stored Agent of its own,
+        # so the code agent is recognised from its newest stored one.
+        agent = _stored_code_agent(organization, workspace)
+        row = _row(organization, workspace, {})
+        agent.observability_provider = row
+        agent.save()
+
+        response = _create_version(auth_client, agent, {})
+
+        assert response.status_code == status.HTTP_201_CREATED
+        assert ObservabilityProvider.no_workspace_objects.get(pk=row.pk).enabled
