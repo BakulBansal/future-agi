@@ -1023,26 +1023,32 @@ def attach_platform_simulator_secret_refs(
     return dispatched
 
 
-# The decision whether a run exports to the agent's observability project is made once, at
+# The decision whether a run exports to the agent's hidden simulation project is made once, at
 # launch, and shipped in job.json; the sandbox repeats none of it. It never fails a launch.
 _EXPORT_SNAPSHOTS_SETTING = "ALK_HOSTED_OBSERVABILITY_EXPORT_SNAPSHOTS"
 _EXPORT_SECRET_PURPOSE = "observability_export"
+# Only the endpoints name where a customer's spans go; their headers are merged by the hook.
 _OTEL_EXPORT_NAMES = frozenset(
-    {
-        "OTEL_EXPORTER_OTLP_ENDPOINT",
-        "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT",
-        "OTEL_EXPORTER_OTLP_HEADERS",
-        "OTEL_EXPORTER_OTLP_TRACES_HEADERS",
-    }
+    {"OTEL_EXPORTER_OTLP_ENDPOINT", "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT"}
 )
-_TRACEAI_KEY_NAMES = frozenset({"FI_API_KEY", "FI_SECRET_KEY"})
-_TRACES_HEADERS_ALIAS = "OTEL_EXPORTER_OTLP_TRACES_HEADERS"
+# The names the sandbox key ships under; no SDK reads them, so they never clash with a name
+# the customer's own code or its libraries look up.
+_INGEST_ALIAS_PREFIX = "FI_SIMULATION_INGEST_"
+_INGEST_API_KEY_ALIAS = f"{_INGEST_ALIAS_PREFIX}API_KEY"
+_INGEST_SECRET_KEY_ALIAS = f"{_INGEST_ALIAS_PREFIX}SECRET_KEY"
 # Refusals that fire on every unbound launch or every launch from an unlisted snapshot.
 _QUIET_EXPORT_REASONS = frozenset({"not_bound", "snapshot_unsupported"})
 _MARK_NAME = re.compile(r"(OTEL_|FI_SIMULATION_|FI_BASE_URL$)[A-Z0-9_]*")
 # Credentials ride as sandbox secrets; a document that named them would put them in job.json.
 _MARK_FORBIDDEN_NAMES = frozenset(
-    {"OTEL_EXPORTER_OTLP_HEADERS", _TRACES_HEADERS_ALIAS, *_TRACEAI_KEY_NAMES}
+    {
+        "OTEL_EXPORTER_OTLP_HEADERS",
+        "OTEL_EXPORTER_OTLP_TRACES_HEADERS",
+        "FI_API_KEY",
+        "FI_SECRET_KEY",
+        _INGEST_API_KEY_ALIAS,
+        _INGEST_SECRET_KEY_ALIAS,
+    }
 )
 _MARK_MAX_ENTRIES = 10
 _MARK_MAX_VALUE_LENGTH = 2048
@@ -1099,42 +1105,6 @@ def _bound_agent_definition(job: HostedHarnessJob, payload: Mapping[str, Any]):
     return agent
 
 
-def _effective_key_workspace(key) -> str | None:
-    """The workspace the collector files a key's spans under: its own, else the default."""
-    if key.workspace_id:
-        return str(key.workspace_id)
-    from accounts.models.workspace import Workspace
-
-    defaults = list(
-        Workspace.no_workspace_objects.filter(
-            organization_id=key.organization_id, is_default=True, is_active=True
-        ).values_list("id", flat=True)[:2]
-    )
-    # The collector refuses an organisation that has no single default workspace.
-    return str(defaults[0]) if len(defaults) == 1 else None
-
-
-def _customer_export_mode(
-    job: HostedHarnessJob, project, resolved: Mapping[str, str]
-) -> str:
-    from accounts.models.user import OrgApiKey
-
-    api_key = resolved.get("FI_API_KEY")
-    secret_key = resolved.get("FI_SECRET_KEY")
-    key = None
-    if api_key and secret_key:
-        # Both halves, because the collector matches the pair: a wrong secret must not pass.
-        key = OrgApiKey.no_workspace_objects.filter(
-            organization_id=job.organization_id,
-            api_key=api_key,
-            secret_key=secret_key,
-            enabled=True,
-        ).first()
-    if key is None or _effective_key_workspace(key) != str(project.workspace_id):
-        raise _ExportRefused("customer_key_other_workspace")
-    return "customer_keys"
-
-
 def _decide_observability_export(
     job: HostedHarnessJob,
     payload: Mapping[str, Any],
@@ -1157,31 +1127,21 @@ def _decide_observability_export(
     provider = agent.observability_provider
     if provider is None or provider.deleted or not provider.enabled:
         raise _ExportRefused("observability_off")
+    # The row only gates the export: spans go to the hidden project, never to this one.
     project = provider.project
-    # A deleted project would be re-created by the collector under its name, not holding.
     if project.deleted or project.organization_id != job.organization_id:
         raise _ExportRefused("observability_off")
-    if project.workspace_id is None:
-        raise _ExportRefused("no_workspace")
     from simulate.services.agent_setup import agent_summary
 
     summary = agent_summary(agent.id)
     if summary.kind != "source":
         raise _ExportRefused("not_source")
-    from tracer.models.project import Project
+    from tracer.services.simulation_project import ensure_simulation_project
 
-    # The collector resolves a name without its type, so a same-named project of another
-    # type could capture the traces.
-    if (
-        Project.no_workspace_objects.filter(
-            organization_id=project.organization_id,
-            workspace_id=project.workspace_id,
-            name=project.name,
-        )
-        .exclude(id=project.id)
-        .exists()
-    ):
-        raise _ExportRefused("name_ambiguous")
+    # A failure to make the project escapes to the guard, which logs the exception's class.
+    hidden = ensure_simulation_project(agent)
+    if hidden.workspace_id is None:
+        raise _ExportRefused("no_workspace")
 
     # Trailing slashes are cut so the traces path is never appended to a double slash.
     collector_url = _sandbox_collector_url().rstrip("/")
@@ -1208,76 +1168,48 @@ def _decide_observability_export(
         for alias, ref in refs.items()
         if isinstance(ref, Mapping) and ref.get("purpose") == "target_provider"
     }
-    resolved = {str(alias).upper(): value for alias, value in secrets_map.items()}
     instrumentation = summary.instrumentation
     if instrumentation == "opentelemetry":
         if declared & _OTEL_EXPORT_NAMES:
             raise _ExportRefused("customer_configuration")
-        mode = "our_keys"
     elif instrumentation == "traceai":
         if declared & (_OTEL_EXPORT_NAMES | {"FI_BASE_URL"}):
             raise _ExportRefused("customer_configuration")
-        keys_declared = declared & _TRACEAI_KEY_NAMES
-        if len(keys_declared) == 1:
-            # A half pair exports nothing, and an alias of ours would overwrite theirs.
-            raise _ExportRefused("customer_configuration")
-        mode = (
-            _customer_export_mode(job, project, resolved)
-            if keys_declared
-            else "our_keys"
-        )
     else:
         raise _ExportRefused("not_instrumented")
+    # A customer value under one of our names would be overwritten by the sandbox key.
+    if any(alias.startswith(_INGEST_ALIAS_PREFIX) for alias in declared):
+        raise _ExportRefused("customer_configuration")
 
-    secrets: tuple[tuple[str, str], ...] = ()
-    redaction: tuple[str, ...] = ()
-    if mode == "our_keys":
-        from tracer.services.collector_ingest import resolve_export_credentials
+    from tracer.services.collector_ingest import resolve_export_credentials
 
-        try:
-            credentials = resolve_export_credentials(
-                str(job.organization_id), str(project.workspace_id)
-            )
-        except Exception:  # noqa: BLE001 - the reason word is all the log may carry
-            raise _ExportRefused("no_key") from None
-        if credentials is None or not (credentials.api_key and credentials.secret_key):
-            raise _ExportRefused("no_key")
-        if not credentials.enabled:
-            raise _ExportRefused("key_disabled")
-        pairs = [
-            (
-                _TRACES_HEADERS_ALIAS,
-                f"X-Api-Key={credentials.api_key},X-Secret-Key={credentials.secret_key}",
-            )
-        ]
-        if instrumentation == "traceai":
-            pairs.append(("FI_API_KEY", credentials.api_key))
-            pairs.append(("FI_SECRET_KEY", credentials.secret_key))
-        secrets = tuple(pairs)
-        redaction = (credentials.api_key, credentials.secret_key)
+    try:
+        credentials = resolve_export_credentials(
+            str(job.organization_id), str(hidden.workspace_id), str(agent.id)
+        )
+    except Exception:  # noqa: BLE001 - the reason word is all the log may carry
+        raise _ExportRefused("no_key") from None
+    if credentials is None or not (credentials.api_key and credentials.secret_key):
+        raise _ExportRefused("no_key")
+    if not credentials.enabled:
+        raise _ExportRefused("key_disabled")
 
-    # Tested before the holding is recorded, so a refused export never marks the project
-    # as holding; the key, created on first use, may remain.
+    # The key, created on first use, may remain when the cap refuses; nothing else is written.
     egress_domains = _normalize_egress_domains({*allowed_domains, host})
     if max_egress_domains is not None and len(egress_domains) > max_egress_domains:
         raise _ExportRefused("egress_cap")
 
-    from tracer.services.simulation_visibility import HoldingNotRecorded, record_holding
-
-    try:
-        # Marked traces never go to a project that cannot hide them.
-        record_holding(str(project.id))
-    except HoldingNotRecorded:
-        raise _ExportRefused("not_holding") from None
-
     return _ExportPlan(
-        project_name=project.name,
+        project_name=hidden.name,
         collector_url=collector_url,
-        export=mode,
+        export="our_keys",
         instrumentation=instrumentation,
-        secrets=secrets,
+        secrets=(
+            (_INGEST_API_KEY_ALIAS, credentials.api_key),
+            (_INGEST_SECRET_KEY_ALIAS, credentials.secret_key),
+        ),
         egress_domains=frozenset(egress_domains),
-        redaction_values=redaction,
+        redaction_values=(credentials.api_key, credentials.secret_key),
     )
 
 
