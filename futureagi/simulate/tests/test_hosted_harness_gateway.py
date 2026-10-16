@@ -3176,8 +3176,9 @@ class _ExportWorld:
         ingest_module = ModuleType("tracer.services.collector_ingest")
         ingest_module.ExportCredentials = _ExportCredentials
 
-        def resolve_export_credentials(
-            organization_id, workspace_id, agent_definition_id
+        # Keyword-only, like the real one, so a positional call fails here too.
+        def get_or_create_export_credentials(
+            *, organization_id, workspace_id, agent_definition_id
         ):
             self.events.append(("key", None))
             self.credential_calls.append(
@@ -3197,7 +3198,9 @@ class _ExportWorld:
                 _EXPORT_API_KEY, _EXPORT_SECRET_KEY, credentials != "disabled"
             )
 
-        ingest_module.resolve_export_credentials = resolve_export_credentials
+        ingest_module.get_or_create_export_credentials = (
+            get_or_create_export_credentials
+        )
         monkeypatch.setitem(
             sys.modules, "tracer.services.collector_ingest", ingest_module
         )

@@ -1180,16 +1180,19 @@ def _decide_observability_export(
     if any(alias.startswith(_INGEST_ALIAS_PREFIX) for alias in declared):
         raise _ExportRefused("customer_configuration")
 
-    from tracer.services.collector_ingest import resolve_export_credentials
+    from tracer.services.collector_ingest import get_or_create_export_credentials
 
     try:
-        credentials = resolve_export_credentials(
-            str(job.organization_id), str(hidden.workspace_id), str(agent.id)
+        credentials = get_or_create_export_credentials(
+            organization_id=str(job.organization_id),
+            workspace_id=str(hidden.workspace_id),
+            agent_definition_id=str(agent.id),
         )
     except Exception:  # noqa: BLE001 - the reason word is all the log may carry
         raise _ExportRefused("no_key") from None
     if credentials is None or not (credentials.api_key and credentials.secret_key):
         raise _ExportRefused("no_key")
+    # A disabled or deleted key stops the export; its pair never reaches the sandbox.
     if not credentials.enabled:
         raise _ExportRefused("key_disabled")
 
