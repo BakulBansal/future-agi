@@ -85,6 +85,21 @@ describe("AgentDefinitionTab", () => {
     ).toBeInTheDocument();
   });
 
+  it("reads the version picked in ?v=", async () => {
+    serve(HOSTED_AGENT_DETAIL, {
+      "v1-id": {
+        ...HOSTED_VERSION_DETAIL,
+        id: "v1-id",
+        version_name_display: "v1",
+        api_key: null,
+      },
+      "v2-id": HOSTED_VERSION_DETAIL,
+    });
+    renderAt(HOSTED_AGENT_DETAIL, "?v=v1-id");
+    expect(await screen.findByText("· v1")).toBeInTheDocument();
+    expect(await screen.findByText("Not saved")).toBeInTheDocument();
+  });
+
   it("shows a code agent's stored Agent as rows only", async () => {
     serve(CODE_AGENT_DETAIL, { [CODE_VERSION_DETAIL.id]: CODE_VERSION_DETAIL });
     renderAt(CODE_AGENT_DETAIL);

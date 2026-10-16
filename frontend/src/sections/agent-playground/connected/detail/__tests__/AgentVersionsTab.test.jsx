@@ -7,9 +7,15 @@ import {
   it,
   vi,
 } from "vitest";
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import {
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { MemoryRouter, Route, Routes } from "react-router-dom";
+import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import axios from "src/utils/axios";
 import { HOSTED_AGENT_DETAIL } from "src/api/agents/_fixtures/agentDetail";
 import AgentVersionsTab from "../AgentVersionsTab";
@@ -24,7 +30,13 @@ vi.mock("src/utils/axios", () => ({
   },
 }));
 
-const renderTab = () =>
+let currentLocation;
+const LocationProbe = () => {
+  currentLocation = useLocation();
+  return null;
+};
+
+const renderTab = (search = "") =>
   render(
     <QueryClientProvider
       client={
@@ -33,7 +45,7 @@ const renderTab = () =>
     >
       <MemoryRouter
         initialEntries={[
-          `/dashboard/agents/connected/${HOSTED_AGENT_DETAIL.id}/versions`,
+          `/dashboard/agents/connected/${HOSTED_AGENT_DETAIL.id}/versions${search}`,
         ]}
       >
         <Routes>
@@ -42,6 +54,7 @@ const renderTab = () =>
             element={<AgentVersionsTab />}
           />
         </Routes>
+        <LocationProbe />
       </MemoryRouter>
     </QueryClientProvider>,
   );
@@ -111,6 +124,20 @@ describe("AgentVersionsTab", () => {
     );
   });
 
+  it("marks the version the page is showing", async () => {
+    renderTab("?v=v1-id");
+    const [newest, oldest] = await screen.findAllByTestId("version-entry");
+    await waitFor(() => expect(oldest).toHaveAttribute("aria-current", "true"));
+    expect(newest).not.toHaveAttribute("aria-current");
+  });
+
+  it("selects a version from the timeline", async () => {
+    renderTab();
+    const [, oldest] = await screen.findAllByTestId("version-entry");
+    fireEvent.click(oldest);
+    await waitFor(() => expect(currentLocation.search).toBe("?v=v1-id"));
+  });
+
   it("shows skeleton rows while the first page loads", async () => {
     axios.get.mockImplementation((url) =>
       url.endsWith("/versions/")
@@ -174,7 +201,9 @@ describe("AgentVersionsTab", () => {
     renderTab();
     await screen.findAllByTestId("version-entry");
     expect(screen.getAllByTestId("version-entry")).toHaveLength(1);
-    expect(screen.queryByRole("button")).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: "Show older versions" }),
+    ).toBeNull();
 
     const list = screen.getByTestId("versions-scroll");
     Object.defineProperty(list, "scrollTop", {
@@ -212,10 +241,14 @@ describe("AgentVersionsTab", () => {
     expect(within(newest).getByText(/15-10-2026/)).toBeInTheDocument();
   });
 
-  it("is read-only when every version is shown", async () => {
+  it("has no version actions, only selection", async () => {
     renderTab();
     await screen.findByText("2 versions");
-    expect(screen.queryByRole("button")).toBeNull();
+    expect(
+      screen.queryByRole("button", {
+        name: /make active|mark as reference|view files|switch/i,
+      }),
+    ).toBeNull();
   });
 
   it("previews Compare under a Coming soon note", async () => {

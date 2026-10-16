@@ -75,7 +75,7 @@ const skeletons = (n) =>
  * the Agent Definition page uses), newest first, and a preview of Compare.
  */
 export default function AgentVersionsTab() {
-  const { agentId, agent } = useAgentRoute();
+  const { agentId, agent, versionId, selectVersion } = useAgentRoute();
   const { data, fetchNextPage, hasNextPage, isFetchingNextPage, isLoading } =
     useAgentDefinitionVersions({ selectedAgentId: agentId });
   const versions = useMemo(
@@ -149,7 +149,35 @@ export default function AgentVersionsTab() {
                 data-testid="version-entry"
                 direction="row"
                 spacing={1.5}
-                sx={{ pb: i === versions.length - 1 ? 0 : 2.25 }}
+                role="button"
+                tabIndex={0}
+                aria-current={v.id === versionId ? "true" : undefined}
+                onClick={() => selectVersion(v.id)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    selectVersion(v.id);
+                  }
+                }}
+                sx={{
+                  mx: -1,
+                  px: 1,
+                  pt: 0.75,
+                  pb: i === versions.length - 1 ? 0.75 : 1.5,
+                  mb: i === versions.length - 1 ? 0 : 0.75,
+                  borderRadius: 1,
+                  cursor: "pointer",
+                  bgcolor:
+                    v.id === versionId ? "action.selected" : "transparent",
+                  "&:hover": {
+                    bgcolor:
+                      v.id === versionId ? "action.selected" : "action.hover",
+                  },
+                  "&:focus-visible": {
+                    outline: "2px solid",
+                    outlineColor: "primary.main",
+                  },
+                }}
               >
                 <Stack alignItems="center" sx={{ flexShrink: 0, pt: 0.25 }}>
                   <Box

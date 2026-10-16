@@ -16,6 +16,7 @@ import ComingSoonChip from "src/sections/simulate/environments/components/Coming
 import { ENV_TABS_SX } from "src/sections/simulate/environments/environmentOptions";
 import { CONNECTED_AGENTS_PATH } from "../../agentsTabs";
 import AgentDetailHeader from "./AgentDetailHeader";
+import AgentVersionSelect from "./AgentVersionSelect";
 import {
   COMING_SOON_TABS,
   DETAIL_TABS,
@@ -35,7 +36,7 @@ const errorText = (error) =>
 export default function AgentDetailLayout() {
   const navigate = useNavigate();
   const { search } = useLocation();
-  const { agentId, agent, query } = useAgentRoute();
+  const { agentId, agent, query, versionId, selectVersion } = useAgentRoute();
   const match = useMatch(`${CONNECTED_AGENTS_PATH}/:agentId/:tab/*`);
   const tab = match?.params.tab;
 
@@ -94,6 +95,15 @@ export default function AgentDetailLayout() {
           onBack={back}
           onOpenEnvironments={() =>
             navigate(`${agentDetailPath(agentId, "environments")}${search}`)
+          }
+          action={
+            versionId ? (
+              <AgentVersionSelect
+                versions={agent.versions}
+                value={versionId}
+                onChange={selectVersion}
+              />
+            ) : null
           }
         />
         <Box

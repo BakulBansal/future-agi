@@ -17,7 +17,7 @@ import {
 } from "src/api/agents/_fixtures/agentDetail";
 import AgentDetailLayout from "../AgentDetailLayout";
 import AgentDetailIndexRedirect from "../AgentDetailIndexRedirect";
-import { agentDetailPath } from "../agentDetailTabs";
+import { agentDetailPath, resolveVersionId } from "../agentDetailTabs";
 
 vi.mock("src/utils/axios", () => ({
   default: { get: vi.fn(), put: vi.fn() },
@@ -88,6 +88,14 @@ beforeEach(() => {
 });
 
 describe("agentDetailTabs", () => {
+  it("falls back to the active version for an unknown ?v=", () => {
+    const versions = [{ id: "v2" }, { id: "v1" }];
+    expect(resolveVersionId("v1", versions, "v2")).toBe("v1");
+    expect(resolveVersionId("nope", versions, "v2")).toBe("v2");
+    expect(resolveVersionId(null, versions, null)).toBe("v2");
+    expect(resolveVersionId(null, [], null)).toBeNull();
+  });
+
   it("builds tab paths", () => {
     expect(agentDetailPath("a1")).toBe(
       "/dashboard/agents/connected/a1/overview",
@@ -187,11 +195,33 @@ describe("AgentDetailLayout", () => {
     ).toBeInTheDocument();
   });
 
-  it("has no version selector", async () => {
+  it("shows the version selector on the active version", async () => {
     serve(HOSTED);
     renderAt(`${base(HOSTED)}/overview`);
-    await screen.findByRole("tab", { name: "Overview" });
-    expect(screen.queryByRole("combobox")).toBeNull();
+    expect(await screen.findByRole("combobox")).toHaveTextContent(
+      "v2 · active",
+    );
+  });
+
+  it("writes the picked version to ?v= and clears it for the active one", async () => {
+    serve(HOSTED);
+    renderAt(`${base(HOSTED)}/overview`);
+    fireEvent.mouseDown(await screen.findByRole("combobox"));
+    fireEvent.click(await screen.findByRole("option", { name: /^v1/ }));
+    await waitFor(() => expect(currentLocation.search).toBe("?v=v1-id"));
+    expect(screen.getByRole("combobox")).toHaveTextContent("Viewing v1");
+
+    fireEvent.mouseDown(screen.getByRole("combobox"));
+    fireEvent.click(await screen.findByRole("option", { name: /^v2/ }));
+    await waitFor(() => expect(currentLocation.search).toBe(""));
+  });
+
+  it("keeps the picked version when switching tabs", async () => {
+    serve(HOSTED);
+    renderAt(`${base(HOSTED)}/overview?v=v1-id`);
+    fireEvent.click(await screen.findByRole("tab", { name: "Definition" }));
+    await screen.findByTestId("tab-definition");
+    expect(currentLocation.search).toBe("?v=v1-id");
   });
 
   it("switches tabs by path", async () => {
