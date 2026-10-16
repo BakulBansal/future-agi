@@ -101,7 +101,7 @@ export default function AgentVersionsTab() {
       sx={{
         display: "grid",
         gap: 2,
-        gridTemplateColumns: { xs: "1fr", lg: "minmax(340px, 420px) 1fr" },
+        gridTemplateColumns: { xs: "1fr", lg: "300px 1fr" },
         alignItems: "start",
       }}
     >
