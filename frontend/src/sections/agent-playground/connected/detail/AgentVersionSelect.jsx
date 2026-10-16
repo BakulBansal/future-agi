@@ -17,6 +17,8 @@ export default function AgentVersionSelect({ versions, value, onChange }) {
         return v.isActive ? `${v.label} · active` : `Viewing ${v.label}`;
       }}
       sx={{ height: 32, typography: "s2", fontWeight: 600, minWidth: 120 }}
+      // Long histories scroll inside the menu instead of running off the page.
+      MenuProps={{ PaperProps: { sx: { maxHeight: 320 } } }}
     >
       {versions.map((v) => (
         <MenuItem key={v.id} value={v.id} sx={{ typography: "s2" }}>
