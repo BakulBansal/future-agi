@@ -78,7 +78,7 @@ describe("AgentDefinitionTab", () => {
     serve(HOSTED_AGENT_DETAIL, { "v2-id": HOSTED_VERSION_DETAIL });
     renderAt(HOSTED_AGENT_DETAIL);
     expect(await screen.findByText("What we read")).toBeInTheDocument();
-    expect(screen.getByText("· v2")).toBeInTheDocument();
+    expect(await screen.findByText("· v2")).toBeInTheDocument();
     expect(await screen.findByText("sk-a...9f2c")).toBeInTheDocument();
     expect(
       screen.getByText("Inbound · caller speaks first"),

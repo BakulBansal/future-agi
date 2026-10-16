@@ -10,11 +10,10 @@ export default function useAgentRoute() {
   const [params, setParams] = useSearchParams();
   const query = useAgentDetail(agentId);
   const agent = query.data;
-  const versionId = agent
-    ? resolveVersionId(params.get("v"), agent.versions, agent.activeVersionId)
-    : null;
-  const version = agent?.versions.find((v) => v.id === versionId) ?? null;
   const activeVersionId = agent?.activeVersionId ?? null;
+  const versionId = agent
+    ? resolveVersionId(params.get("v"), activeVersionId)
+    : null;
   const selectVersion = useCallback(
     (id) => {
       const next = new URLSearchParams(params);
@@ -24,5 +23,5 @@ export default function useAgentRoute() {
     },
     [params, setParams, activeVersionId],
   );
-  return { agentId, agent, query, versionId, version, selectVersion };
+  return { agentId, agent, query, versionId, selectVersion };
 }

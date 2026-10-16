@@ -1,16 +1,15 @@
 import PropTypes from "prop-types";
-import React, { useEffect, useMemo } from "react";
+import React, { useEffect } from "react";
 import { format } from "date-fns";
 import { Box, Skeleton, Stack, Typography } from "@mui/material";
 import { useScrollEnd } from "src/hooks/use-scroll-end";
-import { useAgentDefinitionVersions } from "src/api/agent-definition/agent-definition-version";
-import { toVersion } from "src/api/agents/agentDetail";
 import { alpha } from "@mui/material/styles";
 import ComingSoonPreview from "./ComingSoonPreview";
 import CompareVersionsPreview from "./previews/CompareVersionsPreview";
 import { Card } from "./bits";
 import { MONO } from "./format";
 import useAgentRoute from "./useAgentRoute";
+import usePinnedVersions from "./usePinnedVersions";
 
 function Chip({ label, tone }) {
   return (
@@ -76,12 +75,14 @@ const skeletons = (n) =>
  */
 export default function AgentVersionsTab() {
   const { agentId, agent, versionId, selectVersion } = useAgentRoute();
-  const { data, fetchNextPage, hasNextPage, isFetchingNextPage, isLoading } =
-    useAgentDefinitionVersions({ selectedAgentId: agentId });
-  const versions = useMemo(
-    () => (data?.pages ?? []).flatMap((p) => p.results ?? []).map(toVersion),
-    [data],
-  );
+  const {
+    versions,
+    loaded,
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage,
+    isLoading,
+  } = usePinnedVersions(agentId, versionId);
   // Like the Agent Definition page: the next page loads at the list's end.
   // The listener attaches once the list exists, so it waits for the agent.
   const scrollRef = useScrollEnd(() => {
@@ -136,13 +137,12 @@ export default function AgentVersionsTab() {
           }}
         >
           {isLoading && skeletons(3)}
-          {data && versions.length === 0 && (
+          {loaded && versions.length === 0 && (
             <Typography sx={{ typography: "s2", color: "text.secondary" }}>
               No versions yet
             </Typography>
           )}
           {versions.map((v, i) => {
-            const isNewest = i === 0;
             return (
               <Stack
                 key={v.id}
@@ -181,13 +181,17 @@ export default function AgentVersionsTab() {
               >
                 <Stack alignItems="center" sx={{ flexShrink: 0, pt: 0.25 }}>
                   <Box
+                    data-testid="version-dot"
+                    data-latest={v.isLatest ? "true" : undefined}
                     sx={{
                       width: 10,
                       height: 10,
                       borderRadius: "50%",
-                      bgcolor: isNewest ? "primary.main" : "transparent",
+                      bgcolor: v.isLatest ? "primary.main" : "transparent",
                       border: "2px solid",
-                      borderColor: isNewest ? "primary.main" : "text.disabled",
+                      borderColor: v.isLatest
+                        ? "primary.main"
+                        : "text.disabled",
                     }}
                   />
                   {i < versions.length - 1 && (

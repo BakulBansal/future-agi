@@ -106,6 +106,11 @@ const toAgentDetails = (d) =>
 export const mapVersionDetail = (raw) => ({
   id: raw.id,
   label: raw.version_name_display || `v${raw.version_number}`,
+  number: raw.version_number,
+  isActive: !!raw.is_active,
+  isLatest: !!raw.is_latest,
+  commitMessage: raw.commit_message || null,
+  createdAt: raw.created_at ?? null,
   agentKind: raw.agent_kind ?? null,
   agentDetails: toAgentDetails(raw.agent_details),
   apiKey: raw.api_key,

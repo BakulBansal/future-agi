@@ -27,6 +27,7 @@ vi.mock("src/utils/axios", () => ({
       versionDetail: (id, v) =>
         `/simulate/agent-definitions/${id}/versions/${v}/`,
       edit: (id) => `/simulate/agent-definitions/${id}/edit/`,
+      versions: (id) => `/simulate/agent-definitions/${id}/versions/`,
     },
   },
 }));
@@ -72,12 +73,33 @@ const renderAt = (url) => {
   return client;
 };
 
-const serve = (detail) =>
-  axios.get.mockImplementation((url) =>
-    url.includes(detail.id)
-      ? Promise.resolve({ data: detail })
-      : Promise.reject(new Error(`unexpected ${url}`)),
+// The agent detail, its paginated versions list (newest first, `pageSize`
+// per page) and each version's own detail.
+const serve = (detail, { pageSize = 10 } = {}) => {
+  const all = [...(detail.versions ?? [])].sort(
+    (a, b) => b.version_number - a.version_number,
   );
+  axios.get.mockImplementation((url, config) => {
+    if (!url.includes(detail.id)) {
+      return Promise.reject(new Error(`unexpected ${url}`));
+    }
+    if (url.endsWith("/versions/")) {
+      const page = config.params.page;
+      const results = all.slice((page - 1) * pageSize, page * pageSize);
+      return Promise.resolve({
+        data: {
+          count: all.length,
+          next: page * pageSize < all.length ? "next" : null,
+          current_page: page,
+          results,
+        },
+      });
+    }
+    const one = all.find((v) => url.endsWith(`/versions/${v.id}/`));
+    if (one) return Promise.resolve({ data: one });
+    return Promise.resolve({ data: detail });
+  });
+};
 
 const HOSTED = HOSTED_AGENT_DETAIL;
 const CODE = CODE_AGENT_DETAIL;
@@ -88,12 +110,10 @@ beforeEach(() => {
 });
 
 describe("agentDetailTabs", () => {
-  it("falls back to the active version for an unknown ?v=", () => {
-    const versions = [{ id: "v2" }, { id: "v1" }];
-    expect(resolveVersionId("v1", versions, "v2")).toBe("v1");
-    expect(resolveVersionId("nope", versions, "v2")).toBe("v2");
-    expect(resolveVersionId(null, versions, null)).toBe("v2");
-    expect(resolveVersionId(null, [], null)).toBeNull();
+  it("takes ?v= as given, else the active version", () => {
+    expect(resolveVersionId("v1", "v2")).toBe("v1");
+    expect(resolveVersionId(null, "v2")).toBe("v2");
+    expect(resolveVersionId(null, null)).toBeNull();
   });
 
   it("builds tab paths", () => {
@@ -198,9 +218,8 @@ describe("AgentDetailLayout", () => {
   it("shows the version selector on the active version", async () => {
     serve(HOSTED);
     renderAt(`${base(HOSTED)}/overview`);
-    expect(await screen.findByRole("combobox")).toHaveTextContent(
-      "v2 · active",
-    );
+    const select = await screen.findByRole("combobox");
+    await waitFor(() => expect(select).toHaveTextContent("v2 · active"));
   });
 
   it("writes the picked version to ?v= and clears it for the active one", async () => {
@@ -214,6 +233,30 @@ describe("AgentDetailLayout", () => {
     fireEvent.mouseDown(screen.getByRole("combobox"));
     fireEvent.click(await screen.findByRole("option", { name: /^v2/ }));
     await waitFor(() => expect(currentLocation.search).toBe(""));
+  });
+
+  it("lists versions from the paginated versions list", async () => {
+    serve(HOSTED);
+    renderAt(`${base(HOSTED)}/overview`);
+    fireEvent.mouseDown(await screen.findByRole("combobox"));
+    await screen.findByRole("option", { name: /^v1/ });
+    expect(axios.get).toHaveBeenCalledWith(
+      `/simulate/agent-definitions/${HOSTED.id}/versions/`,
+      { params: { page: 1, limit: 10 } },
+    );
+  });
+
+  it("pins the picked version to the top of the menu until its page loads", async () => {
+    serve(HOSTED, { pageSize: 1 });
+    renderAt(`${base(HOSTED)}/overview?v=v1-id`);
+    const select = await screen.findByRole("combobox");
+    await waitFor(() => expect(select).toHaveTextContent("Viewing v1"));
+    fireEvent.mouseDown(screen.getByRole("combobox"));
+    await waitFor(() =>
+      expect(
+        screen.getAllByRole("option").map((o) => o.textContent.slice(0, 2)),
+      ).toEqual(["v1", "v2"]),
+    );
   });
 
   it("keeps the picked version when switching tabs", async () => {

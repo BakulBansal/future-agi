@@ -112,7 +112,7 @@ Note.propTypes = { children: PropTypes.node, tone: PropTypes.string };
 
 /** Definition: what we read for the selected version, and observability. */
 export default function AgentDefinitionTab() {
-  const { agentId, agent, versionId, version: versionMeta } = useAgentRoute();
+  const { agentId, agent, versionId } = useAgentRoute();
   const {
     data: version,
     isLoading,
@@ -171,7 +171,7 @@ export default function AgentDefinitionTab() {
         title={
           <>
             <span>What we read</span>{" "}
-            {versionMeta && (
+            {version && (
               <Box
                 component="span"
                 sx={{
@@ -180,7 +180,7 @@ export default function AgentDefinitionTab() {
                   color: "text.subtitle",
                 }}
               >
-                {`· ${versionMeta.label}`}
+                {`· ${version.label}`}
               </Box>
             )}
           </>
@@ -203,7 +203,7 @@ export default function AgentDefinitionTab() {
         title="File structure"
         description="Browse the files we read from your agent, version by version."
       >
-        <FileStructurePreview versionLabel={versionMeta?.label} />
+        <FileStructurePreview versionLabel={version?.label} />
       </ComingSoonPreview>
     </Stack>
   );

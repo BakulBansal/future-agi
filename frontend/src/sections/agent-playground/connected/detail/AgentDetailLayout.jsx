@@ -99,7 +99,7 @@ export default function AgentDetailLayout() {
           action={
             versionId ? (
               <AgentVersionSelect
-                versions={agent.versions}
+                agentId={agentId}
                 value={versionId}
                 onChange={selectVersion}
               />

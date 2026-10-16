@@ -26,6 +26,8 @@ vi.mock("src/utils/axios", () => ({
     agentDefinitions: {
       detail: (id) => `/simulate/agent-definitions/${id}/`,
       versions: (id) => `/simulate/agent-definitions/${id}/versions/`,
+      versionDetail: (id, v) =>
+        `/simulate/agent-definitions/${id}/versions/${v}/`,
     },
   },
 }));
@@ -78,6 +80,8 @@ const servePages = (pages) =>
         },
       });
     }
+    const one = [V2, V1].find((v) => url.endsWith(`/versions/${v.id}/`));
+    if (one) return Promise.resolve({ data: one });
     return Promise.resolve({ data: HOSTED_AGENT_DETAIL });
   });
 
@@ -129,6 +133,33 @@ describe("AgentVersionsTab", () => {
     const [newest, oldest] = await screen.findAllByTestId("version-entry");
     await waitFor(() => expect(oldest).toHaveAttribute("aria-current", "true"));
     expect(newest).not.toHaveAttribute("aria-current");
+  });
+
+  it("pins the selected version to the top until its page loads", async () => {
+    servePages([[V2], [V1]]);
+    renderTab("?v=v1-id");
+    const labels = () =>
+      screen
+        .getAllByTestId("version-entry")
+        .map((e) => within(e).getByTestId("version-label").textContent);
+    await waitFor(() => expect(labels()).toEqual(["v1", "v2"]));
+    expect(screen.getAllByTestId("version-entry")[0]).toHaveAttribute(
+      "aria-current",
+      "true",
+    );
+    // The filled dot marks the latest version, not whichever row is first.
+    const dots = screen.getAllByTestId("version-dot");
+    expect(dots[0]).not.toHaveAttribute("data-latest");
+    expect(dots[1]).toHaveAttribute("data-latest", "true");
+
+    const list = screen.getByTestId("versions-scroll");
+    Object.defineProperty(list, "scrollTop", {
+      value: 500,
+      configurable: true,
+    });
+    fireEvent.scroll(list);
+
+    await waitFor(() => expect(labels()).toEqual(["v2", "v1"]));
   });
 
   it("selects a version from the timeline", async () => {

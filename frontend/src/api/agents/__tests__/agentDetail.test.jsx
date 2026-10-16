@@ -187,6 +187,16 @@ describe("mapVersionDetail", () => {
     expect(v.agentDetails.agent.name).toBe("uber_voice_agent");
   });
 
+  it("carries what a timeline row shows", () => {
+    expect(mapVersionDetail(HOSTED_VERSION_DETAIL)).toMatchObject({
+      number: 2,
+      isActive: true,
+      isLatest: true,
+      commitMessage: null,
+      createdAt: "2026-10-15T09:00:00Z",
+    });
+  });
+
   it("keeps a hosted version's snapshot and masked key", () => {
     const v = mapVersionDetail(HOSTED_VERSION_DETAIL);
     expect(v.agentDetails).toBeNull();
