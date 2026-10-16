@@ -84,9 +84,12 @@ CREATE TABLE tracer_project (
 	updated_at timestamptz NOT NULL,
 	deleted boolean NOT NULL,
 	deleted_at timestamptz NULL,
-	simulation_agent_id uuid NULL UNIQUE REFERENCES simulate_agent_definition (id) ON DELETE CASCADE
+	simulation_agent_id uuid NULL REFERENCES simulate_agent_definition (id) ON DELETE CASCADE
 );
 CREATE UNIQUE INDEX unique_project_per_org_type ON tracer_project (name, trace_type, organization_id, workspace_id) WHERE NOT deleted;
+-- Added after the name index, as the migration that added the column did, so
+-- an insert checks the indexes in the order the platform's database does.
+ALTER TABLE tracer_project ADD CONSTRAINT tracer_project_simulation_agent_id_key UNIQUE (simulation_agent_id);
 `
 
 // routingDatabase creates a private database with routingSchema on the
@@ -571,6 +574,88 @@ func TestEnsureSimulationProject(t *testing.T) {
 			t.Fatalf("project = %+v, want the existing row %s with no insert", got.project, known)
 		}
 		if n := f.count(`SELECT count(*) FROM tracer_project WHERE simulation_agent_id = $1`, agent); n != 1 {
+			t.Fatalf("%d rows", n)
+		}
+	})
+
+	t.Run("a racer that loses on the project name returns the winner's row", func(t *testing.T) {
+		agent := f.agent(org, &ownWS, false)
+		known := uuid.NewString()
+
+		// The holder's row has the hidden name but no agent yet, so the call
+		// passes the agent check, inserts, and waits on the name index. The
+		// holder then sets the agent and commits: the call meets the name, not
+		// the agent, as a collector that loses a race between those two
+		// checks does. The project is the agent's own and must be returned.
+		tx, err := pool.Begin(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		held := true
+		defer func() {
+			if held {
+				_ = tx.Rollback(ctx)
+			}
+		}()
+		_, err = tx.Exec(ctx, `
+			INSERT INTO tracer_project (
+				id, name, organization_id, workspace_id, trace_type, model_type, source,
+				tags, metadata, config, session_config, user_id, deleted, created_at, updated_at,
+				simulation_agent_id
+			) VALUES ($1, $2, $3, $4, 'observe', 'GenerativeLLM', 'simulator',
+				'[]'::jsonb, '{}'::jsonb, $5::jsonb, '[]'::jsonb, NULL, false, now(), now(), NULL)`,
+			known, hiddenNamePrefix+agent, org, ownWS, expectedProjectConfig)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		type answer struct {
+			project SimulationProject
+			err     error
+		}
+		done := make(chan answer, 1)
+		go func() {
+			project, err := r.EnsureSimulationProject(ctx, org, agent)
+			done <- answer{project, err}
+		}()
+
+		waiting := false
+		deadline := time.Now().Add(5 * time.Second)
+		for !waiting && time.Now().Before(deadline) {
+			var n int
+			err := pool.QueryRow(ctx, `
+				SELECT count(*) FROM pg_stat_activity
+				WHERE datname = current_database() AND pid <> pg_backend_pid()
+				  AND wait_event_type = 'Lock' AND query LIKE '%INSERT INTO tracer_project%'`).Scan(&n)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if waiting = n > 0; !waiting {
+				time.Sleep(10 * time.Millisecond)
+			}
+		}
+		if !waiting {
+			_ = tx.Rollback(ctx)
+			held = false
+			<-done
+			t.Fatal("the call never blocked on the row held by the open transaction")
+		}
+
+		if _, err := tx.Exec(ctx, `UPDATE tracer_project SET simulation_agent_id = $1 WHERE id = $2`, agent, known); err != nil {
+			t.Fatal(err)
+		}
+		if err := tx.Commit(ctx); err != nil {
+			t.Fatal(err)
+		}
+		held = false
+		got := <-done
+		if got.err != nil {
+			t.Fatalf("err = %v, want the winner's row", got.err)
+		}
+		if got.project.ID != known || got.project.Created || got.project.WorkspaceID != ownWS {
+			t.Fatalf("project = %+v, want the existing row %s in %s with no insert", got.project, known, ownWS)
+		}
+		if n := f.count(`SELECT count(*) FROM tracer_project WHERE name = $1`, hiddenNamePrefix+agent); n != 1 {
 			t.Fatalf("%d rows", n)
 		}
 	})

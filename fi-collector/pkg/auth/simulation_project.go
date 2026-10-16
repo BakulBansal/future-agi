@@ -108,6 +108,19 @@ const ensureSimulationProjectQuery = `
 // creating it when there is none. It runs on the primary. The errors above
 // are conditions that a retry cannot fix; any other error is transient.
 func (r *PGResolver) EnsureSimulationProject(ctx context.Context, orgID, agentID string) (SimulationProject, error) {
+	project, err := r.ensureSimulationProjectOnce(ctx, orgID, agentID)
+	if errors.Is(err, ErrSimulationNameConflict) {
+		// ON CONFLICT settles only a clash on the agent. A statement racing
+		// another writer of the same agent's project can meet the name first
+		// and fail although the winner's row is the agent's own. The winner
+		// has committed by then, so a second statement reads its row; a name
+		// held by any other project conflicts again.
+		project, err = r.ensureSimulationProjectOnce(ctx, orgID, agentID)
+	}
+	return project, err
+}
+
+func (r *PGResolver) ensureSimulationProjectOnce(ctx context.Context, orgID, agentID string) (SimulationProject, error) {
 	var agentDeleted bool
 	var agentWorkspace *string
 	var existingID, existingName, existingWorkspace, existingOrg *string
