@@ -1537,7 +1537,6 @@ def _ask_builder_to_check(job_id: str, attempt_id: str) -> None:
             content="The environment is validated and sealed. Check it against the agent.",
             client_request_id=f"check-{attempt_id}",
             endpoint_base_url=_public_base_url(None),
-            payload={"builder_check": True},
         )
     except Exception:
         logger.exception("builder_check_request_failed", job_id=job_id)

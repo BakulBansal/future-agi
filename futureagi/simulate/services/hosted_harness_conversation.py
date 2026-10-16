@@ -429,13 +429,12 @@ def send_to_harness(
     content: str,
     client_request_id: str,
     endpoint_base_url: str,
-    payload: dict[str, Any] | None = None,
 ) -> None:
     """Put a platform message into the environment's conversation and wake its harness."""
     from simulate.tasks.hosted_harness_conversation import schedule_conversation_runtime
 
     conversation, _message, _created = enqueue_message(
-        job, content=content, client_request_id=client_request_id, payload=payload
+        job, content=content, client_request_id=client_request_id
     )
     schedule_conversation_runtime(str(conversation.id), endpoint_base_url)
 
