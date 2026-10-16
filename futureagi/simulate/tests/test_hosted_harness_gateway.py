@@ -2906,6 +2906,17 @@ class _ExportCredentials(NamedTuple):
     enabled: bool
 
 
+class _CredentialsThatFailAfterTheKeys:
+    """Hands out both key values, then fails when asked whether the key is enabled."""
+
+    api_key = _EXPORT_API_KEY
+    secret_key = _EXPORT_SECRET_KEY
+
+    @property
+    def enabled(self):
+        raise RuntimeError(_LEAK_SENTINEL)
+
+
 class _Logs:
     """Stands in for the module's structlog logger and keeps what it was told."""
 
@@ -3176,6 +3187,12 @@ class _ExportWorld:
                 raise RuntimeError(_LEAK_SENTINEL)
             if credentials == "none":
                 return None
+            if credentials == "fails_after_the_keys":
+                return _CredentialsThatFailAfterTheKeys()
+            if credentials == "no_api_key":
+                return _ExportCredentials("", _EXPORT_SECRET_KEY, True)
+            if credentials == "no_secret_key":
+                return _ExportCredentials(_EXPORT_API_KEY, "", True)
             return _ExportCredentials(
                 _EXPORT_API_KEY, _EXPORT_SECRET_KEY, credentials != "disabled"
             )
@@ -3197,10 +3214,21 @@ class _ExportWorld:
                 raise SimulationProjectError(_LEAK_SENTINEL)
             # This branch's Project has no column naming its agent, so the row is only
             # shaped like the hidden one: its name and its workspace.
+            hidden_workspace = agent.workspace
+            if hidden == "other_workspace":
+                from accounts.models.workspace import Workspace
+
+                hidden_workspace = Workspace.objects.create(
+                    name="Simulation workspace",
+                    organization=agent.organization,
+                    is_default=False,
+                    is_active=True,
+                    created_by=user,
+                )
             row = Project.no_workspace_objects.create(
                 name=f"fi-simulation-{agent.id}",
                 organization=agent.organization,
-                workspace=agent.workspace,
+                workspace=hidden_workspace,
                 model_type=AIModel.ModelTypes.GENERATIVE_LLM,
                 trace_type="observe",
             )
@@ -3565,6 +3593,29 @@ def test_an_observability_project_without_a_workspace_still_exports_to_the_hidde
 
 
 @pytest.mark.django_db
+def test_the_key_is_asked_for_by_the_hidden_projects_workspace_when_it_is_another_one(
+    organization, workspace, user, settings, monkeypatch
+):
+    world = _ExportWorld(
+        organization,
+        workspace,
+        user,
+        settings,
+        monkeypatch,
+        tag="elsewhere",
+        hidden="other_workspace",
+    ).launch()
+    assert world.hidden.workspace_id is not None
+    assert world.hidden.workspace_id != world.project.workspace_id
+    assert world.hidden.workspace_id != world.agent.workspace_id
+    assert world.credential_calls == [
+        (str(organization.id), str(world.hidden.workspace_id), str(world.agent.id))
+    ]
+    assert world.export_log() == []
+    assert world.secrets == _INGEST_PAIR
+
+
+@pytest.mark.django_db
 def test_the_hidden_project_is_made_before_the_key_and_both_before_the_sandbox_exists(
     organization, workspace, user, settings, monkeypatch
 ):
@@ -3733,6 +3784,12 @@ _REFUSALS = {
     "export_key_disabled": ({"credentials": "disabled"}, "key_disabled", "warning"),
     "key_resolver_raises": ({"credentials": "raises"}, "no_key", "warning"),
     "key_resolver_answers_nothing": ({"credentials": "none"}, "no_key", "warning"),
+    "key_without_its_api_key": ({"credentials": "no_api_key"}, "no_key", "warning"),
+    "key_without_its_secret_key": (
+        {"credentials": "no_secret_key"},
+        "no_key",
+        "warning",
+    ),
     "summary_raises": ({"summary_raises": True}, "RuntimeError", "warning"),
     "egress_cap": ({"cap_at_baseline": True}, "egress_cap", "warning"),
     "summary_module_missing": (
@@ -3926,19 +3983,8 @@ def test_a_failure_after_the_key_leaves_no_alias_ref_or_host(
         monkeypatch,
         tag="halfway",
         instrumentation="traceai",
+        credentials="fails_after_the_keys",
     )
-    from simulate.services.hosted_harness_gateway import _ExportPlan
-
-    real_plan = _ExportPlan
-
-    def failing_plan(*args, **kwargs):
-        # The empty default the guard falls back to is still built; the plan with the
-        # keys in it is the one that fails.
-        if kwargs:
-            raise RuntimeError(_LEAK_SENTINEL)
-        return real_plan(*args)
-
-    monkeypatch.setattr(f"{_GATEWAY}._ExportPlan", failing_plan)
     world.launch()
     # The key had been read when the plan failed to build.
     assert world.credential_calls

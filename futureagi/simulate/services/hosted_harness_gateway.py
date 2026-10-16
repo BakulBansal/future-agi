@@ -1031,8 +1031,8 @@ _EXPORT_SECRET_PURPOSE = "observability_export"
 _OTEL_EXPORT_NAMES = frozenset(
     {"OTEL_EXPORTER_OTLP_ENDPOINT", "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT"}
 )
-# The names the sandbox key ships under; no SDK reads them, so they never clash with a name
-# the customer's own code or its libraries look up.
+# The names the sandbox key ships under; no instrumenter reads them, so they never clash
+# with a name the customer's own code or its libraries look up.
 _INGEST_ALIAS_PREFIX = "FI_SIMULATION_INGEST_"
 _INGEST_API_KEY_ALIAS = f"{_INGEST_ALIAS_PREFIX}API_KEY"
 _INGEST_SECRET_KEY_ALIAS = f"{_INGEST_ALIAS_PREFIX}SECRET_KEY"
@@ -1108,7 +1108,6 @@ def _bound_agent_definition(job: HostedHarnessJob, payload: Mapping[str, Any]):
 def _decide_observability_export(
     job: HostedHarnessJob,
     payload: Mapping[str, Any],
-    secrets_map: Mapping[str, str],
     *,
     selected_snapshot: str,
     allowed_domains: Iterable[str],
@@ -1194,7 +1193,8 @@ def _decide_observability_export(
     if not credentials.enabled:
         raise _ExportRefused("key_disabled")
 
-    # The key, created on first use, may remain when the cap refuses; nothing else is written.
+    # The key and the hidden project, both made on first use, may remain when the cap refuses;
+    # nothing of the launch is written yet.
     egress_domains = _normalize_egress_domains({*allowed_domains, host})
     if max_egress_domains is not None and len(egress_domains) > max_egress_domains:
         raise _ExportRefused("egress_cap")
@@ -1216,7 +1216,6 @@ def _decide_observability_export(
 def _plan_observability_export(
     job: HostedHarnessJob,
     payload: Mapping[str, Any],
-    secrets_map: Mapping[str, str],
     *,
     selected_snapshot: str,
     allowed_domains: Iterable[str],
@@ -1227,7 +1226,6 @@ def _plan_observability_export(
         return _decide_observability_export(
             job,
             payload,
-            secrets_map,
             selected_snapshot=selected_snapshot,
             allowed_domains=allowed_domains,
             max_egress_domains=max_egress_domains,
@@ -2288,7 +2286,6 @@ class HostedHarnessGateway:
         export_plan = _plan_observability_export(
             job,
             payload,
-            secrets_map,
             selected_snapshot=selected_snapshot,
             allowed_domains=allowed_domains,
             max_egress_domains=self.client.max_egress_domains,
