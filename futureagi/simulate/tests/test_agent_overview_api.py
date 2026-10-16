@@ -391,6 +391,7 @@ def test_edit_passes_the_switch_through(auth_client, organization, workspace):
     assert all(
         call.kwargs["agent_definition"].id == agent.id for call in switch.call_args_list
     )
+    assert all(call.kwargs["workspace"] == workspace for call in switch.call_args_list)
 
 
 @pytest.mark.django_db

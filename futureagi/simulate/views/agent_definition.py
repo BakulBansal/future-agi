@@ -804,7 +804,7 @@ class EditAgentDefinitionView(APIView):
                         enabled=validated["observability_enabled"],
                         user_id=str(request.user.id),
                         organization=agent.organization,
-                        workspace=getattr(request.user, "workspace", None),
+                        workspace=agent.workspace,
                     )
             updated_agent = agent
 
