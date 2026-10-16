@@ -135,7 +135,7 @@ describe("AgentVersionsTab", () => {
     expect(newest).not.toHaveAttribute("aria-current");
   });
 
-  it("pins the selected version to the top until its page loads", async () => {
+  it("keeps an off-page selected version pinned to the top", async () => {
     servePages([[V2], [V1]]);
     renderTab("?v=v1-id");
     const labels = () =>
@@ -159,6 +159,25 @@ describe("AgentVersionsTab", () => {
     });
     fireEvent.scroll(list);
 
+    // Its page has loaded, but it stays pinned and isn't listed twice.
+    await waitFor(() =>
+      expect(axios.get).toHaveBeenCalledWith(
+        expect.stringMatching(/\/versions\/$/),
+        {
+          params: { page: 2, limit: 10 },
+        },
+      ),
+    );
+    await waitFor(() => expect(labels()).toEqual(["v1", "v2"]));
+  });
+
+  it("doesn't pin a selected version that's on the first page", async () => {
+    servePages([[V2, V1]]);
+    renderTab("?v=v1-id");
+    const labels = () =>
+      screen
+        .getAllByTestId("version-entry")
+        .map((e) => within(e).getByTestId("version-label").textContent);
     await waitFor(() => expect(labels()).toEqual(["v2", "v1"]));
   });
 
