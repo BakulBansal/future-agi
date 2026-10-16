@@ -1,6 +1,5 @@
 import PropTypes from "prop-types";
 import React from "react";
-import { format } from "date-fns";
 import { Box, Skeleton, Stack, Typography } from "@mui/material";
 import { useAgentVersion } from "src/api/agents/agentDetail";
 import ComingSoonChip from "src/sections/simulate/environments/components/ComingSoonChip";
@@ -142,23 +141,9 @@ export default function AgentDefinitionTab() {
   } else if (details) {
     body = (
       <>
-        <Typography
-          sx={{
-            px: 2,
-            pt: 1,
-            typography: "s3",
-            color: "text.subtitle",
-            fontFamily: MONO,
-          }}
-        >
-          {details.agent.name}
-        </Typography>
         {storedAgentRows(details).map((row) => (
           <DefinitionRow key={row.label} row={row} />
         ))}
-        <Note>
-          {`Stored by SDK ${details.sdkVersion} on ${format(new Date(details.storedAt), "dd-MM-yyyy")}`}
-        </Note>
         {details.setupStale && (
           <Note tone="warning">
             This setup may be out of date — the agent has changed since it was

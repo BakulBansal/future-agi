@@ -79,13 +79,12 @@ describe("AgentDefinitionTab", () => {
     ).toBeInTheDocument();
   });
 
-  it("shows a code agent's stored Agent with its SDK line", async () => {
+  it("shows a code agent's stored Agent as rows only", async () => {
     serve(CODE_AGENT_DETAIL, { [CODE_VERSION_DETAIL.id]: CODE_VERSION_DETAIL });
     renderAt(CODE_AGENT_DETAIL);
-    expect(await screen.findByText("uber_voice_agent")).toBeInTheDocument();
-    expect(
-      screen.getByText(/Stored by SDK 0\.2\.3 on 14-10-2026/),
-    ).toBeInTheDocument();
+    expect(await screen.findByText("Source")).toBeInTheDocument();
+    expect(screen.queryByText(/Stored by SDK/)).toBeNull();
+    expect(screen.queryByText("uber_voice_agent")).toBeNull();
     expect(screen.queryByText(/may be out of date/i)).toBeNull();
   });
 
