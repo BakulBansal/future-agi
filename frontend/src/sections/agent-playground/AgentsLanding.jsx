@@ -1,9 +1,10 @@
 import React from "react";
 import { Helmet } from "react-helmet-async";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { Box, Stack, Tab, Tooltip, Typography } from "@mui/material";
+import { Box, Stack, Tab, Typography } from "@mui/material";
 import Iconify from "src/components/iconify";
 import { SegmentedTabs } from "src/components/tabs/tabs";
+import CustomTooltip from "src/components/tooltip/CustomTooltip";
 import AgentView from "./AgentView";
 import ConnectedAgentsView from "./connected/ConnectedAgentsView";
 import CreateAgentsButton from "./components/CreateAgentsButton";
@@ -44,14 +45,16 @@ export default function AgentsLanding() {
           >
             Agents
           </Typography>
-          <Tooltip
+          <CustomTooltip
+            show
             arrow
+            size="small"
             title="Build agents in the Playground, or connect agents that already run somewhere else to test them in simulations."
           >
             <Box sx={{ display: "flex", color: "text.subtitle" }}>
               <Iconify icon="solar:info-circle-linear" width={16} />
             </Box>
-          </Tooltip>
+          </CustomTooltip>
         </Stack>
 
         <Stack

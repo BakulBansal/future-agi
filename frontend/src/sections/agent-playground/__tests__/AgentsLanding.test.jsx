@@ -21,6 +21,18 @@ vi.mock("../components/CreateAgentsButton", () => ({
   default: () => <button type="button">Create Agents</button>,
 }));
 
+vi.mock("src/components/tooltip/CustomTooltip", () => ({
+  default: ({ title, show, children }) => (
+    <div
+      data-testid="custom-tooltip"
+      data-title={title}
+      data-show={String(show)}
+    >
+      {children}
+    </div>
+  ),
+}));
+
 vi.mock("../hooks/useCanEditAgent", () => ({
   default: () => ({ canCreate: true, canUpdate: true, canDelete: true }),
 }));
@@ -97,6 +109,20 @@ describe("AgentsLanding", () => {
       "true",
     );
     expect(screen.queryByTestId("connected-list")).toBeNull();
+  });
+
+  it("explains the page in a CustomTooltip on the header info icon", () => {
+    renderAt("/dashboard/agents");
+    const tip = screen
+      .getAllByTestId("custom-tooltip")
+      .find((t) =>
+        t.dataset.title?.startsWith("Build agents in the Playground"),
+      );
+    expect(tip).toBeDefined();
+    expect(tip).toHaveAttribute("data-show", "true");
+    expect(tip.dataset.title).toBe(
+      "Build agents in the Playground, or connect agents that already run somewhere else to test them in simulations.",
+    );
   });
 
   it("shows the Agents header and the Create Agents button", () => {
