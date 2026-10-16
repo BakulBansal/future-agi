@@ -134,7 +134,7 @@ export default function AgentDetailLayout() {
                 label={
                   <Stack direction="row" alignItems="center" spacing={0.75}>
                     <span>{label}</span>
-                    <ComingSoonChip compact />
+                    <ComingSoonChip />
                   </Stack>
                 }
               />
