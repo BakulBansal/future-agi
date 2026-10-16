@@ -870,9 +870,7 @@ class ObservationSpanView(BaseModelViewSetMixin, ModelViewSet):
                 # constructed. Never widen a denied selector to bare-ID lookup.
                 # With a run, the only project that opens is the run's hidden one.
                 if run_scope is not None:
-                    allowed = str(physical_reference["project_id"]) == str(
-                        run_scope.id
-                    )
+                    allowed = str(physical_reference["project_id"]) == str(run_scope.id)
                 else:
                     allowed = project_manager.filter(
                         _project_workspace_scope_q(request, project_prefix=""),

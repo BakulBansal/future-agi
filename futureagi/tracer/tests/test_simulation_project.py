@@ -231,8 +231,7 @@ def test_ensure_is_idempotent_and_race_safe(organization, workspace, monkeypatch
     assert len(project_ids) == 2
     assert project_ids[0] == project_ids[1]
     assert (
-        Project.with_simulation.filter(simulation_agent_id=racing_agent.id).count()
-        == 1
+        Project.with_simulation.filter(simulation_agent_id=racing_agent.id).count() == 1
     )
     assert [e["event"] for e in race_events].count("simulation_project_created") == 1
 
@@ -388,9 +387,9 @@ def test_public_signatures_and_constants():
     assert list(inspect.signature(simulation_project_name).parameters) == [
         "agent_definition_id"
     ]
-    assert list(
-        inspect.signature(agent_id_in_simulation_project_name).parameters
-    ) == ["name"]
+    assert list(inspect.signature(agent_id_in_simulation_project_name).parameters) == [
+        "name"
+    ]
     assert list(inspect.signature(ensure_simulation_project).parameters) == [
         "agent_definition"
     ]
@@ -415,7 +414,7 @@ def test_agent_id_in_name_is_exact():
 def test_ensure_refuses_a_deleted_hidden_project(organization, workspace):
     agent = _agent_without_context(organization, workspace)
     project = ensure_simulation_project(agent)
-    visible = Project.objects.create(
+    Project.objects.create(
         name="A visible project",
         organization=organization,
         workspace=workspace,

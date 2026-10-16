@@ -2,6 +2,7 @@
 
 import json
 import uuid
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -9,6 +10,8 @@ from django.db import IntegrityError, transaction
 from rest_framework import status
 
 from accounts.models.workspace import Workspace
+from ai_tools.base import ToolContext
+from ai_tools.registry import registry
 from model_hub.models.ai_model import AIModel
 from simulate.models.agent_definition import AgentDefinition
 from simulate.models.run_test import RunTest
@@ -25,6 +28,7 @@ from tracer.services.simulation_project import (
     RESERVED_PROJECT_NAME_MESSAGE,
     ReservedProjectNameError,
     ensure_simulation_project,
+    simulation_project_name,
 )
 from tracer.tests.test_detail_identity_collision import (
     STARTED,
@@ -180,14 +184,28 @@ def test_save_full_clean_does_not_see_a_hidden_name_but_the_database_does(
 
 
 VIEW_PATHS = ("view_create", "view_rename", "view_patch")
+# The assistant's tools do not trim a name, so only the exact name is reserved.
+TOOL_PATHS = ("tool_create", "tool_rename")
 VIEW_NOT_RESERVED_NAMES = [name for name in NOT_RESERVED_NAMES if name == name.strip()]
 HARMLESS_NAME = "A harmless name"
 RESERVED_PATH_CASES = (
-    [(path, RESERVED_NAME, True) for path in (*VIEW_PATHS, "get_or_create_project")]
+    [
+        (path, RESERVED_NAME, True)
+        for path in (*VIEW_PATHS, *TOOL_PATHS, "get_or_create_project")
+    ]
     + [(path, f" {RESERVED_NAME} ", True) for path in VIEW_PATHS]
     + [(path, name, False) for path in VIEW_PATHS for name in VIEW_NOT_RESERVED_NAMES]
-    + [("get_or_create_project", name, False) for name in NOT_RESERVED_NAMES]
+    + [
+        (path, name, False)
+        for path in (*TOOL_PATHS, "get_or_create_project")
+        for name in NOT_RESERVED_NAMES
+    ]
 )
+
+
+def _run_tool(name, params, user, organization, workspace):
+    context = ToolContext(user=user, organization=organization, workspace=workspace)
+    return registry.get(name).run(params, context)
 
 
 @pytest.mark.parametrize(
@@ -216,6 +234,25 @@ def test_reserved_name_is_refused_by_create_rename_tools_and_get_or_create(
             )
             assert project.name == name
             assert Project.no_workspace_objects.filter(pk=project.pk).exists()
+    elif path in TOOL_PATHS:
+        if path == "tool_create":
+            params = {"name": name, "model_type": "GenerativeLLM"}
+        else:
+            params = {"project_id": str(target.id), "name": name}
+        result = _run_tool(
+            "create_project" if path == "tool_create" else "update_project",
+            params,
+            user,
+            organization,
+            workspace,
+        )
+        if refused:
+            assert result.is_error
+            assert RESERVED_PROJECT_NAME_MESSAGE in result.content
+        else:
+            assert not result.is_error, result.content
+            assert result.data["name"] == name
+            assert Project.objects.filter(pk=result.data["project_id"]).exists()
     elif path == "view_create":
         response = auth_client.post(
             "/tracer/project/",
@@ -257,8 +294,27 @@ def test_reserved_name_is_refused_by_create_rename_tools_and_get_or_create(
         assert not Project.with_simulation.filter(
             name__in={name, name.strip()}
         ).exists()
-        if path in ("view_rename", "view_patch"):
+        if path in ("view_rename", "view_patch", "tool_rename"):
             assert Project.objects.get(pk=target.pk).name == "Target project"
+
+
+@pytest.mark.parametrize("tool", ["create_project", "update_project"])
+def test_a_reserved_name_from_the_ai_tool_does_not_block_the_hidden_project(
+    tool, user, organization, workspace
+):
+    agent = _agent_without_context(organization, workspace)
+    target = _project(Project.objects, organization, workspace, "Target project")
+    name = simulation_project_name(agent.id)
+    if tool == "create_project":
+        params = {"name": name, "model_type": "GenerativeLLM"}
+    else:
+        params = {"project_id": str(target.id), "name": name}
+
+    assert _run_tool(tool, params, user, organization, workspace).is_error
+    project = ensure_simulation_project(agent)
+
+    assert project.simulation_agent_id == agent.id
+    assert project.name == name
 
 
 @pytest.mark.parametrize("path", ["view_patch", "view_rename"])
@@ -330,6 +386,25 @@ def test_the_three_query_serializers_declare_the_run_parameters(serializer, base
     bad = serializer(data={**base, "test_execution_id": "not-a-uuid"})
     assert not bad.is_valid()
     assert "test_execution_id" in bad.errors
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/tracer/trace/{id}/",
+        "/tracer/trace/voice_call_detail/",
+        "/tracer/observation-span/{id}/",
+    ],
+)
+def test_the_published_schema_lists_the_run_parameters(path):
+    swagger = Path(__file__).resolve().parents[3] / "api_contracts/openapi/swagger.json"
+    parameters = json.loads(swagger.read_text())["paths"][path]["get"]["parameters"]
+    by_name = {parameter["name"]: parameter for parameter in parameters}
+
+    for key in ("test_execution_id", "call_execution_id"):
+        assert by_name[key]["in"] == "query"
+        assert by_name[key]["required"] is False
+        assert by_name[key]["format"] == "uuid"
 
 
 def test_unknown_query_fields_are_still_rejected_or_ignored():
@@ -737,9 +812,7 @@ def test_by_id_reads_serve_it_with_a_readable_run_of_the_same_agent_only(
 
 
 @pytest.mark.parametrize("read", READS)
-def test_by_id_reads_without_a_run_parameter_are_unchanged(
-    read, world, monkeypatch
-):
+def test_by_id_reads_without_a_run_parameter_are_unchanged(read, world, monkeypatch):
     scope_calls = []
     monkeypatch.setattr(
         "tracer.services.simulation_project.simulation_scope_for_run",

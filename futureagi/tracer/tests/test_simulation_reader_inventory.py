@@ -604,9 +604,7 @@ _MONITOR_STATEMENT = filed(
 )
 _NO_LIVE_CALLER_ERROR_ANALYSIS = filed(
     NOT_A_USER_READ,
-    why=(
-        "no live caller: its package exports the builder and nothing imports it"
-    ),
+    why=("no live caller: its package exports the builder and nothing imports it"),
 )
 _NO_LIVE_CALLER_SESSION_ANALYTICS = filed(
     NOT_A_USER_READ,
@@ -2169,9 +2167,10 @@ def test_every_spans_reading_function_is_filed():
         "decide which category covers each, then add it to FILED with a reason:\n"
         + "\n".join(unfiled)
     )
-    assert not stale, (
-        "these filings no longer match a reader; rename or remove them:\n"
-        + "\n".join(stale)
+    assert (
+        not stale
+    ), "these filings no longer match a reader; rename or remove them:\n" + "\n".join(
+        stale
     )
 
     unlisted = {
@@ -2182,9 +2181,9 @@ def test_every_spans_reading_function_is_filed():
     assert not unlisted, f"filed under a category that does not exist: {unlisted}"
     assert not [key for key, filing in FILED.items() if not filing.why.strip()]
     used = {bucket for filing in FILED.values() for bucket in filing.buckets}
-    assert used == set(BUCKETS), (
-        f"categories nothing is filed under: {sorted(set(BUCKETS) - used)}"
-    )
+    assert used == set(
+        BUCKETS
+    ), f"categories nothing is filed under: {sorted(set(BUCKETS) - used)}"
     claims = _filing_problems(readers)
     assert not claims, "\n".join(claims)
 
@@ -2528,9 +2527,9 @@ CREATORS = {
         "the name starts with 'Demo SQL Agent (' and is followed by a trace type",
     ),
     "ai_tools/tools/tracing/create_project.py:CreateProjectTool.execute": (
-        NO_GUARD_REMOVED_ELSEWHERE,
-        "takes the name from the caller with no check; the tool is deleted on the "
-        "main branch, so the entry goes when the file does",
+        REFUSES_RESERVED_NAMES,
+        "returns an error for a name that carries an agent id before it builds the "
+        "project",
     ),
     "tfc/management/commands/seed_dummy_data.py:Command._seed_tracing": (
         OPERATOR_TOOLING,
@@ -2693,7 +2692,10 @@ def creator_claim_holds(claim, creator):
             isinstance(node, ast.If)
             and node.lineno < creator.call.lineno
             and _tests_the_guard(node.test)
-            and any(isinstance(statement, ast.Raise) for statement in node.body)
+            and any(
+                isinstance(statement, (ast.Raise, ast.Return))
+                for statement in node.body
+            )
             for node in ast.walk(creator.function)
         )
     if claim == HIDDEN_PROJECT_OF_AN_AGENT:
@@ -2732,7 +2734,7 @@ def creator_problems(found, pinned, present):
     return problems
 
 
-SAMPLE_CREATORS = '''
+SAMPLE_CREATORS = """
 from tracer.models.project import Project
 from tracer.models.project import Project as TracerProject
 
@@ -2749,7 +2751,7 @@ class Seeder:
         other.objects.create(name=name)
         models.Project.objects.update_or_create(name=name)
         models.Project(name=name)
-'''
+"""
 
 
 @pytest.mark.unit
@@ -3121,9 +3123,9 @@ def test_no_postgres_row_names_a_hidden_project_after_a_simulated_run(
                 f"below would prove nothing for it: {recorder.project_names}"
             )
         else:
-            assert not recorder.project_names, (
-                f"{name} exported {recorder.project_names}"
-            )
+            assert (
+                not recorder.project_names
+            ), f"{name} exported {recorder.project_names}"
 
     # The run's own rows exist, so a row that is missing below is not for lack of one.
     assert RunTest.objects.filter(pk=run.pk).exists()
