@@ -81,20 +81,28 @@ def test_ingest_key_is_refused_by_the_api_key_class(
 
 @pytest.mark.integration
 @pytest.mark.django_db
-def test_ingest_key_is_refused_by_langfuse_basic_and_mcp(user, organization, workspace):
+@pytest.mark.parametrize("with_user", [False, True], ids=["no_user", "user_attached"])
+def test_ingest_key_is_refused_by_langfuse_basic_and_mcp(
+    user, organization, workspace, with_user
+):
     from mcp_server import mcp_app
 
     ingest = _ingest_key(organization, workspace)
     system = _system_key(organization, workspace)
+    if with_user:
+        # Nothing keeps an ingest key user-less (the admin exposes the field),
+        # so the refusal must come from the key's type, not from a missing user.
+        ingest.user = user
+        ingest.save(update_fields=["user"])
 
-    with pytest.raises(AuthenticationFailed, match="No user found"):
+    with pytest.raises(AuthenticationFailed, match="ingest keys cannot call the API"):
         LangfuseBasicAuthentication().authenticate(_basic_request(ingest))
     assert (
         mcp_app._authenticate_and_set_context(ingest.api_key, ingest.secret_key) is None
     )
 
-    # The same calls with the system pair succeed, so the refusals above come
-    # from the key's type and not from a badly built request.
+    # The same calls with the system pair succeed, so the refusals above do not
+    # come from a badly built request.
     authenticated_user, _ = LangfuseBasicAuthentication().authenticate(
         _basic_request(system)
     )

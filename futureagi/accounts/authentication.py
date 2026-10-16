@@ -622,6 +622,11 @@ class LangfuseBasicAuthentication(APIKeyAuthentication):
         if not org_api_key.organization:
             raise AuthenticationFailed("API key has no organization")
 
+        # Same refusal as the parent class: an ingest key may only write spans
+        # to the collector, even if a user was attached to it.
+        if org_api_key.type == "ingest":
+            raise AuthenticationFailed("ingest keys cannot call the API")
+
         # Resolve user (same logic as parent class)
         if org_api_key.type == "system":
             user = (

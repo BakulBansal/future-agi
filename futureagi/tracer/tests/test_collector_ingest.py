@@ -18,6 +18,8 @@ from tracer.services.collector_ingest import (
 # The collector's key lookup (fi-collector/pkg/auth/pgresolver.go, ValidateKey)
 # with psycopg placeholders, extended with the join that routes a key to its
 # agent. No collector runs this shape yet; it pins what the columns must answer.
+# It is a hand copy that documents the current Go query, not a guard: if the
+# collector's query changes, this copy will not, and these tests stay green.
 COLLECTOR_VALIDATE_KEY_SQL = """
     SELECT k.organization_id, k.workspace_id, k.user_id, k.type,
            k.simulation_agent_id, a.organization_id, a.deleted
