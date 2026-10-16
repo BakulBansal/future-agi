@@ -15,6 +15,7 @@ import {
   useCallTraces,
 } from "src/api/simulate-environments/runDetail";
 import VoiceDetailDrawerV2 from "src/components/VoiceDetailDrawerV2";
+import { useLLMTracingStoreShallow } from "src/sections/projects/LLMTracing/states";
 import CallTracesPanel from "./CallTracesPanel";
 import { CALL_TRACES_COPY } from "./callTraces.constants";
 
@@ -68,6 +69,9 @@ export default function VoiceCallDrawer({
   hasPrev = false,
   hasNext = false,
 }) {
+  const traceOpen = useLLMTracingStoreShallow((state) =>
+    Boolean(state.traceDetailDrawerOpen),
+  );
   const { data, isPending, isError } = useCallExecutionV3Detail(
     task.id,
     !!task.id,
@@ -151,8 +155,8 @@ export default function VoiceCallDrawer({
         // real values.
         onPrev={onPrev}
         onNext={onNext}
-        hasPrev={hasPrev}
-        hasNext={hasNext}
+        hasPrev={hasPrev && !traceOpen}
+        hasNext={hasNext && !traceOpen}
       />
     </Box>
   );

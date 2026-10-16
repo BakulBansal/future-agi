@@ -31,7 +31,7 @@ export default function CallTracesPanel({
 
   useEffect(() => () => resetStates(), [resetStates]);
 
-  if (isError) {
+  if (isError && traces.length === 0) {
     return (
       <EmptyState
         icon="solar:danger-triangle-linear"

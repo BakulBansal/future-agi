@@ -92,9 +92,12 @@ const VoiceLeftPanel = ({
     return t;
   }, [showPathTabs, extraTabs]);
 
-  const isTranscriptTab = currentTab === TABS.TRANSCRIPT;
-  const activeExtraTab = extraTabs.find((tab) => tab.value === currentTab);
-  const isPathTab = currentTab === TABS.CHECKLIST || currentTab === TABS.GRAPH;
+  const selectedTab = tabs.some((tab) => tab.value === currentTab)
+    ? currentTab
+    : TABS.TRANSCRIPT;
+  const isTranscriptTab = selectedTab === TABS.TRANSCRIPT;
+  const activeExtraTab = extraTabs.find((tab) => tab.value === selectedTab);
+  const isPathTab = selectedTab === TABS.CHECKLIST || selectedTab === TABS.GRAPH;
 
   return (
     <Stack
@@ -111,7 +114,7 @@ const VoiceLeftPanel = ({
       {!embedded && (
         <Box sx={{ px: 1.25, flexShrink: 0 }}>
           <CompactTabs
-            value={currentTab}
+            value={selectedTab}
             onChange={(_, value) => setCurrentTab(value)}
             tabs={tabs}
           />
@@ -199,7 +202,7 @@ const VoiceLeftPanel = ({
                 openedExecutionId={callExecutionId}
                 testExecutionId={data?.test_execution_id}
                 enabled={isPathTab}
-                viewMode={PATH_VIEW_MODE[currentTab]}
+                viewMode={PATH_VIEW_MODE[selectedTab]}
                 onRequestTranscript={() => setCurrentTab(TABS.TRANSCRIPT)}
               />
             </ShowComponent>

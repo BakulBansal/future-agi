@@ -13,6 +13,7 @@ import {
 } from "src/api/simulate-environments/runDetail";
 
 import { BUILD_TONES } from "../../../buildEnvironment/buildTones";
+import { useLLMTracingStoreShallow } from "src/sections/projects/LLMTracing/states";
 import ChatTranscriptPane from "./ChatTranscriptPane";
 import CallTracesPanel from "./CallTracesPanel";
 import { CALL_TRACES_COPY } from "./callTraces.constants";
@@ -94,8 +95,11 @@ export default function ChatCallDrawer({
   hasNext = false,
 }) {
   const [shareOpen, setShareOpen] = useState(false);
+  const traceOpen = useLLMTracingStoreShallow((state) =>
+    Boolean(state.traceDetailDrawerOpen),
+  );
   useEffect(() => {
-    if (shareOpen) return undefined;
+    if (shareOpen || traceOpen) return undefined;
     const onKeyDown = (e) => {
       const tag = e.target?.tagName;
       if (tag === "INPUT" || tag === "TEXTAREA" || e.target?.isContentEditable) return;
@@ -109,7 +113,7 @@ export default function ChatCallDrawer({
     };
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
-  }, [hasNext, hasPrev, onNext, onPrev, shareOpen]);
+  }, [hasNext, hasPrev, onNext, onPrev, shareOpen, traceOpen]);
   const [side, setSide] = useState("analytics");
   const [artifact, setArtifact] = useState("transcript");
   const { callDetail, isLoading } = useCallDetail(task.id);

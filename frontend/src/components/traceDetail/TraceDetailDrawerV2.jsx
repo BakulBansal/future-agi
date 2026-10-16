@@ -376,6 +376,7 @@ const TraceDetailDrawerV2 = ({
 
   // "Set default for everyone" — make current view project-visible
   const handleSetDefaultView = useCallback(() => {
+    if (readOnly) return;
     const onDone = {
       onSuccess: () =>
         enqueueSnackbar("View set as default for everyone", {
@@ -438,6 +439,7 @@ const TraceDetailDrawerV2 = ({
     user,
     updateSavedView,
     createSavedView,
+    readOnly,
   ]);
 
   // Create new view from current config (called from "+" button or filter save)
@@ -958,6 +960,7 @@ const TraceDetailDrawerV2 = ({
         onFilterOpen={(e) => setFilterAnchorEl(e?.currentTarget || e)}
         onDisplayOpen={(el) => setDisplayAnchorEl(el)}
         hasActiveFilter={spanFilters.length > 0}
+        hideFilter={readOnly}
       />
 
       {/* Display options popover — hidden on Imagine tab */}
@@ -978,6 +981,7 @@ const TraceDetailDrawerV2 = ({
           onToggleAgentGraph={() => setShowAgentGraph((prev) => !prev)}
           onResetView={handleResetView}
           onSetDefaultView={handleSetDefaultView}
+          hideSetDefault={readOnly}
         />
       )}
 

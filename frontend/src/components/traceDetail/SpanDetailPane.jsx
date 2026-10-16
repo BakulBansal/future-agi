@@ -2142,6 +2142,7 @@ const SpanDetailPane = ({
             onSelectSpan={onSelectSpan}
             emptyMessage="No evaluations for this span or its children"
             showErrorLocalization={!readOnly}
+            showFixWithFalcon={!readOnly}
             onFixWithFalcon={({ level, ev, failingEvals, allEvals }) => {
               const traceId = span?.trace;
               if (level === "eval" && ev) {
