@@ -1524,21 +1524,21 @@ def record_cleanup(
 def _ask_builder_to_check(job_id: str, attempt_id: str) -> None:
     """Tell the builder session that built this environment to check it against the agent."""
     from simulate.models import HostedHarnessConversationMessage
-    from simulate.services.hosted_harness_conversation import enqueue_message
+    from simulate.services.hosted_harness_conversation import send_to_harness
     from simulate.services.hosted_harness_ingress import _public_base_url
-    from simulate.tasks.hosted_harness_conversation import schedule_conversation_runtime
 
     try:
         if not HostedHarnessConversationMessage.no_workspace_objects.filter(
             conversation__job_id=job_id, client_request_id=f"build-{attempt_id}"
         ).exists():
             return
-        conversation, _message, _created = enqueue_message(
+        send_to_harness(
             HostedHarnessJob.no_workspace_objects.get(id=job_id),
             content="The environment is validated and sealed. Check it against the agent.",
             client_request_id=f"check-{attempt_id}",
+            endpoint_base_url=_public_base_url(None),
+            payload={"builder_check": True},
         )
-        schedule_conversation_runtime(str(conversation.id), _public_base_url(None))
     except Exception:
         logger.exception("builder_check_request_failed", job_id=job_id)
 

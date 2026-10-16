@@ -423,6 +423,23 @@ def environment_authoring_revision(job: HostedHarnessJob) -> str:
     return authoring_content_digest(body)
 
 
+def send_to_harness(
+    job: HostedHarnessJob,
+    *,
+    content: str,
+    client_request_id: str,
+    endpoint_base_url: str,
+    payload: dict[str, Any] | None = None,
+) -> None:
+    """Put a platform message into the environment's conversation and wake its harness."""
+    from simulate.tasks.hosted_harness_conversation import schedule_conversation_runtime
+
+    conversation, _message, _created = enqueue_message(
+        job, content=content, client_request_id=client_request_id, payload=payload
+    )
+    schedule_conversation_runtime(str(conversation.id), endpoint_base_url)
+
+
 def enqueue_message(
     job: HostedHarnessJob,
     *,
