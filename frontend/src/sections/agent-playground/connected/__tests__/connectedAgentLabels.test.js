@@ -57,7 +57,10 @@ describe("sourceLabel", () => {
 
 describe("usedInLabel", () => {
   it("says so when no environment uses it", () => {
-    expect(usedInLabel([])).toEqual({ text: "No environments yet", empty: true });
+    expect(usedInLabel([])).toEqual({
+      text: "No environments yet",
+      empty: true,
+    });
     expect(usedInLabel(undefined)).toEqual({
       text: "No environments yet",
       empty: true,

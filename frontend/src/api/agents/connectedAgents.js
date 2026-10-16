@@ -27,8 +27,7 @@ export const mapConnectedAgent = (raw) => ({
 const fetchFixturePage = ({ page, pageSize, search }) => {
   const q = (search || "").trim().toLowerCase();
   const matching = structuredClone(CONNECTED_AGENTS_FIXTURE).filter(
-    (a) =>
-      !q || `${a.name} ${a.description || ""}`.toLowerCase().includes(q),
+    (a) => !q || `${a.name} ${a.description || ""}`.toLowerCase().includes(q),
   );
   const start = page * pageSize;
   return {
@@ -42,7 +41,10 @@ export function useConnectedAgents({ page, pageSize, search }) {
   return useQuery({
     queryKey: connectedAgentsQueryKey({ page, pageSize, search }),
     queryFn: async () => fetchFixturePage({ page, pageSize, search }),
-    select: (d) => ({ items: d.results.map(mapConnectedAgent), total: d.count }),
+    select: (d) => ({
+      items: d.results.map(mapConnectedAgent),
+      total: d.count,
+    }),
     placeholderData: keepPreviousData,
   });
 }

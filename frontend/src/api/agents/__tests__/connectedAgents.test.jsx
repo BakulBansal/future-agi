@@ -50,9 +50,9 @@ describe("useConnectedAgents", () => {
     expect(matching.length).toBeGreaterThan(0);
     expect(data.total).toBe(matching.length);
     data.items.forEach((a) =>
-      expect(
-        `${a.name} ${a.description || ""}`.toLowerCase(),
-      ).toContain("support"),
+      expect(`${a.name} ${a.description || ""}`.toLowerCase()).toContain(
+        "support",
+      ),
     );
   });
 

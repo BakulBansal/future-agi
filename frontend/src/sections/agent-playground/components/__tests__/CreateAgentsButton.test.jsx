@@ -2,7 +2,8 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
-import CreateAgentsButton, { CONNECT_AGENT_PATH } from "../CreateAgentsButton";
+import CreateAgentsButton from "../CreateAgentsButton";
+import { CONNECT_AGENT_PATH } from "../../agentsTabs";
 
 const mockNavigate = vi.fn();
 const mockCreateGraph = vi.fn();
@@ -59,7 +60,9 @@ describe("CreateAgentsButton", () => {
     renderButton();
     openMenu();
     fireEvent.click(screen.getByText("Connect agents"));
-    expect(CONNECT_AGENT_PATH).toBe("/dashboard/simulate/environments?tab=build");
+    expect(CONNECT_AGENT_PATH).toBe(
+      "/dashboard/simulate/environments?tab=build",
+    );
     expect(mockNavigate).toHaveBeenCalledWith(
       "/dashboard/simulate/environments?tab=build",
     );
@@ -77,9 +80,10 @@ describe("CreateAgentsButton", () => {
   it("disables only Playground when the user can't create playground agents", () => {
     renderButton({ canCreatePlayground: false });
     openMenu();
-    expect(
-      screen.getByText("Playground").closest("li"),
-    ).toHaveAttribute("aria-disabled", "true");
+    expect(screen.getByText("Playground").closest("li")).toHaveAttribute(
+      "aria-disabled",
+      "true",
+    );
     expect(
       screen.getByText("Connect agents").closest("li"),
     ).not.toHaveAttribute("aria-disabled", "true");

@@ -48,7 +48,9 @@ describe("ConnectedAgentsView", () => {
     expect(screen.getAllByText("Voice · Inbound").length).toBeGreaterThan(0);
     expect(screen.getByText("Video Call · Inbound")).toBeInTheDocument();
     expect(screen.getByText("Vonage Sip")).toBeInTheDocument();
-    expect(screen.getAllByText("No environments yet").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("No environments yet").length).toBeGreaterThan(
+      0,
+    );
     expect(screen.getAllByText("3 environments").length).toBeGreaterThan(0);
     expect(
       screen.getByText("Inbound phone support for an online storefront"),
@@ -77,9 +79,12 @@ describe("ConnectedAgentsView", () => {
       target: { value: "receptionist" },
     });
 
-    await waitFor(() => expect(screen.getByText("1–1 of 1")).toBeInTheDocument(), {
-      timeout: 2000,
-    });
+    await waitFor(
+      () => expect(screen.getByText("1–1 of 1")).toBeInTheDocument(),
+      {
+        timeout: 2000,
+      },
+    );
     expect(screen.getByText("Clinic receptionist")).toBeInTheDocument();
   });
 
