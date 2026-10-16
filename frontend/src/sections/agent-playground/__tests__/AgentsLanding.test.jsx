@@ -4,7 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { HelmetProvider } from "react-helmet-async";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import AgentsLanding from "../AgentsLanding";
-import { resolveAgentsTab } from "../agentsTabs";
+import { PLAYGROUND_AGENTS_PATH, resolveAgentsTab } from "../agentsTabs";
 import AgentListView from "../AgentListView/AgentListView";
 
 vi.mock("../AgentView", () => ({
@@ -62,6 +62,14 @@ describe("resolveAgentsTab", () => {
     expect(resolveAgentsTab("garbage")).toBe("connected");
     expect(resolveAgentsTab("connected")).toBe("connected");
     expect(resolveAgentsTab("playground")).toBe("playground");
+  });
+});
+
+describe("PLAYGROUND_AGENTS_PATH", () => {
+  it("opens the Agents page on the Agent Playground tab", () => {
+    const url = new URL(PLAYGROUND_AGENTS_PATH, "http://localhost");
+    expect(url.pathname).toBe("/dashboard/agents");
+    expect(resolveAgentsTab(url.searchParams.get("tab"))).toBe("playground");
   });
 });
 
