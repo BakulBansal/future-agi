@@ -251,6 +251,15 @@ describe("hooks", () => {
     ]);
   });
 
+  it("useAgentEnvironments doesn't call when disabled", async () => {
+    const { Wrapper } = makeWrapper();
+    renderHook(() => useAgentEnvironments("a1", { enabled: false }), {
+      wrapper: Wrapper,
+    });
+    await new Promise((r) => setTimeout(r, 20));
+    expect(listHarnessEnvironments).not.toHaveBeenCalled();
+  });
+
   it("useSetObservability sends only the switch and refetches the agent", async () => {
     axios.put.mockResolvedValue({ data: { message: "ok" } });
     const { client, Wrapper } = makeWrapper();

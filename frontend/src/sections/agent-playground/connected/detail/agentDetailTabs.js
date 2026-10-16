@@ -18,8 +18,3 @@ export const visibleDetailTabs = (agentKind) =>
 
 export const agentDetailPath = (agentId, tab = "overview") =>
   `${CONNECTED_AGENTS_PATH}/${agentId}/${tab}`;
-
-export const resolveVersionId = (raw, versions, activeVersionId) => {
-  if (raw && versions.some((v) => v.id === raw)) return raw;
-  return activeVersionId ?? versions[0]?.id ?? null;
-};

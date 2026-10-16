@@ -6,11 +6,23 @@ import { ENVIRONMENT_RUN } from "src/api/agents/_fixtures/agentDetail";
 import AgentEnvironmentsTab from "../AgentEnvironmentsTab";
 
 const envState = { current: {} };
+const envCalls = [];
+const agentState = { current: { environmentCount: 2 } };
 
 vi.mock("src/api/agents/agentDetail", async () => {
   const actual = await vi.importActual("src/api/agents/agentDetail");
-  return { ...actual, useAgentEnvironments: () => envState.current };
+  return {
+    ...actual,
+    useAgentEnvironments: (...args) => {
+      envCalls.push(args);
+      return envState.current;
+    },
+  };
 });
+
+vi.mock("../useAgentRoute", () => ({
+  default: () => ({ agentId: "a1", agent: agentState.current }),
+}));
 
 let currentLocation;
 const LocationProbe = () => {
@@ -37,6 +49,8 @@ const renderTab = () =>
 const twoHoursAgo = new Date(Date.now() - 2 * 3600 * 1000).toISOString();
 
 beforeEach(() => {
+  envCalls.length = 0;
+  agentState.current = { environmentCount: 2 };
   envState.current = {
     isLoading: false,
     isError: false,
@@ -95,6 +109,14 @@ describe("AgentEnvironmentsTab", () => {
     expect(
       screen.getByText("No environments test this agent yet"),
     ).toBeInTheDocument();
+  });
+
+  it("asks for environments only once the backend sends a count", () => {
+    renderTab();
+    expect(envCalls.at(-1)).toEqual(["a1", { enabled: true }]);
+    agentState.current = { environmentCount: null };
+    renderTab();
+    expect(envCalls.at(-1)).toEqual(["a1", { enabled: false }]);
   });
 
   it("shows a load error as an error", () => {

@@ -5,11 +5,13 @@ import { paths } from "src/routes/paths";
 import { rateTone } from "./bits";
 
 const NEUTRAL_BAR = "rgba(161,161,170,.75)";
-const RUNNING = ["pending", "queued", "running", "in_progress"];
-const TIMED_OUT = ["timed_out", "timeout"];
+// TestExecution.ExecutionStatus: pending, running, evaluating, cancelling,
+// completed, failed, cancelled.
+const IN_PROGRESS = ["pending", "running", "evaluating", "cancelling"];
+const END_TAGS = { failed: "Failed", cancelled: "Cancelled" };
 
-export const isRunning = (run) => RUNNING.includes(run.status);
-export const isTimedOut = (run) => TIMED_OUT.includes(run.status);
+export const isRunning = (run) => IN_PROGRESS.includes(run.status);
+export const endTagOf = (run) => END_TAGS[run.status] ?? null;
 
 export const runPath = (run) =>
   run.kind === "environment" && run.environment

@@ -6,21 +6,21 @@ import {
   useLocation,
   useMatch,
   useNavigate,
-  useSearchParams,
 } from "react-router-dom";
 import {
   Box,
   CircularProgress,
+  IconButton,
   Skeleton,
   Stack,
   Tab,
   Typography,
 } from "@mui/material";
+import Iconify from "src/components/iconify";
 import { CustomTabs } from "src/components/tabs/tabs";
 import ComingSoonChip from "src/sections/simulate/environments/components/ComingSoonChip";
 import { CONNECTED_AGENTS_PATH } from "../../agentsTabs";
 import AgentDetailHeader from "./AgentDetailHeader";
-import AgentVersionSelect from "./AgentVersionSelect";
 import {
   COMING_SOON_TABS,
   DETAIL_TABS,
@@ -33,26 +33,30 @@ const errorText = (error) =>
   error?.message || error?.detail || "Couldn't load this agent";
 
 /**
- * A connected agent: header, version selector and tabs. Each tab is its own
- * route rendered into the Outlet; `?v=` carries the version across tabs.
+ * A connected agent: header and tabs. Each tab is its own route rendered into
+ * the Outlet.
  */
 export default function AgentDetailLayout() {
   const navigate = useNavigate();
   const { search } = useLocation();
-  const [params, setParams] = useSearchParams();
-  const { agentId, agent, query, versionId } = useAgentRoute();
+  const { agentId, agent, query } = useAgentRoute();
   const match = useMatch(`${CONNECTED_AGENTS_PATH}/:agentId/:tab/*`);
   const tab = match?.params.tab;
 
   const back = () => navigate(CONNECTED_AGENTS_PATH);
 
-  if (query.isError) {
+  // A failed background refetch keeps the loaded page; only a first load
+  // that fails shows the error.
+  if (query.isError && !agent) {
     return (
-      <Box sx={{ p: 2 }}>
+      <Stack direction="row" alignItems="center" spacing={1.5} sx={{ p: 2 }}>
+        <IconButton size="small" onClick={back} aria-label="Back">
+          <Iconify icon="eva:arrow-ios-back-fill" width={18} />
+        </IconButton>
         <Typography sx={{ typography: "s1", color: "text.secondary" }}>
           {errorText(query.error)}
         </Typography>
-      </Box>
+      </Stack>
     );
   }
 
@@ -70,15 +74,6 @@ export default function AgentDetailLayout() {
   if (tab && !visible.includes(tab)) {
     return <Navigate to={`${agentDetailPath(agentId)}${search}`} replace />;
   }
-
-  const showVersions =
-    visible.includes("versions") && agent.versions.length > 0;
-  const pickVersion = (id) => {
-    const next = new URLSearchParams(params);
-    if (id === agent.activeVersionId) next.delete("v");
-    else next.set("v", id);
-    setParams(next, { replace: true });
-  };
 
   const tabLabel = (t) => {
     if (t.id === "versions") return `Versions ${agent.versions.length}`;
@@ -104,15 +99,6 @@ export default function AgentDetailLayout() {
                     `${agentDetailPath(agentId, "environments")}${search}`,
                   )
               : undefined
-          }
-          action={
-            showVersions && versionId ? (
-              <AgentVersionSelect
-                versions={agent.versions}
-                value={versionId}
-                onChange={pickVersion}
-              />
-            ) : null
           }
         />
         <Box sx={{ borderBottom: "1px solid", borderColor: "divider", mb: 2 }}>

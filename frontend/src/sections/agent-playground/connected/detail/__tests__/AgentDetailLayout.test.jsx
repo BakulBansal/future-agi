@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import {
+  act,
   fireEvent,
   render,
   screen,
@@ -16,11 +17,7 @@ import {
 } from "src/api/agents/_fixtures/agentDetail";
 import AgentDetailLayout from "../AgentDetailLayout";
 import AgentDetailIndexRedirect from "../AgentDetailIndexRedirect";
-import {
-  agentDetailPath,
-  resolveVersionId,
-  visibleDetailTabs,
-} from "../agentDetailTabs";
+import { agentDetailPath, visibleDetailTabs } from "../agentDetailTabs";
 
 vi.mock("src/utils/axios", () => ({
   default: { get: vi.fn(), put: vi.fn() },
@@ -43,14 +40,13 @@ const LocationProbe = () => {
 const Tab = ({ name }) => <div data-testid={`tab-${name}`} />;
 
 // Mirrors the connected/:agentId block in routes/sections/dashboard.jsx.
-const renderAt = (url) =>
+const renderAt = (url) => {
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
   render(
     <HelmetProvider>
-      <QueryClientProvider
-        client={
-          new QueryClient({ defaultOptions: { queries: { retry: false } } })
-        }
-      >
+      <QueryClientProvider client={client}>
         <MemoryRouter initialEntries={[url]}>
           <Routes>
             <Route
@@ -73,6 +69,8 @@ const renderAt = (url) =>
       </QueryClientProvider>
     </HelmetProvider>,
   );
+  return client;
+};
 
 const serve = (detail) =>
   axios.get.mockImplementation((url) =>
@@ -118,14 +116,6 @@ describe("agentDetailTabs", () => {
     expect(agentDetailPath("a1", "definition")).toBe(
       "/dashboard/agents/connected/a1/definition",
     );
-  });
-
-  it("falls back to the active version for an unknown ?v=", () => {
-    const versions = [{ id: "v2" }, { id: "v1" }];
-    expect(resolveVersionId("v1", versions, "v2")).toBe("v1");
-    expect(resolveVersionId("nope", versions, "v2")).toBe("v2");
-    expect(resolveVersionId(null, versions, null)).toBe("v2");
-    expect(resolveVersionId(null, [], null)).toBeNull();
   });
 });
 
@@ -185,7 +175,6 @@ describe("AgentDetailLayout", () => {
     await screen.findByRole("tab", { name: "Overview" });
     expect(screen.getByRole("tab", { name: /^Versions/ })).toBeInTheDocument();
     expect(screen.queryByRole("tab", { name: /^Environments/ })).toBeNull();
-    expect(screen.getByRole("combobox")).toBeInTheDocument();
   });
 
   it("gives a code agent Environments and no Versions or version selector", async () => {
@@ -196,7 +185,6 @@ describe("AgentDetailLayout", () => {
       screen.getByRole("tab", { name: /^Environments/ }),
     ).toBeInTheDocument();
     expect(screen.queryByRole("tab", { name: /^Versions/ })).toBeNull();
-    expect(screen.queryByRole("combobox")).toBeNull();
   });
 
   it("shows Constraints, Improvements and Connections as disabled Coming soon tabs", async () => {
@@ -217,28 +205,38 @@ describe("AgentDetailLayout", () => {
     expect(currentLocation.pathname).toBe(`${base(HOSTED)}/overview`);
   });
 
-  it("switches tabs by path and keeps the chosen version", async () => {
+  it("has no version selector", async () => {
     serve(HOSTED);
-    renderAt(`${base(HOSTED)}/overview?v=v1-id`);
+    renderAt(`${base(HOSTED)}/overview`);
+    await screen.findByRole("tab", { name: "Overview" });
+    expect(screen.queryByRole("combobox")).toBeNull();
+  });
+
+  it("switches tabs by path", async () => {
+    serve(HOSTED);
+    renderAt(`${base(HOSTED)}/overview`);
     fireEvent.click(await screen.findByRole("tab", { name: "Definition" }));
     await screen.findByTestId("tab-definition");
     expect(currentLocation.pathname).toBe(`${base(HOSTED)}/definition`);
-    expect(currentLocation.search).toBe("?v=v1-id");
   });
 
-  it("writes the picked version to ?v= and clears it for the active one", async () => {
+  it("keeps the page when a background refetch fails", async () => {
     serve(HOSTED);
-    renderAt(`${base(HOSTED)}/overview`);
-    const select = await screen.findByRole("combobox");
-    expect(select).toHaveTextContent("v2 · active");
-
-    fireEvent.mouseDown(select);
-    fireEvent.click(await screen.findByRole("option", { name: /^v1/ }));
-    await waitFor(() => expect(currentLocation.search).toBe("?v=v1-id"));
-
-    fireEvent.mouseDown(screen.getByRole("combobox"));
-    fireEvent.click(await screen.findByRole("option", { name: /^v2/ }));
-    await waitFor(() => expect(currentLocation.search).toBe(""));
+    const client = renderAt(`${base(HOSTED)}/overview`);
+    await screen.findByRole("heading", { name: "Northwind Pharmacy" });
+    axios.get.mockRejectedValue({ message: "Server error" });
+    await act(async () => {
+      await client.refetchQueries();
+    });
+    await waitFor(() =>
+      expect(client.getQueryState(["agents", "detail", HOSTED.id]).status).toBe(
+        "error",
+      ),
+    );
+    expect(
+      screen.getByRole("heading", { name: "Northwind Pharmacy" }),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("Server error")).toBeNull();
   });
 
   it("shows the server's message when the agent can't be loaded", async () => {

@@ -79,21 +79,6 @@ describe("AgentDefinitionTab", () => {
     ).toBeInTheDocument();
   });
 
-  it("reads the version picked in ?v=", async () => {
-    serve(HOSTED_AGENT_DETAIL, {
-      "v1-id": {
-        ...HOSTED_VERSION_DETAIL,
-        id: "v1-id",
-        version_name_display: "v1",
-        api_key: null,
-      },
-      "v2-id": HOSTED_VERSION_DETAIL,
-    });
-    renderAt(HOSTED_AGENT_DETAIL, "?v=v1-id");
-    expect(await screen.findByText("· v1")).toBeInTheDocument();
-    expect(await screen.findByText("Not saved")).toBeInTheDocument();
-  });
-
   it("shows a code agent's stored Agent with its SDK line", async () => {
     serve(CODE_AGENT_DETAIL, { [CODE_VERSION_DETAIL.id]: CODE_VERSION_DETAIL });
     renderAt(CODE_AGENT_DETAIL);
@@ -173,15 +158,31 @@ describe("AgentDefinitionTab", () => {
     expect(toggle).not.toBeChecked();
   });
 
-  it("starts from the active version's switch when the agent doesn't send one", async () => {
+  it("shows the saved switch read-only while the backend can't change it", async () => {
     const today = { ...HOSTED_AGENT_DETAIL };
     delete today.observability_enabled;
     serve(today, { "v2-id": HOSTED_VERSION_DETAIL });
     renderAt(today);
-    await waitFor(() =>
-      expect(
-        screen.getByRole("checkbox", { name: "Observability" }),
-      ).toBeChecked(),
-    );
+    const toggle = await screen.findByRole("checkbox", {
+      name: "Observability",
+    });
+    await waitFor(() => expect(toggle).toBeChecked());
+    expect(toggle).toBeDisabled();
+    expect(
+      screen.getByText(/Turning observability on or off here is coming soon/),
+    ).toBeInTheDocument();
+  });
+
+  it("follows the server after a change it accepted", async () => {
+    serve(HOSTED_AGENT_DETAIL, { "v2-id": HOSTED_VERSION_DETAIL });
+    axios.put.mockResolvedValue({ data: { message: "ok" } });
+    renderAt(HOSTED_AGENT_DETAIL);
+    const toggle = await screen.findByRole("checkbox", {
+      name: "Observability",
+    });
+    fireEvent.click(toggle);
+    await waitFor(() => expect(axios.put).toHaveBeenCalled());
+    // The refetched agent still says false (no observe project yet).
+    await waitFor(() => expect(toggle).not.toBeChecked());
   });
 });

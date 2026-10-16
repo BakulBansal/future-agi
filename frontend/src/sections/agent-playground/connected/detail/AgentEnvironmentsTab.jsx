@@ -1,10 +1,11 @@
 import PropTypes from "prop-types";
 import React from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import { Box, Typography } from "@mui/material";
 import { useAgentEnvironments } from "src/api/agents/agentDetail";
 import { paths } from "src/routes/paths";
 import { Card, MONO, Row, ago, rateTone } from "./bits";
+import useAgentRoute from "./useAgentRoute";
 
 const COLUMNS = ["Environment", "Testing", "Last result"];
 
@@ -42,17 +43,21 @@ LastResult.propTypes = { env: PropTypes.object.isRequired };
 
 /** Environments: every environment built for this code agent and how it did. */
 export default function AgentEnvironmentsTab() {
-  const { agentId } = useParams();
+  const { agentId, agent } = useAgentRoute();
   const navigate = useNavigate();
   const {
     data: envs,
     isLoading,
     isError,
     error,
-  } = useAgentEnvironments(agentId);
+  } = useAgentEnvironments(agentId, {
+    // The agent_definition_id filter ships with environment_count; asking
+    // before then would list every environment in the workspace.
+    enabled: agent?.environmentCount != null,
+  });
 
   let body;
-  if (isError) {
+  if (isError && !envs) {
     body = (
       <Typography
         sx={{ px: 2, py: 1.5, typography: "s2", color: "text.secondary" }}

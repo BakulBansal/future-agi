@@ -82,10 +82,27 @@ describe("AgentOverviewTab", () => {
     expect(screen.getByText(/^started /)).toBeInTheDocument();
   });
 
-  it("tags a timed-out run", () => {
-    runsState.current = loaded([{ ...ENVIRONMENT_RUN, status: "timed_out" }]);
+  it("treats an evaluating run as still running, with no final rate", () => {
+    runsState.current = loaded([{ ...ENVIRONMENT_RUN, status: "evaluating" }]);
     renderTab();
-    expect(screen.getByText("Timed out")).toBeInTheDocument();
+    expect(screen.getByText("Running")).toBeInTheDocument();
+    expect(
+      screen.getByTestId("pass-rate-68dedb99-42b6-46e7-8e94-b511041fa2cb"),
+    ).toHaveTextContent("—");
+  });
+
+  it("tags failed and cancelled runs", () => {
+    runsState.current = loaded([
+      { ...ENVIRONMENT_RUN, status: "failed" },
+      {
+        ...SIMULATE_RUN,
+        status: "cancelled",
+        completed_at: "2026-10-16T11:00:00Z",
+      },
+    ]);
+    renderTab();
+    expect(screen.getByText("Failed")).toBeInTheDocument();
+    expect(screen.getByText("Cancelled")).toBeInTheDocument();
   });
 
   it("opens an environment run on its environment's run page", () => {

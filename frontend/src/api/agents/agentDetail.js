@@ -142,7 +142,7 @@ export function useAgentVersion(agentId, versionId) {
   });
 }
 
-export function useAgentEnvironments(agentId) {
+export function useAgentEnvironments(agentId, { enabled = true } = {}) {
   return useQuery({
     queryKey: ["agents", "environments", agentId],
     queryFn: () =>
@@ -157,7 +157,7 @@ export function useAgentEnvironments(agentId) {
         name: e.name,
         lastRun: e.last_run ? toRun(e.last_run) : null,
       })),
-    enabled: !!agentId,
+    enabled: !!agentId && enabled,
   });
 }
 

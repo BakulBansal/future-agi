@@ -137,7 +137,7 @@ export default function AgentDefinitionTab() {
         <Skeleton variant="text" width="60%" />
       </Box>
     );
-  } else if (isError) {
+  } else if (isError && !version) {
     body = <Note>Couldn&apos;t load this version</Note>;
   } else if (details) {
     body = (

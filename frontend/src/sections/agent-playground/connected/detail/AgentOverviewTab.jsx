@@ -4,7 +4,7 @@ import { Stack, Typography } from "@mui/material";
 import { useAgentRuns } from "src/api/agents/agentDetail";
 import FitDataTable from "./FitDataTable";
 import { MONO, QuietTag, ago } from "./bits";
-import { PassRateCell, isRunning, isTimedOut, runPath } from "./runCells";
+import { PassRateCell, endTagOf, isRunning, runPath } from "./runCells";
 
 const EMPTY = "No simulations have run against this agent yet.";
 
@@ -36,7 +36,7 @@ export default function AgentOverviewTab() {
               {`Run ${r.runNumber}`}
             </Typography>
             {isRunning(r) && <QuietTag>Running</QuietTag>}
-            {isTimedOut(r) && <QuietTag>Timed out</QuietTag>}
+            {endTagOf(r) && <QuietTag>{endTagOf(r)}</QuietTag>}
           </Stack>
         ),
       },
@@ -96,7 +96,7 @@ export default function AgentOverviewTab() {
   );
 
   let body;
-  if (isError) {
+  if (isError && !runs) {
     body = (
       <Typography sx={{ py: 1.5, typography: "s2", color: "text.secondary" }}>
         {errorText(error)}

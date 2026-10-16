@@ -1,29 +1,31 @@
 import PropTypes from "prop-types";
-import React, { useEffect, useState } from "react";
+import React, { useState } from "react";
 import { Box, Stack, Switch, Typography } from "@mui/material";
 import {
   useAgentVersion,
   useSetObservability,
 } from "src/api/agents/agentDetail";
 
+const NOT_YET = "Turning observability on or off here is coming soon";
+
 /**
- * Observability on/off for the agent. Starts from the agent's
- * observability_enabled, or its active version's switch on a backend that
- * doesn't send that yet. A refused change snaps back and says why.
+ * Observability on/off for the agent, from its observability_enabled. A
+ * backend that doesn't send that yet can't change it either, so the switch
+ * shows the active version's saved state, read-only. A refused change snaps
+ * back and says why.
  */
 export default function ObservabilityToggle({ agent }) {
-  const active = useAgentVersion(agent.id, agent.activeVersionId);
-  const saved =
-    agent.observabilityEnabled ??
-    active.data?.config?.observability_enabled ??
-    false;
+  const supported = agent.observabilityEnabled != null;
+  const active = useAgentVersion(
+    agent.id,
+    supported ? null : agent.activeVersionId,
+  );
+  const saved = supported
+    ? agent.observabilityEnabled
+    : !!active.data?.config?.observability_enabled;
   const [override, setOverride] = useState(null);
   const [error, setError] = useState(null);
   const mutation = useSetObservability(agent.id);
-
-  useEffect(() => {
-    setOverride(null);
-  }, [agent.observabilityEnabled]);
 
   const checked = override ?? saved;
   const change = (next) => {
@@ -32,6 +34,8 @@ export default function ObservabilityToggle({ agent }) {
     mutation.mutate(
       { enabled: next },
       {
+        // The refetched agent is the truth once the change is accepted.
+        onSuccess: () => setOverride(null),
         onError: (e) => {
           setOverride(null);
           setError(e?.message || "Couldn't change observability");
@@ -39,6 +43,12 @@ export default function ObservabilityToggle({ agent }) {
       },
     );
   };
+
+  let caption;
+  if (error) caption = error;
+  else if (!supported) caption = NOT_YET;
+  else if (checked) caption = "Production calls land in Observe";
+  else caption = "Not watched — you only see what simulations find";
 
   return (
     <Box
@@ -62,16 +72,13 @@ export default function ObservabilityToggle({ agent }) {
               color: error ? "#DC2626" : "text.subtitle",
             }}
           >
-            {error ||
-              (checked
-                ? "Production calls land in Observe"
-                : "Not watched — you only see what simulations find")}
+            {caption}
           </Typography>
         </Box>
         <Switch
           size="small"
           checked={checked}
-          disabled={mutation.isPending}
+          disabled={!supported || mutation.isPending}
           onChange={(e) => change(e.target.checked)}
           inputProps={{ "aria-label": "Observability" }}
         />
