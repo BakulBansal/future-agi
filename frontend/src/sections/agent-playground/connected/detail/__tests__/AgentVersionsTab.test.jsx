@@ -147,10 +147,10 @@ describe("AgentVersionsTab", () => {
       "aria-current",
       "true",
     );
-    // The filled dot marks the latest version, not whichever row is first.
+    // The filled dot marks the version the page is showing, like a radio.
     const dots = screen.getAllByTestId("version-dot");
-    expect(dots[0]).not.toHaveAttribute("data-latest");
-    expect(dots[1]).toHaveAttribute("data-latest", "true");
+    expect(dots[0]).toHaveAttribute("data-selected", "true");
+    expect(dots[1]).not.toHaveAttribute("data-selected");
 
     const list = screen.getByTestId("versions-scroll");
     Object.defineProperty(list, "scrollTop", {

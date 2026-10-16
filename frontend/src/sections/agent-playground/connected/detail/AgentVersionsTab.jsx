@@ -182,16 +182,16 @@ export default function AgentVersionsTab() {
                 <Stack alignItems="center" sx={{ flexShrink: 0, pt: 0.25 }}>
                   <Box
                     data-testid="version-dot"
-                    data-latest={v.isLatest ? "true" : undefined}
+                    data-selected={v.id === versionId ? "true" : undefined}
                     sx={{
                       width: 10,
                       height: 10,
                       borderRadius: "50%",
-                      bgcolor: v.isLatest ? "primary.main" : "transparent",
+                      bgcolor:
+                        v.id === versionId ? "primary.main" : "transparent",
                       border: "2px solid",
-                      borderColor: v.isLatest
-                        ? "primary.main"
-                        : "text.disabled",
+                      borderColor:
+                        v.id === versionId ? "primary.main" : "text.disabled",
                     }}
                   />
                   {i < versions.length - 1 && (
