@@ -469,6 +469,15 @@ const WidgetEditorView = lazyWithRetry(
 const Agents = lazyWithRetry(
   () => import("src/sections/agent-playground/Agents"),
 );
+const AgentsIndexRedirect = lazyWithRetry(
+  () => import("src/sections/agent-playground/AgentsIndexRedirect"),
+);
+const ConnectedAgentsTab = lazyWithRetry(
+  () => import("src/sections/agent-playground/ConnectedAgentsTab"),
+);
+const PlaygroundAgentsTab = lazyWithRetry(
+  () => import("src/sections/agent-playground/PlaygroundAgentsTab"),
+);
 const AgentPlayground = lazyWithRetry(
   () => import("src/sections/agent-playground/AgentPlayground"),
 );
@@ -1268,8 +1277,12 @@ export const dashboardRoutes = (
       path: "agents",
       children: [
         {
-          index: true,
           element: <Agents />,
+          children: [
+            { index: true, element: <AgentsIndexRedirect /> },
+            { path: "connected", element: <ConnectedAgentsTab /> },
+            { path: "playground", element: <PlaygroundAgentsTab /> },
+          ],
         },
         {
           path: "playground/:agentId",

@@ -1,24 +1,23 @@
-import React from "react";
+import React, { Suspense } from "react";
 import { Helmet } from "react-helmet-async";
-import { useNavigate, useSearchParams } from "react-router-dom";
-import { Box, Stack, Tab, Typography } from "@mui/material";
+import { Outlet, useMatch, useNavigate } from "react-router-dom";
+import { Box, CircularProgress, Stack, Tab, Typography } from "@mui/material";
 import Iconify from "src/components/iconify";
 import { SegmentedTabs } from "src/components/tabs/tabs";
 import CustomTooltip from "src/components/tooltip/CustomTooltip";
-import AgentView from "./AgentView";
-import ConnectedAgentsView from "./connected/ConnectedAgentsView";
 import CreateAgentsButton from "./components/CreateAgentsButton";
 import useCanEditAgent from "./hooks/useCanEditAgent";
-import { CONNECT_AGENT_PATH, resolveAgentsTab } from "./agentsTabs";
+import { agentsTabPath, resolveAgentsTab } from "./agentsTabs";
 
 /**
  * Agents — the ones built here in the Playground, and the ones that live
- * elsewhere and were connected to run simulations against.
+ * elsewhere and were connected to run simulations against. Each tab is its
+ * own route, rendered into the Outlet.
  */
 export default function AgentsLanding() {
-  const [params, setParams] = useSearchParams();
   const navigate = useNavigate();
-  const tab = resolveAgentsTab(params.get("tab"));
+  const match = useMatch(`${agentsTabPath(":tab")}/*`);
+  const tab = resolveAgentsTab(match?.params.tab);
   const { canCreate } = useCanEditAgent();
 
   return (
@@ -64,7 +63,7 @@ export default function AgentsLanding() {
         >
           <SegmentedTabs
             value={tab}
-            onChange={(_, v) => setParams({ tab: v }, { replace: true })}
+            onChange={(_, v) => navigate(agentsTabPath(v))}
           >
             <Tab value="connected" label="Connected agents" disableRipple />
             <Tab value="playground" label="Agent Playground" disableRipple />
@@ -80,13 +79,15 @@ export default function AgentsLanding() {
             flexDirection: "column",
           }}
         >
-          {tab === "playground" ? (
-            <AgentView embedded />
-          ) : (
-            <ConnectedAgentsView
-              onConnect={() => navigate(CONNECT_AGENT_PATH)}
-            />
-          )}
+          <Suspense
+            fallback={
+              <Box sx={{ display: "flex", justifyContent: "center", p: 4 }}>
+                <CircularProgress size={24} />
+              </Box>
+            }
+          >
+            <Outlet />
+          </Suspense>
         </Box>
       </Box>
     </>

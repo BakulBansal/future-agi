@@ -1,10 +1,30 @@
 import { describe, it, expect, vi } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { HelmetProvider } from "react-helmet-async";
-import { MemoryRouter, useLocation } from "react-router-dom";
+import {
+  MemoryRouter,
+  Route,
+  Routes,
+  useLocation,
+  useNavigate,
+} from "react-router-dom";
 import AgentsLanding from "../AgentsLanding";
-import { PLAYGROUND_AGENTS_PATH, resolveAgentsTab } from "../agentsTabs";
+import AgentsIndexRedirect from "../AgentsIndexRedirect";
+import ConnectedAgentsTab from "../ConnectedAgentsTab";
+import PlaygroundAgentsTab from "../PlaygroundAgentsTab";
+import {
+  CONNECTED_AGENTS_PATH,
+  PLAYGROUND_AGENTS_PATH,
+  agentsTabPath,
+  resolveAgentsTab,
+} from "../agentsTabs";
 import AgentListView from "../AgentListView/AgentListView";
 
 vi.mock("../AgentView", () => ({
@@ -14,7 +34,13 @@ vi.mock("../AgentView", () => ({
 }));
 
 vi.mock("../connected/ConnectedAgentsView", () => ({
-  default: () => <div data-testid="connected-list" />,
+  default: ({ onConnect }) => (
+    <div data-testid="connected-list">
+      <button type="button" onClick={onConnect}>
+        Connect an agent
+      </button>
+    </div>
+  ),
 }));
 
 vi.mock("../components/CreateAgentsButton", () => ({
@@ -48,13 +74,28 @@ vi.mock("src/utils/axios", () => ({
   endpoints: { agentPlayground: { listGraphs: "/graphs/" } },
 }));
 
-let currentSearch = "";
+let currentLocation = null;
+let goBack = () => {};
 const LocationProbe = () => {
-  currentSearch = useLocation().search;
+  currentLocation = useLocation();
+  const navigate = useNavigate();
+  goBack = () => navigate(-1);
   return null;
 };
 
-const renderAt = (url, ui = <AgentsLanding />) =>
+// Mirrors the agents block in routes/sections/dashboard.jsx.
+const agentsRoutes = (
+  <Routes>
+    <Route path="/dashboard/agents" element={<AgentsLanding />}>
+      <Route index element={<AgentsIndexRedirect />} />
+      <Route path="connected" element={<ConnectedAgentsTab />} />
+      <Route path="playground" element={<PlaygroundAgentsTab />} />
+    </Route>
+    <Route path="*" element={<div data-testid="elsewhere" />} />
+  </Routes>
+);
+
+const renderAt = (url, ui = agentsRoutes) =>
   render(
     <HelmetProvider>
       <QueryClientProvider client={new QueryClient()}>
@@ -77,33 +118,50 @@ describe("resolveAgentsTab", () => {
   });
 });
 
-describe("PLAYGROUND_AGENTS_PATH", () => {
-  it("opens the Agents page on the Agent Playground tab", () => {
-    const url = new URL(PLAYGROUND_AGENTS_PATH, "http://localhost");
-    expect(url.pathname).toBe("/dashboard/agents");
-    expect(resolveAgentsTab(url.searchParams.get("tab"))).toBe("playground");
+describe("agents tab paths", () => {
+  it("gives each tab its own path", () => {
+    expect(CONNECTED_AGENTS_PATH).toBe("/dashboard/agents/connected");
+    expect(PLAYGROUND_AGENTS_PATH).toBe("/dashboard/agents/playground");
+    expect(agentsTabPath("connected")).toBe(CONNECTED_AGENTS_PATH);
+    expect(agentsTabPath("playground")).toBe(PLAYGROUND_AGENTS_PATH);
+  });
+});
+
+describe("AgentsIndexRedirect", () => {
+  it("sends the bare Agents page to Connected agents", async () => {
+    renderAt("/dashboard/agents");
+    await screen.findByTestId("connected-list");
+    expect(currentLocation.pathname).toBe("/dashboard/agents/connected");
+    expect(currentLocation.search).toBe("");
+  });
+
+  it("sends a legacy ?tab=playground link to the Playground path", async () => {
+    renderAt("/dashboard/agents?tab=playground");
+    await screen.findByTestId("playground-list");
+    expect(currentLocation.pathname).toBe("/dashboard/agents/playground");
+    expect(currentLocation.search).toBe("");
+  });
+
+  it("sends an unknown legacy tab to Connected agents", async () => {
+    renderAt("/dashboard/agents?tab=garbage");
+    await screen.findByTestId("connected-list");
+    expect(currentLocation.pathname).toBe("/dashboard/agents/connected");
+  });
+
+  it("keeps other query params when it redirects", async () => {
+    renderAt("/dashboard/agents?tab=connected&moved=agent-definitions");
+    await screen.findByTestId("connected-list");
+    expect(currentLocation.pathname).toBe("/dashboard/agents/connected");
+    expect(currentLocation.search).toBe("?moved=agent-definitions");
   });
 });
 
 describe("AgentsLanding", () => {
-  it("lands on Connected agents with no tab in the URL", () => {
-    renderAt("/dashboard/agents");
+  it("selects the tab named in the path", () => {
+    renderAt("/dashboard/agents/playground");
     expect(
-      screen.getByRole("tab", { name: "Connected agents" }),
+      screen.getByRole("tab", { name: "Agent Playground" }),
     ).toHaveAttribute("aria-selected", "true");
-    expect(screen.getByTestId("connected-list")).toBeInTheDocument();
-    expect(screen.queryByTestId("playground-list")).toBeNull();
-  });
-
-  it("falls back to Connected agents for an unknown tab", () => {
-    renderAt("/dashboard/agents?tab=garbage");
-    expect(screen.getByTestId("connected-list")).toBeInTheDocument();
-  });
-
-  it("switches to the Playground and records it in the URL", () => {
-    renderAt("/dashboard/agents?tab=connected");
-    fireEvent.click(screen.getByRole("tab", { name: "Agent Playground" }));
-    expect(currentSearch).toBe("?tab=playground");
     expect(screen.getByTestId("playground-list")).toHaveAttribute(
       "data-embedded",
       "true",
@@ -111,8 +169,28 @@ describe("AgentsLanding", () => {
     expect(screen.queryByTestId("connected-list")).toBeNull();
   });
 
+  it("switches tabs by path, and Back returns to the previous tab", async () => {
+    renderAt("/dashboard/agents/connected");
+    fireEvent.click(screen.getByRole("tab", { name: "Agent Playground" }));
+
+    await screen.findByTestId("playground-list");
+    expect(currentLocation.pathname).toBe("/dashboard/agents/playground");
+    expect(currentLocation.search).toBe("");
+
+    act(() => goBack());
+    await screen.findByTestId("connected-list");
+    expect(currentLocation.pathname).toBe("/dashboard/agents/connected");
+  });
+
+  it("sends Connect an agent to the environments build page", () => {
+    renderAt("/dashboard/agents/connected");
+    fireEvent.click(screen.getByRole("button", { name: "Connect an agent" }));
+    expect(currentLocation.pathname).toBe("/dashboard/simulate/environments");
+    expect(currentLocation.search).toBe("?tab=build");
+  });
+
   it("explains the page in a CustomTooltip on the header info icon", () => {
-    renderAt("/dashboard/agents");
+    renderAt("/dashboard/agents/connected");
     const tip = screen
       .getAllByTestId("custom-tooltip")
       .find((t) =>
@@ -126,7 +204,7 @@ describe("AgentsLanding", () => {
   });
 
   it("shows the Agents header and the Create Agents button", () => {
-    renderAt("/dashboard/agents");
+    renderAt("/dashboard/agents/connected");
     expect(screen.getByText("Agents")).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: "Create Agents" }),
@@ -136,7 +214,7 @@ describe("AgentsLanding", () => {
 
 describe("AgentListView embedded", () => {
   it("drops its own Agent Playground header and docs link", async () => {
-    renderAt("/dashboard/agents?tab=playground", <AgentListView embedded />);
+    renderAt("/dashboard/agents/playground", <AgentListView embedded />);
     await waitFor(() =>
       expect(screen.getByPlaceholderText(/search/i)).toBeInTheDocument(),
     );
