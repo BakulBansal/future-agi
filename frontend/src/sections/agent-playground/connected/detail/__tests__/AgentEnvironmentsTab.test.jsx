@@ -58,6 +58,7 @@ beforeEach(() => {
       {
         id: "e5391b8a",
         name: "ride-voice-agent",
+        status: "ready",
         lastRun: toRun({
           ...ENVIRONMENT_RUN,
           outcome_passed: 8,
@@ -65,19 +66,33 @@ beforeEach(() => {
           completed_at: twoHoursAgo,
         }),
       },
-      { id: "e9999999", name: "Refund edge cases", lastRun: null },
+      {
+        id: "e9999999",
+        name: "Refund edge cases",
+        status: "failed",
+        lastRun: null,
+      },
     ],
   };
 });
 
 describe("AgentEnvironmentsTab", () => {
-  it("has the contract's columns and no Status or actions", () => {
+  it("has the contract's columns plus Status, and no actions", () => {
     renderTab();
-    ["Environment", "Testing", "Last result"].forEach((h) =>
+    ["Environment", "Status", "Testing", "Last result"].forEach((h) =>
       expect(screen.getByText(h)).toBeInTheDocument(),
     );
-    expect(screen.queryByText("Status")).toBeNull();
     expect(screen.queryByText("Open")).toBeNull();
+  });
+
+  it("shows each environment's status like My Environments does", () => {
+    renderTab();
+    expect(screen.getByTestId("env-status-e5391b8a")).toHaveTextContent(
+      "Ready",
+    );
+    expect(screen.getByTestId("env-status-e9999999")).toHaveTextContent(
+      "Failed",
+    );
   });
 
   it("shows the version tested and the last result", () => {

@@ -4,11 +4,12 @@ import { useNavigate } from "react-router-dom";
 import { Box, Skeleton, Typography } from "@mui/material";
 import { useAgentEnvironments } from "src/api/agents/agentDetail";
 import { paths } from "src/routes/paths";
+import StatusPill from "src/sections/simulate/environments/components/StatusPill";
 import { Card, LineSkeleton, Row } from "./bits";
 import { MONO, ago, rateTone } from "./format";
 import useAgentRoute from "./useAgentRoute";
 
-const COLUMNS = ["Environment", "Testing", "Last result"];
+const COLUMNS = ["Environment", "Status", "Testing", "Last result"];
 const SKELETON_ROWS = 3;
 
 function LastResult({ env }) {
@@ -77,8 +78,15 @@ export default function AgentEnvironmentsTab() {
                 width={140}
                 data-testid="environment-row-skeleton"
               />,
-              <Skeleton key="testing" width={24} />,
-              <Skeleton key="last" width={150} />,
+              <Skeleton
+                key="status"
+                variant="rounded"
+                width={62}
+                height={24}
+                sx={{ borderRadius: 999 }}
+              />,
+              <LineSkeleton key="testing" width={24} />,
+              <LineSkeleton key="last" width={150} />,
             ]}
           />
         ))}
@@ -105,6 +113,13 @@ export default function AgentEnvironmentsTab() {
             cells={[
               <Box component="span" key="name" sx={{ fontWeight: 600 }}>
                 {env.name}
+              </Box>,
+              <Box
+                key="status"
+                data-testid={`env-status-${env.id}`}
+                sx={{ display: "flex" }}
+              >
+                <StatusPill status={env.status} />
               </Box>,
               <Box component="span" key="testing" sx={{ fontFamily: MONO }}>
                 {env.lastRun?.agentVersion

@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import axios, { endpoints } from "src/utils/axios";
 import { listHarnessEnvironments } from "src/api/simulate-environments/harnessEnvironments";
+import { envStatusFor } from "src/sections/simulate/environments/helpers/harnessJobToRow";
 
 // Agent detail page data (agent pages contract, sections 2-6).
 
@@ -140,6 +141,8 @@ export function useAgentEnvironments(agentId) {
       (d?.results ?? []).map((e) => ({
         id: e.id,
         name: e.name,
+        // Mapped like the My Environments table: a built environment is Ready.
+        status: envStatusFor(e.stage, e.status),
         lastRun: e.last_run ? toRun(e.last_run) : null,
       })),
     enabled: !!agentId,

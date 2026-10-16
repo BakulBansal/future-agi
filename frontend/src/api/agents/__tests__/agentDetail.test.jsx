@@ -235,9 +235,15 @@ describe("hooks", () => {
       {
         id: "e5391b8a",
         name: "ride-voice-agent",
+        status: "ready",
         lastRun: toRun(ENVIRONMENT_RUN),
       },
-      { id: "e9999999", name: "Refund edge cases", lastRun: null },
+      {
+        id: "e9999999",
+        name: "Refund edge cases",
+        status: "failed",
+        lastRun: null,
+      },
     ]);
   });
 

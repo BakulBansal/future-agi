@@ -238,8 +238,20 @@ export const AGENT_ENVIRONMENTS = {
   total_pages: 1,
   current_page: 1,
   results: [
-    { id: "e5391b8a", name: "ride-voice-agent", last_run: ENVIRONMENT_RUN },
-    { id: "e9999999", name: "Refund edge cases", last_run: null },
+    {
+      id: "e5391b8a",
+      name: "ride-voice-agent",
+      stage: "completed",
+      status: "completed",
+      last_run: ENVIRONMENT_RUN,
+    },
+    {
+      id: "e9999999",
+      name: "Refund edge cases",
+      stage: "failed",
+      status: "failed",
+      last_run: null,
+    },
   ],
 };
 
