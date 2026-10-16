@@ -204,7 +204,10 @@ describe("AgentDefinitionTab", () => {
     axios.put.mockResolvedValue({ data: { message: "ok" } });
     renderAt(HOSTED_AGENT_DETAIL);
     await screen.findByRole("checkbox", { name: "Observability" });
-    fireEvent.click(screen.getByText("Observability"));
+    const label = screen.getByText("Observability");
+    // Quick clicks on the label shouldn't select its text.
+    expect(label.closest("label")).toHaveStyle({ userSelect: "none" });
+    fireEvent.click(label);
     await waitFor(() =>
       expect(axios.put).toHaveBeenCalledWith(
         `/simulate/agent-definitions/${HOSTED_AGENT_DETAIL.id}/edit/`,

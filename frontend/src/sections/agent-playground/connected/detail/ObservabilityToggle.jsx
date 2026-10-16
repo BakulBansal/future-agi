@@ -81,6 +81,7 @@ export default function ObservabilityToggle({ agent }) {
           alignItems="center"
           sx={{
             flexShrink: 0,
+            userSelect: "none",
             cursor: supported && !mutation.isPending ? "pointer" : "default",
           }}
         >
