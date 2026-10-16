@@ -141,3 +141,30 @@ Row.propTypes = {
   header: PropTypes.bool,
   onClick: PropTypes.func,
 };
+
+export function QuietTag({ children }) {
+  return (
+    <Box
+      component="span"
+      sx={{
+        display: "inline-flex",
+        alignItems: "center",
+        px: 0.625,
+        height: 18,
+        borderRadius: 0.75,
+        flexShrink: 0,
+        border: "1px solid",
+        borderColor: "divider",
+        typography: "s3",
+        fontSize: 11,
+        fontWeight: 600,
+        lineHeight: 1,
+        whiteSpace: "nowrap",
+        color: "text.secondary",
+      }}
+    >
+      {children}
+    </Box>
+  );
+}
+QuietTag.propTypes = { children: PropTypes.node };
