@@ -12,7 +12,13 @@ const runsState = { current: {} };
 
 vi.mock("src/api/agents/agentDetail", async () => {
   const actual = await vi.importActual("src/api/agents/agentDetail");
-  return { ...actual, useAgentRuns: () => runsState.current };
+  return {
+    ...actual,
+    useAgentRuns: (...args) => {
+      runsState.args = args;
+      return runsState.current;
+    },
+  };
 });
 
 let currentLocation;
@@ -46,6 +52,11 @@ beforeEach(() => {
 });
 
 describe("AgentOverviewTab", () => {
+  it("asks for the 15 newest runs", () => {
+    renderTab();
+    expect(runsState.args).toEqual(["a1", { limit: 15 }]);
+  });
+
   it("shows only Recent runs with the ticket's columns", () => {
     renderTab();
     expect(screen.getByText("Recent runs")).toBeInTheDocument();

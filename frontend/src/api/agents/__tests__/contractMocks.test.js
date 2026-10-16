@@ -74,6 +74,19 @@ describe("mockAgentRuns", () => {
     expect([...times].sort((a, b) => b - a)).toEqual(times);
   });
 
+  it("fills up to the limit asked for", () => {
+    const counts = Array.from(
+      { length: 20 },
+      (_, i) =>
+        mockAgentRuns(
+          withDetailContractFields({ ...sdkAgent, id: `agent-${i}` }),
+          15,
+        ).results.length,
+    );
+    expect(Math.max(...counts)).toBeGreaterThan(5);
+    expect(Math.max(...counts)).toBeLessThanOrEqual(15);
+  });
+
   it("numbers runs from the oldest, so the newest has the highest number", () => {
     const agent = withDetailContractFields(sdkAgent);
     const { results } = mockAgentRuns(agent, 5);

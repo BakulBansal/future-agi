@@ -105,7 +105,7 @@ const run = (agent, i, env, total = 1) => {
 /** Recent runs (section 3), newest first. Hosted agents get old Simulate runs too. */
 export const mockAgentRuns = (agent, limit = 5) => {
   const envs = environmentsOf(agent);
-  const count = 1 + (hashOf(agent.id) % 5);
+  const count = 1 + (hashOf(agent.id) % limit);
   const results = Array.from({ length: Math.min(count, limit) }, (_, i) =>
     run(
       agent,

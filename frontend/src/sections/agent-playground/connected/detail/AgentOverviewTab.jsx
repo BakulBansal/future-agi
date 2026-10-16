@@ -7,17 +7,23 @@ import { MONO, QuietTag, ago } from "./bits";
 import { PassRateCell, endTagOf, isRunning, runPath } from "./runCells";
 
 const EMPTY = "No simulations have run against this agent yet.";
+const RECENT_RUNS = 15;
 
 const errorText = (error) =>
   error?.code === "runs_unavailable"
     ? error.message
     : "Couldn't load recent runs";
 
-/** Overview: the agent's five newest runs, across environments and Simulate. */
+/** Overview: the agent's newest runs, across environments and Simulate. */
 export default function AgentOverviewTab() {
   const { agentId } = useParams();
   const navigate = useNavigate();
-  const { data: runs, isLoading, isError, error } = useAgentRuns(agentId);
+  const {
+    data: runs,
+    isLoading,
+    isError,
+    error,
+  } = useAgentRuns(agentId, { limit: RECENT_RUNS });
 
   const columns = useMemo(
     () => [
