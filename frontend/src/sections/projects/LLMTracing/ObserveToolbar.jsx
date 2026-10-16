@@ -103,6 +103,8 @@ const ObserveToolbar = ({
   allMatching,
   selectedCountIsLowerBound,
   // Add Evals button
+  excludeSimulationCalls,
+  onToggleSimulationCalls,
   graphFilters,
   // View persistence
   onResetView,
@@ -526,6 +528,8 @@ const ObserveToolbar = ({
             onResetView={onResetView}
             onSetDefaultView={onSetDefaultView}
             isSimulator={isSimulator}
+            excludeSimulationCalls={excludeSimulationCalls}
+            onToggleSimulationCalls={onToggleSimulationCalls}
           />
 
           {/* Add Evals — opens task create with project + filters pre-filled */}
@@ -602,6 +606,8 @@ ObserveToolbar.propTypes = {
   bulkActions: PropTypes.array,
   onAddEvals: PropTypes.func,
   isSimulator: PropTypes.bool,
+  excludeSimulationCalls: PropTypes.bool,
+  onToggleSimulationCalls: PropTypes.func,
   onApplyExtraFilters: PropTypes.func,
   onClearExtraFilters: PropTypes.func,
   onClearCompareExtraFilters: PropTypes.func,
