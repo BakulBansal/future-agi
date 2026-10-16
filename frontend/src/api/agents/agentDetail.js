@@ -59,7 +59,7 @@ export const toRun = (raw) => ({
   completedAt: raw.completed_at ?? null,
 });
 
-const toVersion = (v) => ({
+export const toVersion = (v) => ({
   id: v.id,
   number: v.version_number,
   label: v.version_name_display || `v${v.version_number}`,

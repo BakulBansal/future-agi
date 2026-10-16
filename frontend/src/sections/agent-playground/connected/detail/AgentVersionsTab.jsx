@@ -1,7 +1,10 @@
 import PropTypes from "prop-types";
-import React from "react";
+import React, { useMemo } from "react";
 import { format } from "date-fns";
 import { Box, Stack, Typography } from "@mui/material";
+import { useScrollEnd } from "src/hooks/use-scroll-end";
+import { useAgentDefinitionVersions } from "src/api/agent-definition/agent-definition-version";
+import { toVersion } from "src/api/agents/agentDetail";
 import { alpha } from "@mui/material/styles";
 import ComingSoonPreview from "./ComingSoonPreview";
 import CompareVersionsPreview from "./previews/CompareVersionsPreview";
@@ -37,11 +40,31 @@ function Chip({ label, tone }) {
 
 Chip.propTypes = { label: PropTypes.string, tone: PropTypes.string };
 
-/** Versions: a read-only timeline, and a preview of Compare. */
+/**
+ * Versions: a read-only timeline from the paginated versions list (the one
+ * the Agent Definition page uses), newest first, and a preview of Compare.
+ */
 export default function AgentVersionsTab() {
-  const { agent } = useAgentRoute();
+  const { agentId, agent } = useAgentRoute();
+  const { data, fetchNextPage, hasNextPage, isFetchingNextPage } =
+    useAgentDefinitionVersions({ selectedAgentId: agentId });
+  const versions = useMemo(
+    () => (data?.pages ?? []).flatMap((p) => p.results ?? []).map(toVersion),
+    [data],
+  );
+  // Like the Agent Definition page: the next page loads at the list's end.
+  // The listener attaches once the list exists, so it waits for the agent.
+  const scrollRef = useScrollEnd(() => {
+    if (hasNextPage && !isFetchingNextPage) fetchNextPage();
+  }, [
+    hasNextPage,
+    isFetchingNextPage,
+    fetchNextPage,
+    !!agent,
+    versions.length,
+  ]);
   if (!agent) return null;
-  const { versions } = agent;
+  const total = agent.versionCount;
 
   return (
     <Box
@@ -52,11 +75,18 @@ export default function AgentVersionsTab() {
         alignItems: "start",
       }}
     >
-      <Card
-        title={`${versions.length} version${versions.length === 1 ? "" : "s"}`}
-      >
-        <Box sx={{ px: 2, py: 1.75 }}>
-          {versions.length === 0 && (
+      <Card title={`${total} version${total === 1 ? "" : "s"}`}>
+        <Box
+          ref={scrollRef}
+          data-testid="versions-scroll"
+          sx={{
+            px: 2,
+            py: 1.75,
+            maxHeight: "calc(100vh - 300px)",
+            overflowY: "auto",
+          }}
+        >
+          {data && versions.length === 0 && (
             <Typography sx={{ typography: "s2", color: "text.secondary" }}>
               No versions yet
             </Typography>

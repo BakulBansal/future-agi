@@ -179,6 +179,14 @@ describe("AgentDetailLayout", () => {
     expect(currentLocation.pathname).toBe(`${base(HOSTED)}/environments`);
   });
 
+  it("counts versions from version_count, not the loaded list", async () => {
+    serve({ ...HOSTED, version_count: 12 });
+    renderAt(`${base(HOSTED)}/overview`);
+    expect(
+      await screen.findByRole("tab", { name: "Versions 12" }),
+    ).toBeInTheDocument();
+  });
+
   it("has no version selector", async () => {
     serve(HOSTED);
     renderAt(`${base(HOSTED)}/overview`);

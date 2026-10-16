@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import axios from "src/utils/axios";
@@ -9,7 +9,10 @@ import AgentVersionsTab from "../AgentVersionsTab";
 vi.mock("src/utils/axios", () => ({
   default: { get: vi.fn() },
   endpoints: {
-    agentDefinitions: { detail: (id) => `/simulate/agent-definitions/${id}/` },
+    agentDefinitions: {
+      detail: (id) => `/simulate/agent-definitions/${id}/`,
+      versions: (id) => `/simulate/agent-definitions/${id}/versions/`,
+    },
   },
 }));
 
@@ -35,12 +38,69 @@ const renderTab = () =>
     </QueryClientProvider>,
   );
 
+// The paginated versions list, newest first, as GET .../versions/ sends it.
+const [V2, V1] = [...HOSTED_AGENT_DETAIL.versions].sort(
+  (a, b) => b.version_number - a.version_number,
+);
+const servePages = (pages) =>
+  axios.get.mockImplementation((url, config) => {
+    if (url.endsWith("/versions/")) {
+      const page = config.params.page;
+      return Promise.resolve({
+        data: {
+          count: pages.flat().length,
+          next: page < pages.length ? "next" : null,
+          previous: null,
+          total_pages: pages.length,
+          current_page: page,
+          results: pages[page - 1],
+        },
+      });
+    }
+    return Promise.resolve({ data: HOSTED_AGENT_DETAIL });
+  });
+
 beforeEach(() => {
   axios.get.mockReset();
-  axios.get.mockResolvedValue({ data: HOSTED_AGENT_DETAIL });
+  servePages([[V2, V1]]);
 });
 
 describe("AgentVersionsTab", () => {
+  it("reads versions from the paginated versions list", async () => {
+    renderTab();
+    await screen.findAllByTestId("version-entry");
+    expect(axios.get).toHaveBeenCalledWith(
+      `/simulate/agent-definitions/${HOSTED_AGENT_DETAIL.id}/versions/`,
+      { params: { page: 1, limit: 10 } },
+    );
+  });
+
+  it("loads older versions when the list is scrolled to the end", async () => {
+    servePages([[V2], [V1]]);
+    renderTab();
+    await screen.findAllByTestId("version-entry");
+    expect(screen.getAllByTestId("version-entry")).toHaveLength(1);
+    expect(screen.queryByRole("button")).toBeNull();
+
+    const list = screen.getByTestId("versions-scroll");
+    Object.defineProperty(list, "scrollHeight", {
+      value: 800,
+      configurable: true,
+    });
+    Object.defineProperty(list, "clientHeight", {
+      value: 300,
+      configurable: true,
+    });
+    Object.defineProperty(list, "scrollTop", {
+      value: 500,
+      configurable: true,
+    });
+    fireEvent.scroll(list);
+
+    expect(await screen.findByText("First version")).toBeInTheDocument();
+    expect(screen.getAllByTestId("version-entry")).toHaveLength(2);
+  });
+
   it("lists every version, newest first", async () => {
     renderTab();
     expect(await screen.findByText("2 versions")).toBeInTheDocument();
@@ -66,7 +126,7 @@ describe("AgentVersionsTab", () => {
     expect(within(newest).getByText(/15-10-2026/)).toBeInTheDocument();
   });
 
-  it("is read-only", async () => {
+  it("is read-only when every version is shown", async () => {
     renderTab();
     await screen.findByText("2 versions");
     expect(screen.queryByRole("button")).toBeNull();
