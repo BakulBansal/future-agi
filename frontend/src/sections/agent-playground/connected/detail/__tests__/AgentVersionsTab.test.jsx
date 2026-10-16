@@ -75,6 +75,64 @@ describe("AgentVersionsTab", () => {
     );
   });
 
+  it("shows skeleton rows while the first page loads", async () => {
+    axios.get.mockImplementation((url) =>
+      url.endsWith("/versions/")
+        ? new Promise(() => {})
+        : Promise.resolve({ data: HOSTED_AGENT_DETAIL }),
+    );
+    renderTab();
+    expect(
+      (await screen.findAllByTestId("version-skeleton")).length,
+    ).toBeGreaterThan(0);
+    expect(screen.queryByTestId("version-entry")).toBeNull();
+    expect(screen.queryByText("No versions yet")).toBeNull();
+  });
+
+  it("adds skeleton rows below the list while the next page loads", async () => {
+    let releasePage2;
+    axios.get.mockImplementation((url, config) => {
+      if (!url.endsWith("/versions/"))
+        return Promise.resolve({ data: HOSTED_AGENT_DETAIL });
+      if (config.params.page === 1) {
+        return Promise.resolve({
+          data: { count: 2, next: "next", current_page: 1, results: [V2] },
+        });
+      }
+      return new Promise((resolve) => {
+        releasePage2 = () =>
+          resolve({
+            data: { count: 2, next: null, current_page: 2, results: [V1] },
+          });
+      });
+    });
+    renderTab();
+    await screen.findAllByTestId("version-entry");
+    expect(screen.queryByTestId("version-skeleton")).toBeNull();
+
+    const list = screen.getByTestId("versions-scroll");
+    Object.defineProperty(list, "scrollHeight", {
+      value: 800,
+      configurable: true,
+    });
+    Object.defineProperty(list, "clientHeight", {
+      value: 300,
+      configurable: true,
+    });
+    Object.defineProperty(list, "scrollTop", {
+      value: 500,
+      configurable: true,
+    });
+    fireEvent.scroll(list);
+
+    expect(
+      (await screen.findAllByTestId("version-skeleton")).length,
+    ).toBeGreaterThan(0);
+    releasePage2();
+    expect(await screen.findByText("First version")).toBeInTheDocument();
+    expect(screen.queryByTestId("version-skeleton")).toBeNull();
+  });
+
   it("loads older versions when the list is scrolled to the end", async () => {
     servePages([[V2], [V1]]);
     renderTab();

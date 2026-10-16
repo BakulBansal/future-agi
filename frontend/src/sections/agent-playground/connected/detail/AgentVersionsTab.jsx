@@ -1,7 +1,7 @@
 import PropTypes from "prop-types";
 import React, { useMemo } from "react";
 import { format } from "date-fns";
-import { Box, Stack, Typography } from "@mui/material";
+import { Box, Skeleton, Stack, Typography } from "@mui/material";
 import { useScrollEnd } from "src/hooks/use-scroll-end";
 import { useAgentDefinitionVersions } from "src/api/agent-definition/agent-definition-version";
 import { toVersion } from "src/api/agents/agentDetail";
@@ -40,13 +40,43 @@ function Chip({ label, tone }) {
 
 Chip.propTypes = { label: PropTypes.string, tone: PropTypes.string };
 
+// A timeline row while it loads: the dot, then label, message and date.
+function VersionSkeleton() {
+  return (
+    <Stack
+      data-testid="version-skeleton"
+      direction="row"
+      spacing={1.5}
+      sx={{ pb: 2.25 }}
+    >
+      <Skeleton
+        variant="circular"
+        width={10}
+        height={10}
+        sx={{ mt: 0.5, flexShrink: 0 }}
+      />
+      <Box flex={1} minWidth={0}>
+        <Skeleton variant="text" width="35%" height={20} />
+        <Skeleton variant="text" width="70%" height={16} />
+        <Skeleton variant="text" width="45%" height={16} />
+      </Box>
+    </Stack>
+  );
+}
+
+const skeletons = (n) =>
+  // eslint-disable-next-line react/no-array-index-key
+  Array.from({ length: n }, (_, i) => (
+    <VersionSkeleton key={`skeleton-${i}`} />
+  ));
+
 /**
  * Versions: a read-only timeline from the paginated versions list (the one
  * the Agent Definition page uses), newest first, and a preview of Compare.
  */
 export default function AgentVersionsTab() {
   const { agentId, agent } = useAgentRoute();
-  const { data, fetchNextPage, hasNextPage, isFetchingNextPage } =
+  const { data, fetchNextPage, hasNextPage, isFetchingNextPage, isLoading } =
     useAgentDefinitionVersions({ selectedAgentId: agentId });
   const versions = useMemo(
     () => (data?.pages ?? []).flatMap((p) => p.results ?? []).map(toVersion),
@@ -86,6 +116,7 @@ export default function AgentVersionsTab() {
             overflowY: "auto",
           }}
         >
+          {isLoading && skeletons(3)}
           {data && versions.length === 0 && (
             <Typography sx={{ typography: "s2", color: "text.secondary" }}>
               No versions yet
@@ -165,6 +196,7 @@ export default function AgentVersionsTab() {
               </Stack>
             );
           })}
+          {isFetchingNextPage && skeletons(2)}
         </Box>
       </Card>
       <ComingSoonPreview
