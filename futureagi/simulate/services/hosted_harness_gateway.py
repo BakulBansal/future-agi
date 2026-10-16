@@ -1036,8 +1036,18 @@ _OTEL_EXPORT_NAMES = frozenset(
 _INGEST_ALIAS_PREFIX = "FI_SIMULATION_INGEST_"
 _INGEST_API_KEY_ALIAS = f"{_INGEST_ALIAS_PREFIX}API_KEY"
 _INGEST_SECRET_KEY_ALIAS = f"{_INGEST_ALIAS_PREFIX}SECRET_KEY"
-# Refusals that fire on every unbound launch or every launch from an unlisted snapshot.
-_QUIET_EXPORT_REASONS = frozenset({"not_bound", "snapshot_unsupported"})
+# Refusals that fire on every launch that was never meant to export: unbound, from an
+# unlisted snapshot, a hosted agent, observability off or no instrumentation. They log at info
+# so the reasons someone running the platform can act on stand out at warning.
+_QUIET_EXPORT_REASONS = frozenset(
+    {
+        "not_bound",
+        "snapshot_unsupported",
+        "not_source",
+        "observability_off",
+        "not_instrumented",
+    }
+)
 _MARK_NAME = re.compile(r"(OTEL_|FI_SIMULATION_|FI_BASE_URL$)[A-Z0-9_]*")
 # Credentials ride as sandbox secrets; a document that named them would put them in job.json.
 _MARK_FORBIDDEN_NAMES = frozenset(
@@ -1326,11 +1336,12 @@ def attach_observability_export_secret_refs(
 
 
 def _ingest_key_values(organization_id: Any) -> tuple[str, ...]:
-    """Every enabled ingest key's two values, read and never created."""
+    """Every ingest key's two values, switched off or not, read and never created."""
     from accounts.models.user import OrgApiKey
 
+    # A key switched off mid-run may still be in a sandbox that another worker polls.
     rows = OrgApiKey.no_workspace_objects.filter(
-        organization_id=organization_id, type="ingest", enabled=True
+        organization_id=organization_id, type="ingest"
     ).values_list("api_key", "secret_key")
     return tuple(value for row in rows for value in row if value)
 

@@ -3675,9 +3675,9 @@ _REFUSALS = {
     "metadata_id_not_a_uuid": ({"bind": "bad_id"}, "not_bound", "info"),
     "agent_of_another_organisation": ({"bind": "other_org"}, "not_bound", "info"),
     "agent_deleted": ({"bind": "deleted"}, "not_bound", "info"),
-    "row_disabled": ({"provider": "disabled"}, "observability_off", "warning"),
-    "no_observability_row": ({"provider": "missing"}, "observability_off", "warning"),
-    "project_deleted": ({"project": "deleted"}, "observability_off", "warning"),
+    "row_disabled": ({"provider": "disabled"}, "observability_off", "info"),
+    "no_observability_row": ({"provider": "missing"}, "observability_off", "info"),
+    "project_deleted": ({"project": "deleted"}, "observability_off", "info"),
     "hidden_project_without_workspace": (
         {"hidden": "no_workspace"},
         "no_workspace",
@@ -3693,7 +3693,7 @@ _REFUSALS = {
         "ModuleNotFoundError",
         "warning",
     ),
-    "hosted_agent": ({"kind": "hosted"}, "not_source", "warning"),
+    "hosted_agent": ({"kind": "hosted"}, "not_source", "info"),
     "no_collector": ({"collector": None}, "no_collector", "warning"),
     "collector_without_a_host": (
         {"collector": "https://:8443"},
@@ -3710,11 +3710,11 @@ _REFUSALS = {
         "customer_configuration",
         "warning",
     ),
-    "provider_row_deleted": ({"provider": "deleted"}, "observability_off", "warning"),
+    "provider_row_deleted": ({"provider": "deleted"}, "observability_off", "info"),
     "project_of_another_organisation": (
         {"project": "other_org"},
         "observability_off",
-        "warning",
+        "info",
     ),
     "otel_declares_traces_endpoint_in_lower_case": (
         {"declared": {"otel_exporter_otlp_traces_endpoint": "https://theirs.example"}},
@@ -3783,7 +3783,7 @@ _REFUSALS = {
         "customer_configuration",
         "warning",
     ),
-    "not_instrumented": ({"instrumentation": "none"}, "not_instrumented", "warning"),
+    "not_instrumented": ({"instrumentation": "none"}, "not_instrumented", "info"),
     "export_key_disabled": ({"credentials": "disabled"}, "key_disabled", "warning"),
     "key_resolver_raises": ({"credentials": "raises"}, "no_key", "warning"),
     "key_resolver_answers_nothing": ({"credentials": "none"}, "no_key", "warning"),
@@ -3989,7 +3989,7 @@ def test_a_failure_after_the_key_leaves_no_alias_ref_or_host(
         credentials="fails_after_the_keys",
     )
     world.launch()
-    # The key had been read when the plan failed to build.
+    # Both key values had been read when the enabled check failed.
     assert world.credential_calls
     assert world.export_log() == [
         ("warning", {"job_id": str(world.job.id), "reason": "RuntimeError"})
@@ -4182,7 +4182,7 @@ def test_the_mark_check_accepts_only_the_documented_shape(mark, accepted):
 
 
 @pytest.mark.django_db
-def test_diagnostics_redaction_fallback_holds_every_enabled_ingest_key(
+def test_diagnostics_redaction_fallback_holds_every_ingest_key_switched_off_or_not(
     organization, workspace, user, monkeypatch
 ):
     from accounts.models.user import OrgApiKey
@@ -4221,7 +4221,8 @@ def test_diagnostics_redaction_fallback_holds_every_enabled_ingest_key(
 
     values = set(seen["secret_values"])
     assert {ingest.api_key, ingest.secret_key} <= values
-    assert not {switched_off.api_key, switched_off.secret_key} & values
+    # Switching a key off stops the export, but a running sandbox may still hold it.
+    assert {switched_off.api_key, switched_off.secret_key} <= values
     assert not {ordinary.api_key, ordinary.secret_key} & values
     # Read, never created.
     assert OrgApiKey.no_workspace_objects.filter(type="ingest").count() == before
