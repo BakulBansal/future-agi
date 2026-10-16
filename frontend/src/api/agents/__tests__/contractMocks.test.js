@@ -53,7 +53,14 @@ describe("withDetailContractFields", () => {
     const d = withDetailContractFields(hostedAgent);
     expect(d.agent_kind).toBeNull();
     expect(d.source).toBe("vapi");
-    expect(d.environment_count).toBe(0);
+  });
+
+  it("lets hosted agents be tested by environments too", () => {
+    const counts = Array.from({ length: 20 }, (_, i) =>
+      withDetailContractFields({ ...hostedAgent, id: `hosted-${i}` }),
+    ).map((d) => d.environment_count);
+    expect(Math.max(...counts)).toBeGreaterThan(0);
+    expect(Math.min(...counts)).toBe(0);
   });
 
   it("gives the same agent the same answers", () => {

@@ -54,7 +54,7 @@ export const withDetailContractFields = (raw) => {
     environment_count: fill(
       raw,
       "environment_count",
-      code ? (seed % 3) + 1 : 0,
+      code ? (seed % 3) + 1 : seed % 3,
     ),
     observability_enabled: fill(
       raw,

@@ -17,7 +17,7 @@ import {
 } from "src/api/agents/_fixtures/agentDetail";
 import AgentDetailLayout from "../AgentDetailLayout";
 import AgentDetailIndexRedirect from "../AgentDetailIndexRedirect";
-import { agentDetailPath, visibleDetailTabs } from "../agentDetailTabs";
+import { agentDetailPath } from "../agentDetailTabs";
 
 vi.mock("src/utils/axios", () => ({
   default: { get: vi.fn(), put: vi.fn() },
@@ -88,27 +88,6 @@ beforeEach(() => {
 });
 
 describe("agentDetailTabs", () => {
-  it("shows Versions for agents not built in an environment", () => {
-    expect(visibleDetailTabs(null)).toEqual([
-      "overview",
-      "definition",
-      "versions",
-    ]);
-    expect(visibleDetailTabs("hosted")).toEqual([
-      "overview",
-      "definition",
-      "versions",
-    ]);
-  });
-
-  it("shows Environments instead for code agents built in one", () => {
-    expect(visibleDetailTabs("source")).toEqual([
-      "overview",
-      "definition",
-      "environments",
-    ]);
-  });
-
   it("builds tab paths", () => {
     expect(agentDetailPath("a1")).toBe(
       "/dashboard/agents/connected/a1/overview",
@@ -169,22 +148,17 @@ describe("AgentDetailLayout", () => {
     expect(currentLocation.pathname).toBe("/dashboard/agents/connected");
   });
 
-  it("gives a hosted agent Versions and no Environments", async () => {
-    serve(HOSTED);
-    renderAt(`${base(HOSTED)}/overview`);
+  it.each([
+    ["hosted", HOSTED],
+    ["code", CODE],
+  ])("gives a %s agent both Versions and Environments", async (_, agent) => {
+    serve(agent);
+    renderAt(`${base(agent)}/overview`);
     await screen.findByRole("tab", { name: "Overview" });
     expect(screen.getByRole("tab", { name: /^Versions/ })).toBeInTheDocument();
-    expect(screen.queryByRole("tab", { name: /^Environments/ })).toBeNull();
-  });
-
-  it("gives a code agent Environments and no Versions or version selector", async () => {
-    serve(CODE);
-    renderAt(`${base(CODE)}/overview`);
-    await screen.findByRole("tab", { name: "Overview" });
     expect(
       screen.getByRole("tab", { name: /^Environments/ }),
     ).toBeInTheDocument();
-    expect(screen.queryByRole("tab", { name: /^Versions/ })).toBeNull();
   });
 
   it("shows Constraints, Improvements and Connections as disabled Coming soon tabs", async () => {
@@ -198,11 +172,11 @@ describe("AgentDetailLayout", () => {
     });
   });
 
-  it("sends a hidden tab's URL to Overview", async () => {
+  it("opens Environments on a hosted agent", async () => {
     serve(HOSTED);
     renderAt(`${base(HOSTED)}/environments`);
-    await screen.findByTestId("tab-overview");
-    expect(currentLocation.pathname).toBe(`${base(HOSTED)}/overview`);
+    await screen.findByTestId("tab-environments");
+    expect(currentLocation.pathname).toBe(`${base(HOSTED)}/environments`);
   });
 
   it("has no version selector", async () => {

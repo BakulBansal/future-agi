@@ -1,12 +1,6 @@
 import React, { Suspense } from "react";
 import { Helmet } from "react-helmet-async";
-import {
-  Navigate,
-  Outlet,
-  useLocation,
-  useMatch,
-  useNavigate,
-} from "react-router-dom";
+import { Outlet, useLocation, useMatch, useNavigate } from "react-router-dom";
 import {
   Box,
   CircularProgress,
@@ -25,7 +19,6 @@ import {
   COMING_SOON_TABS,
   DETAIL_TABS,
   agentDetailPath,
-  visibleDetailTabs,
 } from "./agentDetailTabs";
 import useAgentRoute from "./useAgentRoute";
 
@@ -34,7 +27,9 @@ const errorText = (error) =>
 
 /**
  * A connected agent: header and tabs. Each tab is its own route rendered into
- * the Outlet.
+ * the Outlet. Every agent gets Versions and Environments — there's no field
+ * yet that tells an environment-built agent from an older one — and each tab
+ * shows what its API returns.
  */
 export default function AgentDetailLayout() {
   const navigate = useNavigate();
@@ -70,11 +65,6 @@ export default function AgentDetailLayout() {
     );
   }
 
-  const visible = visibleDetailTabs(agent.agentKind);
-  if (tab && !visible.includes(tab)) {
-    return <Navigate to={`${agentDetailPath(agentId)}${search}`} replace />;
-  }
-
   const tabLabel = (t) => {
     if (t.id === "versions") return `Versions ${agent.versions.length}`;
     if (t.id === "environments" && agent.environmentCount != null) {
@@ -92,23 +82,18 @@ export default function AgentDetailLayout() {
         <AgentDetailHeader
           agent={agent}
           onBack={back}
-          onOpenEnvironments={
-            visible.includes("environments")
-              ? () =>
-                  navigate(
-                    `${agentDetailPath(agentId, "environments")}${search}`,
-                  )
-              : undefined
+          onOpenEnvironments={() =>
+            navigate(`${agentDetailPath(agentId, "environments")}${search}`)
           }
         />
         <Box sx={{ borderBottom: "1px solid", borderColor: "divider", mb: 2 }}>
           <CustomTabs
-            value={visible.includes(tab) ? tab : false}
+            value={DETAIL_TABS.some((t) => t.id === tab) ? tab : false}
             onChange={(_, v) =>
               navigate(`${agentDetailPath(agentId, v)}${search}`)
             }
           >
-            {DETAIL_TABS.filter((t) => visible.includes(t.id)).map((t) => (
+            {DETAIL_TABS.map((t) => (
               <Tab key={t.id} value={t.id} label={tabLabel(t)} disableRipple />
             ))}
             {COMING_SOON_TABS.map((label) => (
