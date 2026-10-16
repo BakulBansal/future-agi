@@ -74,16 +74,6 @@ export default function ObservabilityToggle({ agent }) {
         spacing={1}
         sx={{ px: 2, minHeight: 44 }}
       >
-        <Iconify
-          icon="solar:eye-scan-linear"
-          width={16}
-          aria-hidden="true"
-          sx={{
-            flexShrink: 0,
-            color: checked ? "success.main" : "text.subtitle",
-            transition: (t) => t.transitions.create("color"),
-          }}
-        />
         <Typography sx={{ typography: "s2", fontWeight: 600, flexShrink: 0 }}>
           Observability
         </Typography>
