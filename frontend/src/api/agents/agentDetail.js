@@ -1,6 +1,14 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import axios, { endpoints } from "src/utils/axios";
 import { listHarnessEnvironments } from "src/api/simulate-environments/harnessEnvironments";
+import {
+  AGENT_PAGES_CONTRACT_MOCKS,
+  mockAgentEnvironments,
+  mockAgentRuns,
+  mockSetObservability,
+  withDetailContractFields,
+  withVersionContractFields,
+} from "./contractMocks";
 
 // Agent detail page data (agent pages contract, sections 2-6). Fields marked
 // new in the contract may be missing on an older backend; they map to null
@@ -10,6 +18,7 @@ const unwrap = (data) => data?.result ?? data;
 
 // The runs endpoint (contract section 3) isn't in the generated contract
 // surface yet, and contracts:check rejects any reference to a path outside it.
+// While contract mocks are on the runs come from contractMocks.js.
 // TODO: once the backend ships it and contracts are regenerated, fetch
 // apiPath("/simulate/agent-definitions/{agent_id}/runs/") with { limit }.
 export class RunsUnavailableError extends Error {
@@ -104,22 +113,38 @@ export const mapVersionDetail = (raw) => ({
   config: raw.configuration_snapshot ?? {},
 });
 
+const mocking = () => AGENT_PAGES_CONTRACT_MOCKS.enabled;
+
+// Raw agent detail, with the contract's new fields filled in while mocking.
+const fetchAgentDetail = async (agentId) => {
+  const raw = unwrap(
+    (await axios.get(endpoints.agentDefinitions.detail(agentId))).data,
+  );
+  return mocking() ? withDetailContractFields(raw) : raw;
+};
+
+const agentDetailQuery = (agentId) => ({
+  queryKey: agentDetailQueryKey(agentId),
+  queryFn: () => fetchAgentDetail(agentId),
+});
+
 export function useAgentDetail(agentId) {
   return useQuery({
-    queryKey: agentDetailQueryKey(agentId),
-    queryFn: async () =>
-      unwrap(
-        (await axios.get(endpoints.agentDefinitions.detail(agentId))).data,
-      ),
+    ...agentDetailQuery(agentId),
     select: mapAgentDetail,
     enabled: !!agentId,
   });
 }
 
 export function useAgentRuns(agentId, { limit = 5 } = {}) {
+  const queryClient = useQueryClient();
   return useQuery({
     queryKey: ["agents", "runs", agentId, limit],
-    queryFn: () => Promise.reject(new RunsUnavailableError()),
+    queryFn: async () => {
+      if (!mocking()) throw new RunsUnavailableError();
+      const detail = await queryClient.fetchQuery(agentDetailQuery(agentId));
+      return mockAgentRuns(detail, limit);
+    },
     select: (d) => (d?.results ?? []).map(toRun),
     enabled: !!agentId,
     retry: false,
@@ -127,30 +152,41 @@ export function useAgentRuns(agentId, { limit = 5 } = {}) {
 }
 
 export function useAgentVersion(agentId, versionId) {
+  const queryClient = useQueryClient();
   return useQuery({
     queryKey: ["agents", "version", agentId, versionId],
-    queryFn: async () =>
-      unwrap(
+    queryFn: async () => {
+      const raw = unwrap(
         (
           await axios.get(
             endpoints.agentDefinitions.versionDetail(agentId, versionId),
           )
         ).data,
-      ),
+      );
+      if (!mocking()) return raw;
+      const detail = await queryClient.fetchQuery(agentDetailQuery(agentId));
+      return withVersionContractFields(raw, detail);
+    },
     select: mapVersionDetail,
     enabled: !!agentId && !!versionId,
   });
 }
 
 export function useAgentEnvironments(agentId, { enabled = true } = {}) {
+  const queryClient = useQueryClient();
   return useQuery({
     queryKey: ["agents", "environments", agentId],
-    queryFn: () =>
-      listHarnessEnvironments({
-        agentDefinitionId: agentId,
-        page: 1,
-        limit: 100,
-      }),
+    queryFn: async () => {
+      if (!mocking()) {
+        return listHarnessEnvironments({
+          agentDefinitionId: agentId,
+          page: 1,
+          limit: 100,
+        });
+      }
+      const detail = await queryClient.fetchQuery(agentDetailQuery(agentId));
+      return mockAgentEnvironments(detail);
+    },
     select: (d) =>
       (d?.results ?? []).map((e) => ({
         id: e.id,
@@ -164,10 +200,12 @@ export function useAgentEnvironments(agentId, { enabled = true } = {}) {
 export function useSetObservability(agentId) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ enabled }) =>
-      axios.put(endpoints.agentDefinitions.edit(agentId), {
-        observability_enabled: enabled,
-      }),
+    mutationFn: async ({ enabled }) =>
+      mocking()
+        ? mockSetObservability(agentId, enabled)
+        : axios.put(endpoints.agentDefinitions.edit(agentId), {
+            observability_enabled: enabled,
+          }),
     onSuccess: () =>
       queryClient.invalidateQueries({ queryKey: agentDetailQueryKey(agentId) }),
   });

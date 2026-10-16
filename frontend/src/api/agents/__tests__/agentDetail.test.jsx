@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import PropTypes from "prop-types";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -23,6 +23,10 @@ import {
   HOSTED_VERSION_DETAIL,
   SIMULATE_RUN,
 } from "../_fixtures/agentDetail";
+import {
+  AGENT_PAGES_CONTRACT_MOCKS,
+  resetContractMocks,
+} from "../contractMocks";
 
 vi.mock("src/utils/axios", () => ({
   default: { get: vi.fn(), put: vi.fn() },
@@ -275,5 +279,83 @@ describe("hooks", () => {
       },
     );
     expect(spy).toHaveBeenCalledWith({ queryKey: ["agents", "detail", "a1"] });
+  });
+});
+
+describe("with contract mocks on", () => {
+  const today = (detail) => {
+    const d = { ...detail };
+    [
+      "agent_kind",
+      "source",
+      "environment_count",
+      "observability_enabled",
+    ].forEach((k) => delete d[k]);
+    return d;
+  };
+  const SDK_AGENT = { ...today(CODE_AGENT_DETAIL), provider: null };
+  const serveDetail = (detail, version) =>
+    axios.get.mockImplementation((url) =>
+      Promise.resolve({ data: url.includes("/versions/") ? version : detail }),
+    );
+
+  beforeEach(() => {
+    AGENT_PAGES_CONTRACT_MOCKS.enabled = true;
+    resetContractMocks();
+  });
+  afterEach(() => {
+    AGENT_PAGES_CONTRACT_MOCKS.enabled = false;
+  });
+
+  it("fills the detail fields today's backend leaves out", async () => {
+    serveDetail(SDK_AGENT);
+    const a = await run(() => useAgentDetail(SDK_AGENT.id));
+    expect(a.agentKind).toBe("source");
+    expect(a.environmentCount).toBeGreaterThan(0);
+  });
+
+  it("serves recent runs without calling the missing endpoint", async () => {
+    serveDetail(SDK_AGENT);
+    const runs = await run(() => useAgentRuns(SDK_AGENT.id));
+    expect(runs.length).toBeGreaterThan(0);
+    expect(axios.get.mock.calls.every(([u]) => !u.includes("/runs/"))).toBe(
+      true,
+    );
+  });
+
+  it("serves the agent's environments without the unfiltered list", async () => {
+    serveDetail(SDK_AGENT);
+    const detail = await run(() => useAgentDetail(SDK_AGENT.id));
+    const envs = await run(() => useAgentEnvironments(SDK_AGENT.id));
+    expect(envs).toHaveLength(detail.environmentCount);
+    expect(listHarnessEnvironments).not.toHaveBeenCalled();
+  });
+
+  it("gives a code agent's version its stored Agent", async () => {
+    const version = { ...CODE_VERSION_DETAIL };
+    delete version.agent_details;
+    delete version.agent_kind;
+    delete version.api_key;
+    serveDetail(SDK_AGENT, version);
+    const v = await run(() => useAgentVersion(SDK_AGENT.id, version.id));
+    expect(v.agentDetails.agent.kind).toBe("source");
+  });
+
+  it("saves observability locally and the refetched agent shows it", async () => {
+    serveDetail(SDK_AGENT);
+    const { Wrapper, client } = makeWrapper();
+    const detail = renderHook(() => useAgentDetail(SDK_AGENT.id), {
+      wrapper: Wrapper,
+    });
+    await waitFor(() => expect(detail.result.current.isSuccess).toBe(true));
+    const toggle = renderHook(() => useSetObservability(SDK_AGENT.id), {
+      wrapper: Wrapper,
+    });
+    await act(() => toggle.result.current.mutateAsync({ enabled: true }));
+    expect(axios.put).not.toHaveBeenCalled();
+    expect(
+      client.getQueryData(["agents", "detail", SDK_AGENT.id])
+        .observability_enabled,
+    ).toBe(true);
   });
 });
