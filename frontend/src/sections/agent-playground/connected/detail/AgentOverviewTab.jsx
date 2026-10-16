@@ -10,10 +10,7 @@ import { PassRateCell, endTagOf, isRunning, runPath } from "./runCells";
 const EMPTY = "No simulations have run against this agent yet.";
 const RECENT_RUNS = 15;
 
-const errorText = (error) =>
-  error?.code === "runs_unavailable"
-    ? error.message
-    : "Couldn't load recent runs";
+const errorText = (error) => error?.message || "Couldn't load recent runs";
 
 /** Overview: the agent's newest runs, across environments and Simulate. */
 export default function AgentOverviewTab() {

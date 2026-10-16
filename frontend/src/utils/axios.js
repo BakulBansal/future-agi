@@ -1538,6 +1538,10 @@ export const endpoints = {
       ),
     detail: (id) =>
       apiPath("/simulate/agent-definitions/{agent_id}/", { agent_id: id }),
+    runs: (id) =>
+      apiPath("/simulate/agent-definitions/{agent_id}/runs/", {
+        agent_id: id,
+      }),
     delete: apiPath("/simulate/agent-definitions/"),
     getTestAnalytics: (agent, version) =>
       apiPath(

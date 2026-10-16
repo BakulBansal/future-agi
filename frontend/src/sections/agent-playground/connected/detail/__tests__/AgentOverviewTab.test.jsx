@@ -140,19 +140,14 @@ describe("AgentOverviewTab", () => {
     ).toBeInTheDocument();
   });
 
-  it("says runs aren't available yet while the endpoint is missing", () => {
+  it("shows the server's reason when the runs can't load", () => {
     runsState.current = {
       isLoading: false,
       isError: true,
-      error: {
-        code: "runs_unavailable",
-        message: "Recent runs aren't available yet",
-      },
+      error: { code: "not_found", message: "Agent definition not found." },
     };
     renderTab();
-    expect(
-      screen.getByText("Recent runs aren't available yet"),
-    ).toBeInTheDocument();
+    expect(screen.getByText("Agent definition not found.")).toBeInTheDocument();
     expect(
       screen.queryByText("No simulations have run against this agent yet."),
     ).toBeNull();
