@@ -65,6 +65,7 @@ describe("AgentOverviewTab", () => {
       .map((h) => h.textContent.trim());
     expect(headers).toEqual([
       "Run",
+      "Status",
       "Environment",
       "Agent version",
       "Pass rate",
@@ -102,19 +103,24 @@ describe("AgentOverviewTab", () => {
     ).toHaveTextContent("—");
   });
 
-  it("tags failed and cancelled runs", () => {
-    runsState.current = loaded([
-      { ...ENVIRONMENT_RUN, status: "failed" },
-      {
-        ...SIMULATE_RUN,
-        status: "cancelled",
-        completed_at: "2026-10-16T11:00:00Z",
-      },
-    ]);
-    renderTab();
-    expect(screen.getByText("Failed")).toBeInTheDocument();
-    expect(screen.getByText("Cancelled")).toBeInTheDocument();
-  });
+  it.each([
+    ["pending", "Queued"],
+    ["running", "Running"],
+    ["evaluating", "Running"],
+    ["cancelling", "Cancelling"],
+    ["completed", "Completed"],
+    ["failed", "Failed"],
+    ["cancelled", "Cancelled"],
+  ])(
+    "shows a %s run as %s, like the environment runs table",
+    (status, label) => {
+      runsState.current = loaded([{ ...ENVIRONMENT_RUN, status }]);
+      renderTab();
+      expect(
+        screen.getByTestId("run-status-68dedb99-42b6-46e7-8e94-b511041fa2cb"),
+      ).toHaveTextContent(label);
+    },
+  );
 
   it("opens an environment run on its environment's run page", () => {
     renderTab();

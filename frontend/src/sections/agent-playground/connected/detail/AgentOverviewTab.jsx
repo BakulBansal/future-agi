@@ -1,13 +1,15 @@
 import React, { useMemo } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
-import { Button, Stack, Typography } from "@mui/material";
+import { Box, Button, Stack, Typography } from "@mui/material";
 import EmptyState from "src/sections/simulate/environments/components/EmptyState";
+import StatusChip from "src/sections/simulate/environments/workspace/runs/StatusChip";
+import { runStateFor } from "src/sections/simulate/environments/workspace/runs/runs.constants";
 import { useAgentRuns } from "src/api/agents/agentDetail";
 import FitDataTable from "./FitDataTable";
 import { QuietTag } from "./bits";
 import { agentDetailPath } from "./agentDetailTabs";
 import { MONO, ago } from "./format";
-import { PassRateCell, endTagOf, isRunning, runPath } from "./runCells";
+import { PassRateCell, runPath } from "./runCells";
 
 const RECENT_RUNS = 15;
 
@@ -29,20 +31,24 @@ export default function AgentOverviewTab() {
       {
         id: "run",
         header: "Run",
-        size: 160,
+        size: 100,
         cell: ({ row: { original: r } }) => (
-          <Stack
-            direction="row"
-            alignItems="center"
-            spacing={0.75}
-            sx={{ minWidth: 0 }}
+          <Typography noWrap sx={{ typography: "s2", fontWeight: 600 }}>
+            {`Run ${r.runNumber}`}
+          </Typography>
+        ),
+      },
+      {
+        id: "status",
+        header: "Status",
+        size: 140,
+        cell: ({ row: { original: r } }) => (
+          <Box
+            data-testid={`run-status-${r.testExecutionId}`}
+            sx={{ display: "flex" }}
           >
-            <Typography noWrap sx={{ typography: "s2", fontWeight: 600 }}>
-              {`Run ${r.runNumber}`}
-            </Typography>
-            {isRunning(r) && <QuietTag>Running</QuietTag>}
-            {endTagOf(r) && <QuietTag>{endTagOf(r)}</QuietTag>}
-          </Stack>
+            <StatusChip status={runStateFor(r.status)} />
+          </Box>
         ),
       },
       {

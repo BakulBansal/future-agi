@@ -8,10 +8,8 @@ const NEUTRAL_BAR = "rgba(161,161,170,.75)";
 // TestExecution.ExecutionStatus: pending, running, evaluating, cancelling,
 // completed, failed, cancelled.
 const IN_PROGRESS = ["pending", "running", "evaluating", "cancelling"];
-const END_TAGS = { failed: "Failed", cancelled: "Cancelled" };
 
-export const isRunning = (run) => IN_PROGRESS.includes(run.status);
-export const endTagOf = (run) => END_TAGS[run.status] ?? null;
+const isRunning = (run) => IN_PROGRESS.includes(run.status);
 
 export const runPath = (run) =>
   run.kind === "environment" && run.environment
