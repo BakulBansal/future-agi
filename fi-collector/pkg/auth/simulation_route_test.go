@@ -485,17 +485,18 @@ func TestRefusalOfTheAgentIsRememberedForTheLifeOfTheKeyResult(t *testing.T) {
 	otherWorkspace := hiddenProject()
 	otherWorkspace.WorkspaceID = "77777777-7777-4777-8777-777777777777"
 	cases := map[string]struct {
-		sim    routeSim
-		reason string
+		project SimulationProject
+		err     error
+		reason  string
 	}{
-		"name conflict":                {routeSim{err: ErrSimulationNameConflict}, dropNameConflict},
-		"hidden project deleted":       {routeSim{err: ErrSimulationAgentDeleted}, dropAgentDeleted},
-		"no workspace to store in":     {routeSim{err: ErrSimulationNoWorkspace}, dropTenantMismatch},
-		"project of another workspace": {routeSim{project: otherWorkspace}, dropTenantMismatch},
+		"name conflict":                {err: ErrSimulationNameConflict, reason: dropNameConflict},
+		"hidden project deleted":       {err: ErrSimulationAgentDeleted, reason: dropAgentDeleted},
+		"no workspace to store in":     {err: ErrSimulationNoWorkspace, reason: dropTenantMismatch},
+		"project of another workspace": {project: otherWorkspace, reason: dropTenantMismatch},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
-			sim := &routeSim{project: tc.sim.project, err: tc.sim.err}
+			sim := &routeSim{project: tc.project, err: tc.err}
 			a, _ := newRouter(t, sim)
 			result := sandboxResult()
 			a.cache.putPositive("ck", result)
