@@ -21,7 +21,6 @@ import { useNavigate, useParams, useLocation } from "react-router";
 import { useQueryClient } from "@tanstack/react-query";
 import Iconify from "src/components/iconify";
 // palette import removed — no longer used
-import { useUrlState } from "src/routes/hooks/use-url-state";
 import { getStorage, setStorage } from "src/hooks/use-local-storage";
 import { ShareDialog } from "src/components/share-dialog";
 import FormSearchField from "src/components/FormSearchField/FormSearchField";
@@ -73,10 +72,6 @@ const ObserveHeader = ({ text, refreshData, resetFilters }) => {
     _setAutoRefresh(value);
     setStorage("autoRefresh", value);
   }, []);
-  const [excludeSimulationCalls, setExcludeSimulationCalls] = useUrlState(
-    "remove_simulation_calls",
-    false,
-  );
   const { observeId } = useParams();
 
   const { data: projectDetail } = useGetProjectDetails(observeId, false);
@@ -442,8 +437,6 @@ const ObserveHeader = ({ text, refreshData, resetFilters }) => {
           </Popover>
           {/* Tag editor */}
           {observeId && <TagEditor projectId={observeId} variant="header" />}
-
-          {/* Show simulation calls toggle — moved to Display panel */}
         </Box>
 
         {/* ── Right: Last updated + Auto refresh + Action buttons ── */}

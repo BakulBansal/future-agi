@@ -1,5 +1,5 @@
 import { useReducer } from "react";
-import { Box, Stack } from "@mui/material";
+import { Box, Checkbox, FormControlLabel, Stack, Typography } from "@mui/material";
 import { parseGitHubInput } from "src/pages/dashboard/harness/requestMapper";
 import Field from "../components/Field";
 import Label from "../components/Label";
@@ -36,6 +36,7 @@ const initial = {
   egress: "",
   secretFiles: [],
   scenarioCount: DEFAULT_SCENARIOS,
+  observabilityEnabled: false,
 };
 
 function reducer(s, a) {
@@ -52,7 +53,7 @@ export default function PanelSourceRepo() {
     dispatch({ field, value });
     build.resetPreflight();
   };
-  const { provider, repo, branch, entry, visibility, installationId, envText, egress, secretFiles, scenarioCount } = form;
+  const { provider, repo, branch, entry, visibility, installationId, envText, egress, secretFiles, scenarioCount, observabilityEnabled } = form;
   const isPrivate = visibility === REPO_VISIBILITY.PRIVATE;
   // The repo must parse to owner/repo (or a GitHub URL) before we can preflight.
   // Only flag a non-empty, unparseable value so the field isn't red before typing.
@@ -74,6 +75,7 @@ export default function PanelSourceRepo() {
     egress: egress.trim() || null,
     secretFiles,
     scenarioCount: Number(scenarioCount) || undefined,
+    observabilityEnabled,
   });
 
   return (
@@ -137,6 +139,22 @@ export default function PanelSourceRepo() {
         secretFiles={secretFiles} onSecretFiles={set("secretFiles")}
       />
       <ScenarioCount value={scenarioCount} onChange={set("scenarioCount")} />
+      <Box>
+        <FormControlLabel
+          label="Turn on observability"
+          control={
+            <Checkbox
+              size="small"
+              checked={observabilityEnabled}
+              onChange={(e) => set("observabilityEnabled")(e.target.checked)}
+              inputProps={{ "aria-describedby": "observability-helper" }}
+            />
+          }
+        />
+        <Typography id="observability-helper" sx={{ typography: "s3", color: "text.subtitle", ml: 4 }}>
+          We can observe your agent only if its code already sends telemetry (OpenTelemetry or traceAI). If it doesn&apos;t, the Environment still builds, without observability.
+        </Typography>
+      </Box>
       <ParallelismField
         value={build.parallelism}
         input={build.parallelismInput}

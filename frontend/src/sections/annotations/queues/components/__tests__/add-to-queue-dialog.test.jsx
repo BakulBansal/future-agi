@@ -266,7 +266,6 @@ describe("AddToQueueDialog", () => {
             filter: [],
             exclude_ids: ["trace-1"],
             is_voice_call: false,
-            remove_simulation_calls: false,
           },
         },
         expect.objectContaining({ onSuccess: expect.any(Function) }),
