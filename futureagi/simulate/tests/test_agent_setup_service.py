@@ -290,6 +290,14 @@ SHAPE_REFUSALS = {
     "parameters_not_object": lambda a: a["tools"][0].update(parameters=[1]),
     "boolean_as_number": lambda a: a.update(model={"name": "m", "temperature": True}),
     "extension_not_object": lambda a: a.update(extension=[]),
+    "max_tokens_over_the_column": lambda a: a.update(model={"name": "m", "max_tokens": 2**31}),
+    "max_tokens_below_the_column": lambda a: a.update(model={"name": "m", "max_tokens": -(2**31) - 1}),
+    "nul_in_instructions": lambda a: a["behaviour"][0].update(instructions="a\x00b"),
+    "nul_in_name": lambda a: a.update(name="a\x00b"),
+    "nul_in_tool_description": lambda a: a["tools"][0].update(description="a\x00b"),
+    "nul_in_extension_value": lambda a: a["extension"].update(note="a\x00b"),
+    "nul_in_extension_key": lambda a: a["extension"].update({"a\x00b": 1}),
+    "nul_after_an_escaped_backslash": lambda a: a["extension"].update(note="\\\x00"),
 }
 
 
@@ -302,6 +310,16 @@ def test_store_repeats_the_sdk_shape_checks(version, provider_list, mutate):
     assert raised.value.code == "agent_invalid"
     assert _rows() == (0, 0, 0, 0)
     assert provider_list.calls == 0
+
+
+@pytest.mark.django_db
+def test_store_accepts_the_text_backslash_u0000_and_the_largest_column_int(version):
+    agent = source_agent(model={"name": "m", "max_tokens": 2**31 - 1})
+    agent["extension"]["note"] = "\\u0000 is only text here"
+
+    outcome = store_agent(agent_version_id=version.id, agent=agent, sdk_version="0.2.3")
+
+    assert outcome == "stored"
 
 
 @pytest.mark.django_db
@@ -443,6 +461,23 @@ def test_stored_agent_hides_a_stale_hosted_agent(hosted_definition, hosted_versi
 
 
 @pytest.mark.django_db
+def test_the_endpoint_shows_a_stale_hosted_agent(
+    auth_client, hosted_definition, hosted_version, provider_list
+):
+    store_agent(agent_version_id=hosted_version.id, agent=hosted_agent(), sdk_version="0.2.3")
+    AgentDefinition.objects.filter(id=hosted_definition.id).update(assistant_id="asst_new")
+
+    response = auth_client.get(
+        f"/simulate/agent-definitions/{hosted_definition.id}/versions/{hosted_version.id}/agent/"
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["setup_stale"] is True
+    assert body["agent"]["provider_ref"]["id"] == "asst_1"
+
+
+@pytest.mark.django_db
 def test_a_source_agent_is_never_stale(definition, version):
     store_agent(agent_version_id=version.id, agent=source_agent(), sdk_version="0.2.3")
     AgentDefinition.objects.filter(id=definition.id).update(provider="livekit", assistant_id="x")
@@ -496,6 +531,19 @@ def test_summary_falls_back_to_the_newest_stored_row(definition, version):
 
 
 @pytest.mark.django_db
+def test_summary_prefers_the_newest_of_two_stored_rows(definition, version):
+    store_agent(agent_version_id=version.id, agent=source_agent(), sdk_version="0.2.3")
+    newer = definition.create_version(description="", commit_message="second", status="active")
+    store_agent(
+        agent_version_id=newer.id, agent=source_agent(setup_hash=HASH_B), sdk_version="0.2.3"
+    )
+
+    summary = agent_summary(definition.id)
+
+    assert (summary.agent_version_id, summary.setup_hash) == (newer.id, HASH_B)
+
+
+@pytest.mark.django_db
 def test_summary_ignores_the_row_of_a_deleted_version(definition, version):
     store_agent(agent_version_id=version.id, agent=source_agent(), sdk_version="0.2.3")
     definition.create_version(description="", commit_message="second", status="active")
@@ -524,6 +572,47 @@ def test_summary_finds_the_active_versions_key(hosted_definition, hosted_version
     summary = agent_summary(hosted_definition.id)
 
     assert (summary.credential_id, summary.key_present, summary.missing) == (credential.id, True, ())
+
+
+@pytest.mark.django_db
+def test_summary_ignores_a_key_of_another_provider_type(hosted_definition, hosted_version):
+    ProviderCredentials.objects.create(
+        agent_version=hosted_version, provider_type="retell", api_key="sk-other", assistant_id="asst_1"
+    )
+
+    summary = agent_summary(hosted_definition.id)
+
+    assert (summary.credential_id, summary.key_present) == (None, False)
+    assert "credential" in summary.missing
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize(
+    ("provider", "credential_type"),
+    [("retell", "retell"), ("livekit", "livekit"), ("livekit_bridge", "livekit"), ("anything_else", "vapi")],
+)
+def test_summary_looks_up_the_credential_type_of_each_provider(
+    hosted_definition, hosted_version, provider, credential_type
+):
+    AgentDefinition.objects.filter(id=hosted_definition.id).update(provider=provider)
+    credential = ProviderCredentials.objects.create(
+        agent_version=hosted_version, provider_type=credential_type, api_key="sk-test", assistant_id="asst_1"
+    )
+
+    assert agent_summary(hosted_definition.id).credential_id == credential.id
+
+
+@pytest.mark.django_db
+def test_summary_pins_the_active_versions_key_over_a_newer_versions(hosted_definition, hosted_version):
+    active_key = ProviderCredentials.objects.create(
+        agent_version=hosted_version, provider_type="vapi", api_key="sk-active", assistant_id="asst_1"
+    )
+    newer = hosted_definition.create_version(description="", commit_message="draft", status="draft")
+    ProviderCredentials.objects.create(
+        agent_version=newer, provider_type="vapi", api_key="sk-newer", assistant_id="asst_1"
+    )
+
+    assert agent_summary(hosted_definition.id).credential_id == active_key.id
 
 
 @pytest.mark.django_db
