@@ -1534,3 +1534,31 @@ def test_new_chat_sandbox_starts_from_the_environment_and_keeps_only_chat_state(
     assert f"scenarios/{NAMES[0]}/scenario.json" in paths
     assert ".futureagi-conversation.json" in paths
     assert authoring_basis(started) == "sha256:current"
+
+
+@pytest.mark.django_db
+def test_a_finished_builder_session_build_asks_its_builder_to_check_it(
+    organization, settings, monkeypatch
+):
+    from simulate.services import hosted_harness
+
+    settings.HARNESS_PUBLIC_BASE_URL = "https://platform.example.com"
+    scheduled = []
+    monkeypatch.setattr(
+        "simulate.tasks.hosted_harness_conversation.schedule_conversation_runtime",
+        lambda conversation_id, base_url: scheduled.append((conversation_id, base_url)),
+    )
+    built, _ = create_hosted_job(organization, _payload(), idempotency_key="built-in-session")
+    staged, _ = create_hosted_job(organization, _payload(), idempotency_key="built-in-stages")
+    attempt_id = str(uuid.uuid4())
+    enqueue_message(built, content="Build it", client_request_id=f"build-{attempt_id}")
+
+    hosted_harness._ask_builder_to_check(str(built.id), attempt_id)
+    hosted_harness._ask_builder_to_check(str(staged.id), attempt_id)
+
+    check = built.conversation.messages.get(client_request_id=f"check-{attempt_id}")
+    assert "validated and sealed" in check.content
+    assert scheduled == [(str(built.conversation.id), "https://platform.example.com")]
+    assert not HostedHarnessConversationMessage.no_workspace_objects.filter(
+        conversation__job=staged
+    ).exists()
