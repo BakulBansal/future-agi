@@ -207,9 +207,9 @@ describe("AgentDefinitionTab", () => {
       name: "Observability",
     });
     fireEvent.click(toggle);
-    expect(
-      await screen.findByText(OBSERVABILITY_REFUSED.message),
-    ).toBeInTheDocument();
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      OBSERVABILITY_REFUSED.message,
+    );
     expect(toggle).not.toBeChecked();
   });
 

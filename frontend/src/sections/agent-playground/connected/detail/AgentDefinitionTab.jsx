@@ -100,6 +100,8 @@ const Note = ({ children, tone }) => (
       py: 1,
       borderTop: "1px solid",
       borderColor: "divider",
+      // Right under the card title, which already draws that line.
+      "&:first-child": { borderTop: "none" },
       typography: "s3",
       color: tone === "warning" ? "#D97706" : "text.subtitle",
     }}
