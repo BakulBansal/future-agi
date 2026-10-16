@@ -8,9 +8,16 @@ const UI_READY = 60_000;
 const SIMULATE = '/dashboard/simulate';
 const ENVIRONMENTS = `${SIMULATE}/environments`;
 
-// Pinned off frontend/src/pages/404.jsx and the pages' <Helmet> titles:
-// AgentDefinitions.jsx, Scenarios.jsx, Personas.jsx, RunTests.jsx.
-const NOT_FOUND_TITLE = '404 Page Not Found!';
+// Pinned off the pages' <Helmet> titles: AgentDefinitions.jsx, Scenarios.jsx,
+// Personas.jsx, RunTests.jsx, and environments/PrebuiltEnvironments.jsx and
+// environments/UseTemplate.jsx for the templates.
+
+// Each Prebuilt template URL and its page title. The template id comes from
+// frontend/src/api/simulate-environments/_fixtures/prebuiltEnvironments.js.
+const TEMPLATE_PAGES = [
+  { path: `${ENVIRONMENTS}/templates`, title: 'Prebuilt Environments | Future AGI' },
+  { path: `${ENVIRONMENTS}/templates/env-voice-support`, title: 'Use template | Future AGI' },
+];
 
 // The Simulate menu for an org created before the cutoff, in order
 // (frontend/src/layouts/dashboard/config-navigation.jsx, Simulate section).
@@ -49,7 +56,7 @@ test('SIM-E2E-001: Simulate opens on Environments and an org from before the cut
     browserChecks: ['/dashboard/simulate lands on Environments',
                     'harness lands on Environments, harness/new on the Build tab, harness/<id> on environments/<id>',
                     'simulator-agent lands on Environments',
-                    'both template URLs end on /404 with the 404 page title',
+                    'both template URLs stay on their URL and open their page by title',
                     'the Simulate menu is exactly Environment, Agent Definition, Scenarios, Personas, Run Simulation',
                     'each of those four items opens its page by URL and title, never /404'],
   }),
@@ -88,11 +95,11 @@ test('SIM-E2E-001: Simulate opens on Environments and an org from before the cut
     }, { timeout: UI_READY });
   }
 
-  for (const path of [`${ENVIRONMENTS}/templates`, `${ENVIRONMENTS}/templates/customer-support`]) {
-    await test.step(`ui: ${path} shows the 404 page`, async () => {
-      await page.goto(path);
-      await expect(page).toHaveURL(exactPath('/404'), { timeout: UI_READY });
-      await expect(page).toHaveTitle(NOT_FOUND_TITLE, { timeout: UI_READY });
+  for (const template of TEMPLATE_PAGES) {
+    await test.step(`ui: ${template.path} opens its template page`, async () => {
+      await page.goto(template.path);
+      await expect(page).toHaveURL(exactPath(template.path), { timeout: UI_READY });
+      await expect(page).toHaveTitle(template.title, { timeout: UI_READY });
     }, { timeout: UI_READY });
   }
 

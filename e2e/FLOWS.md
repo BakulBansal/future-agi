@@ -1469,7 +1469,7 @@
 ### SIM-E2E-001 — Simulate opens on Environments and an org from before the cutoff keeps every page
 
 **Goal:** A developer opening Simulate lands on Environments, old Harness, Simulator Agent and template links go somewhere sensible, and an org from before the cutoff still reaches every Simulate page (the restricted side for new orgs is not claimed: the harness cannot create an org dated after a cutoff)  
-**Spec:** `flows/simulate/environments-only-routing.spec.ts:36`  
+**Spec:** `flows/simulate/environments-only-routing.spec.ts:43`  
 **Tags:** —
 
 **User steps:**
@@ -1490,6 +1490,6 @@
 - /dashboard/simulate lands on Environments
 - harness lands on Environments, harness/new on the Build tab, harness/<id> on environments/<id>
 - simulator-agent lands on Environments
-- both template URLs end on /404 with the 404 page title
+- both template URLs stay on their URL and open their page by title
 - the Simulate menu is exactly Environment, Agent Definition, Scenarios, Personas, Run Simulation
 - each of those four items opens its page by URL and title, never /404

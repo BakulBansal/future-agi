@@ -94,10 +94,14 @@ const ENVIRONMENT_URLS = [
   `${SIMULATE}/environments/env-1/runs/test-1/exec-1/optimization_runs`,
 ];
 
-// Prebuilt templates are "Coming soon"; their pages are blocked for every org.
-const COMING_SOON_URLS = [
-  `${SIMULATE}/environments/templates`,
-  `${SIMULATE}/environments/templates/template-1`,
+// Each Prebuilt template URL and the route that must serve it, so
+// "templates" is never read as an :envId.
+const TEMPLATE_ROUTES = [
+  [`${SIMULATE}/environments/templates`, "environments/templates"],
+  [
+    `${SIMULATE}/environments/templates/template-1`,
+    "environments/templates/:templateId",
+  ],
 ];
 
 const ALWAYS_REDIRECTED = [
@@ -139,8 +143,10 @@ describe.each([
     expect(redirectTarget(leafRoute(user, url))).toBe(target);
   });
 
-  it.each(COMING_SOON_URLS)("%s goes to the 404", (url) => {
-    expect(redirectTarget(leafRoute(user, url))).toBe("/404");
+  it.each(TEMPLATE_ROUTES)("%s opens the %s page", (url, path) => {
+    const route = leafRoute(user, url);
+    expect(route.path).toBe(path);
+    expect(redirectTarget(route)).toBeNull();
   });
 
   it("an old harness job link opens that environment", () => {
