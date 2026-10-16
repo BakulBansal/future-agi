@@ -1,5 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import axios from "src/utils/axios";
@@ -112,11 +118,19 @@ describe("AgentDefinitionTab", () => {
     ).toBeInTheDocument();
   });
 
-  it("marks File structure as coming soon", async () => {
+  it("previews File structure under a Coming soon note", async () => {
     serve(HOSTED_AGENT_DETAIL, { "v2-id": HOSTED_VERSION_DETAIL });
     renderAt(HOSTED_AGENT_DETAIL);
-    expect(await screen.findByText("File structure")).toBeInTheDocument();
-    expect(screen.getAllByLabelText("Coming soon").length).toBeGreaterThan(0);
+    const region = await screen.findByRole("region", {
+      name: "File structure",
+    });
+    expect(
+      within(region).getByText(/Browse the files we read from your agent/),
+    ).toBeInTheDocument();
+    expect(within(region).getByLabelText("Coming soon")).toBeInTheDocument();
+    expect(within(region).getByTestId("coming-soon-preview")).toHaveTextContent(
+      "agent.yaml",
+    );
   });
 
   it("turns observability on and refetches the agent", async () => {

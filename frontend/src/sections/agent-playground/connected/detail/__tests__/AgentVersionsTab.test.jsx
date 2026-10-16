@@ -72,9 +72,15 @@ describe("AgentVersionsTab", () => {
     expect(screen.queryByRole("button")).toBeNull();
   });
 
-  it("marks Compare as coming soon", async () => {
+  it("previews Compare under a Coming soon note", async () => {
     renderTab();
-    expect(await screen.findByText("Compare")).toBeInTheDocument();
-    expect(screen.getByLabelText("Coming soon")).toBeInTheDocument();
+    const region = await screen.findByRole("region", { name: "Compare" });
+    expect(
+      within(region).getByText(/Compare any two versions/),
+    ).toBeInTheDocument();
+    expect(within(region).getByLabelText("Coming soon")).toBeInTheDocument();
+    expect(within(region).getByTestId("coming-soon-preview")).toHaveTextContent(
+      "prompts/system.md",
+    );
   });
 });

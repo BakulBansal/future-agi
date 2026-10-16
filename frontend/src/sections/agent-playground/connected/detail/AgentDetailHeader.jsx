@@ -4,7 +4,8 @@ import { format } from "date-fns";
 import { Box, IconButton, Stack, Typography } from "@mui/material";
 import Iconify from "src/components/iconify";
 import { sourceLabel } from "../connectedAgentLabels";
-import { MONO, Pill } from "./bits";
+import { Pill } from "./bits";
+import { MONO } from "./format";
 
 const environmentsText = (count) => {
   if (count == null) return null;

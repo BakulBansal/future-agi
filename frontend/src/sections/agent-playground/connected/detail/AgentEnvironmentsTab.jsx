@@ -4,7 +4,8 @@ import { useNavigate } from "react-router-dom";
 import { Box, Typography } from "@mui/material";
 import { useAgentEnvironments } from "src/api/agents/agentDetail";
 import { paths } from "src/routes/paths";
-import { Card, MONO, Row, ago, rateTone } from "./bits";
+import { Card, Row } from "./bits";
+import { MONO, ago, rateTone } from "./format";
 import useAgentRoute from "./useAgentRoute";
 
 const COLUMNS = ["Environment", "Testing", "Last result"];

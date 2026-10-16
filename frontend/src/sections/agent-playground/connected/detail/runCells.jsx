@@ -2,7 +2,7 @@ import PropTypes from "prop-types";
 import React from "react";
 import { Box, Stack, Typography } from "@mui/material";
 import { paths } from "src/routes/paths";
-import { rateTone } from "./bits";
+import { rateTone } from "./format";
 
 const NEUTRAL_BAR = "rgba(161,161,170,.75)";
 // TestExecution.ExecutionStatus: pending, running, evaluating, cancelling,

@@ -2,11 +2,13 @@ import PropTypes from "prop-types";
 import React from "react";
 import { Box, Skeleton, Stack, Typography } from "@mui/material";
 import { useAgentVersion } from "src/api/agents/agentDetail";
-import ComingSoonChip from "src/sections/simulate/environments/components/ComingSoonChip";
 import { sourceLabel } from "../connectedAgentLabels";
-import { Card, MONO } from "./bits";
+import { Card } from "./bits";
+import { MONO } from "./format";
 import { hostedRows, storedAgentRows } from "./definitionRows";
+import ComingSoonPreview from "./ComingSoonPreview";
 import ObservabilityToggle from "./ObservabilityToggle";
+import FileStructurePreview from "./previews/FileStructurePreview";
 import useAgentRoute from "./useAgentRoute";
 
 function DefinitionRow({ row }) {
@@ -197,7 +199,12 @@ export default function AgentDefinitionTab() {
         {body}
       </Card>
       <ObservabilityToggle agent={agent} />
-      <Card title="File structure" action={<ComingSoonChip />} />
+      <ComingSoonPreview
+        title="File structure"
+        description="Browse the files we read from your agent, version by version."
+      >
+        <FileStructurePreview versionLabel={versionMeta?.label} />
+      </ComingSoonPreview>
     </Stack>
   );
 }

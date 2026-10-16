@@ -3,7 +3,8 @@ import { useNavigate, useParams } from "react-router-dom";
 import { Stack, Typography } from "@mui/material";
 import { useAgentRuns } from "src/api/agents/agentDetail";
 import FitDataTable from "./FitDataTable";
-import { MONO, QuietTag, ago } from "./bits";
+import { QuietTag } from "./bits";
+import { MONO, ago } from "./format";
 import { PassRateCell, endTagOf, isRunning, runPath } from "./runCells";
 
 const EMPTY = "No simulations have run against this agent yet.";

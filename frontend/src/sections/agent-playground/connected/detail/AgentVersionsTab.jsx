@@ -3,8 +3,10 @@ import React from "react";
 import { format } from "date-fns";
 import { Box, Stack, Typography } from "@mui/material";
 import { alpha } from "@mui/material/styles";
-import ComingSoonChip from "src/sections/simulate/environments/components/ComingSoonChip";
-import { Card, MONO } from "./bits";
+import ComingSoonPreview from "./ComingSoonPreview";
+import CompareVersionsPreview from "./previews/CompareVersionsPreview";
+import { Card } from "./bits";
+import { MONO } from "./format";
 import useAgentRoute from "./useAgentRoute";
 
 function Chip({ label, tone }) {
@@ -35,7 +37,7 @@ function Chip({ label, tone }) {
 
 Chip.propTypes = { label: PropTypes.string, tone: PropTypes.string };
 
-/** Versions: a read-only timeline; Compare comes later. */
+/** Versions: a read-only timeline, and a preview of Compare. */
 export default function AgentVersionsTab() {
   const { agent } = useAgentRoute();
   if (!agent) return null;
@@ -135,7 +137,12 @@ export default function AgentVersionsTab() {
           })}
         </Box>
       </Card>
-      <Card title="Compare" action={<ComingSoonChip />} />
+      <ComingSoonPreview
+        title="Compare"
+        description="Compare any two versions to see exactly what changed."
+      >
+        <CompareVersionsPreview />
+      </ComingSoonPreview>
     </Box>
   );
 }

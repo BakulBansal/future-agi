@@ -3,21 +3,6 @@ import { Box, Stack, Typography } from "@mui/material";
 
 // Small pieces shared by the agent detail tabs, from the designer prototype.
 
-export const MONO = "ui-monospace, Menlo, monospace";
-
-export const ago = (iso) => {
-  if (!iso) return "—";
-  const s = Math.max(0, (Date.now() - Date.parse(iso)) / 1000);
-  if (s < 60) return "just now";
-  if (s < 3600) return `${Math.round(s / 60)}m ago`;
-  if (s < 86400) return `${Math.round(s / 3600)}h ago`;
-  const d = Math.round(s / 86400);
-  return d === 1 ? "yesterday" : `${d}d ago`;
-};
-
-export const rateTone = (rate) =>
-  rate >= 80 ? "#16A34A" : rate >= 50 ? "text.primary" : "#DC2626";
-
 export function Pill({ children }) {
   return (
     <Box
@@ -73,7 +58,8 @@ export function Card({ title, action, children }) {
         </Typography>
         {action}
       </Stack>
-      {children}
+      {/* Its own box, so rows can drop the first top border with :first-of-type. */}
+      <Box>{children}</Box>
     </Box>
   );
 }
@@ -107,7 +93,9 @@ export function Row({ cells, header = false, onClick }) {
         px: 2,
         py: header ? 0.75 : 1,
         alignItems: "center",
-        borderTop: "1px solid",
+        // A header row sits right under its card's title, which already
+        // draws that line.
+        borderTop: header ? "none" : "1px solid",
         borderColor: "divider",
         cursor: onClick ? "pointer" : "default",
         "&:hover": onClick ? { bgcolor: "action.hover" } : {},
