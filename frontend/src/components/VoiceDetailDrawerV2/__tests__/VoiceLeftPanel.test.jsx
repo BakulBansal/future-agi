@@ -57,3 +57,27 @@ describe("VoiceLeftPanel extra tabs", () => {
     expect(screen.queryByText("Traces")).not.toBeInTheDocument();
   });
 });
+
+describe("VoiceLeftPanel when the selected tab goes away", () => {
+  it("falls back to the transcript instead of an empty pane", async () => {
+    const user = userEvent.setup();
+    const traces = {
+      label: "Traces",
+      value: "traces",
+      content: <div data-testid="traces-content" />,
+    };
+    const { rerender } = render(
+      <VoiceLeftPanel data={data} hidePathTabs extraTabs={[traces]} />,
+    );
+    await user.click(screen.getByText("Traces"));
+    expect(screen.getByTestId("traces-content")).toBeInTheDocument();
+
+    rerender(<VoiceLeftPanel data={data} hidePathTabs extraTabs={[]} />);
+
+    expect(screen.queryByText("Traces")).not.toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Transcript" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+  });
+});

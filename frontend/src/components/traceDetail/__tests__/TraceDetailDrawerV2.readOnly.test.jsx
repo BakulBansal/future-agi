@@ -26,11 +26,24 @@ const mocks = vi.hoisted(() => ({
   toolbarProps: vi.fn(),
   headerProps: vi.fn(),
   spanPaneProps: vi.fn(),
+  displayProps: vi.fn(),
+  createView: vi.fn(),
+  updateView: vi.fn(),
 }));
 
 vi.mock("src/api/project/saved-views", async (importOriginal) => ({
   ...(await importOriginal()),
   useGetSavedViews: (...args) => mocks.getSavedViews(...args),
+  useCreateSavedView: () => ({ mutate: mocks.createView }),
+  useUpdateSavedView: () => ({ mutate: mocks.updateView }),
+}));
+
+vi.mock("../TraceDisplayPanel", async (importOriginal) => ({
+  ...(await importOriginal()),
+  default: (props) => {
+    mocks.displayProps(props);
+    return null;
+  },
 }));
 
 vi.mock("src/api/project/trace-detail", () => ({
@@ -81,6 +94,9 @@ describe("TraceDetailDrawerV2 read-only", () => {
     mocks.toolbarProps.mockClear();
     mocks.headerProps.mockClear();
     mocks.spanPaneProps.mockClear();
+    mocks.displayProps.mockClear();
+    mocks.createView.mockClear();
+    mocks.updateView.mockClear();
   });
 
   it("reads saved views and offers every action when it can act", () => {
@@ -107,5 +123,24 @@ describe("TraceDetailDrawerV2 read-only", () => {
     const pane = mocks.spanPaneProps.mock.lastCall[0];
     expect(pane.onAction).toBeUndefined();
     expect(pane.readOnly).toBe(true);
+  });
+
+  it("leaves out the filter and the shared default when read-only", () => {
+    renderDrawer({ readOnly: true });
+
+    expect(mocks.toolbarProps.mock.lastCall[0].hideFilter).toBe(true);
+    const display = mocks.displayProps.mock.lastCall[0];
+    expect(display.hideSetDefault).toBe(true);
+
+    display.onSetDefaultView();
+    expect(mocks.createView).not.toHaveBeenCalled();
+    expect(mocks.updateView).not.toHaveBeenCalled();
+  });
+
+  it("offers the filter and the shared default when it can act", () => {
+    renderDrawer();
+
+    expect(mocks.toolbarProps.mock.lastCall[0].hideFilter).toBe(false);
+    expect(mocks.displayProps.mock.lastCall[0].hideSetDefault).toBe(false);
   });
 });

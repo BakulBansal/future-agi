@@ -9,6 +9,16 @@ vi.mock("src/components/ScoresListSection/ScoresListSection", () => ({
   ),
 }));
 
+const evalsProps = vi.hoisted(() => vi.fn());
+
+vi.mock("../EvalsTabView", async (importOriginal) => ({
+  ...(await importOriginal()),
+  default: (props) => {
+    evalsProps(props);
+    return <div data-testid="evals-tab" />;
+  },
+}));
+
 vi.mock("src/components/iconify", () => ({
   default: ({ icon, ...props }) => (
     <span data-testid="iconify" data-icon={icon} {...props} />
@@ -57,5 +67,17 @@ describe("SpanDetailPane read-only", () => {
     expect(screen.queryByText("tag")).toBeNull();
     expect(screen.queryByText("Annotations")).toBeNull();
     expect(screen.queryByTestId("scores-list")).toBeNull();
+  });
+
+  it("offers Fix with Falcon in the Evals tab only when it can act", async () => {
+    const user = userEvent.setup();
+    const { unmount } = renderPane({ onAction: vi.fn() });
+    await user.click(screen.getByText("Evals"));
+    expect(evalsProps.mock.lastCall[0].showFixWithFalcon).toBe(true);
+    unmount();
+
+    renderPane({ readOnly: true });
+    await user.click(screen.getByText("Evals"));
+    expect(evalsProps.mock.lastCall[0].showFixWithFalcon).toBe(false);
   });
 });

@@ -18,6 +18,7 @@ vi.mock("src/sections/projects/LLMTracing/LLMTracingTraceDetailDrawer", () => ({
 }));
 
 import CallTracesPanel from "../CallTracesPanel";
+import { CALL_TRACES_COPY } from "../callTraces.constants";
 
 const TRACES = [
   {
@@ -117,5 +118,18 @@ describe("CallTracesPanel", () => {
       screen.getByText("Couldn't load this call's traces."),
     ).toBeInTheDocument();
     expect(screen.queryByTestId("trace-drawer")).toBeNull();
+  });
+
+  it("keeps the rows it has when a background refetch fails", () => {
+    renderPanel({ isError: true });
+
+    expect(screen.getByText("book_ride")).toBeInTheDocument();
+    expect(screen.queryByText(CALL_TRACES_COPY.error)).not.toBeInTheDocument();
+  });
+
+  it("shows the error words only when there is nothing to show", () => {
+    renderPanel({ isError: true, traces: [] });
+
+    expect(screen.getByText(CALL_TRACES_COPY.error)).toBeInTheDocument();
   });
 });
