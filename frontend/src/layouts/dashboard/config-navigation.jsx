@@ -6,6 +6,7 @@ import {
   useWorkspacesList,
 } from "src/api/workspaces/list";
 import { paths } from "src/routes/paths";
+import { CONNECTED_AGENTS_PATH } from "src/sections/agent-playground/agentsTabs";
 import { HELP_LINK } from "src/config-global";
 import SvgColor from "src/components/svg-color";
 import Iconify from "src/components/iconify";
@@ -93,7 +94,8 @@ export function useNavData() {
       },
       {
         title: "Agents",
-        path: paths.dashboard.agents,
+        path: CONNECTED_AGENTS_PATH,
+        activePath: paths.dashboard.agents,
         icon: ICONS.agents,
         // eventTrigger: () => {
         //   trackEvent(Events.navigationPromptClicked, {
