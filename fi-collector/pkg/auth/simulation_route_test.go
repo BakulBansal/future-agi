@@ -608,6 +608,53 @@ func TestStampFindsTheRoutedNameInTheKeyMap(t *testing.T) {
 	}
 }
 
+func TestStampFindsTheRoutedNameInTheRequestsOwnResult(t *testing.T) {
+	cases := map[string]func(a *Authenticator, result *ResolveResult){
+		// The key's cache entry is gone, as when it expires between the read
+		// and the routing.
+		"the key is no longer cached": func(*Authenticator, *ResolveResult) {},
+		// The entry was replaced by a fresh read of the same key, so the
+		// cache merge lands in a result this request does not hold.
+		"the cache entry holds another result": func(a *Authenticator, _ *ResolveResult) {
+			a.cache.putPositive("ck", sandboxResult())
+		},
+	}
+	for name, arrange := range cases {
+		t.Run(name, func(t *testing.T) {
+			sim := &routeSim{project: hiddenProject()}
+			a, _ := newRouter(t, sim)
+			a.projects = failingProjectResolver{t}
+			result := sandboxResult()
+			arrange(a, result)
+			traces := routeTraces("customer-prod", "other")
+			before := traces.SpanCount()
+
+			out, err := a.RouteSimulation(context.Background(), "ck", traces, result)
+			if err != nil || out.Hidden != routeHiddenID {
+				t.Fatalf("route: %+v, %v", out, err)
+			}
+			// The stamp reads the same result, so the spans stay with the
+			// hidden project instead of being dropped or stored under a
+			// project made from the reserved name.
+			dropped, err := StampResourceAttrs(context.Background(), a, "ck", traces, result)
+			if err != nil || dropped != 0 {
+				t.Fatalf("stamp dropped %d, err = %v", dropped, err)
+			}
+			if traces.SpanCount() != before {
+				t.Fatalf("spans = %d, want %d", traces.SpanCount(), before)
+			}
+			for i := 0; i < traces.ResourceSpans().Len(); i++ {
+				if got, _ := resourceStr(t, traces, i, "fi.project_id"); got != routeHiddenID {
+					t.Errorf("resource %d fi.project_id = %q", i, got)
+				}
+			}
+			if id, ok := result.GetProjectInWorkspace(routeWorkspace, routeHiddenKey); !ok || id != routeHiddenID {
+				t.Errorf("the request's result maps the hidden name to %q, %v", id, ok)
+			}
+		})
+	}
+}
+
 // countingProjectResolver answers lookups from a map and counts creations.
 type countingProjectResolver struct {
 	found   map[string]string

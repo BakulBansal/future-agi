@@ -7,12 +7,14 @@ import (
 	"log/slog"
 	"net/url"
 	"os"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -460,12 +462,22 @@ func TestEnsureSimulationProject(t *testing.T) {
 		if _, err := r.EnsureSimulationProject(ctx, org, agent); err != nil {
 			t.Fatal(err)
 		}
-		f.exec(`UPDATE tracer_project SET deleted = true WHERE simulation_agent_id = $1`, agent)
+		// A fixed past time, so that any write to the row shows.
+		past := time.Date(2020, 1, 2, 3, 4, 5, 0, time.UTC)
+		f.exec(`UPDATE tracer_project SET deleted = true, updated_at = $2 WHERE simulation_agent_id = $1`, agent, past)
 		if _, err := r.EnsureSimulationProject(ctx, org, agent); !errors.Is(err, ErrSimulationAgentDeleted) {
 			t.Fatalf("err = %v", err)
 		}
 		if row := f.projectOf(agent); !row.Deleted {
 			t.Fatal("the deleted project was revived")
+		}
+		var updatedAt time.Time
+		err := pool.QueryRow(ctx, `SELECT updated_at FROM tracer_project WHERE simulation_agent_id = $1`, agent).Scan(&updatedAt)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !updatedAt.Equal(past) {
+			t.Fatalf("the deleted project was written: updated_at = %v, want %v", updatedAt, past)
 		}
 	})
 
@@ -480,6 +492,116 @@ func TestEnsureSimulationProject(t *testing.T) {
 		}
 		if n := f.count(`SELECT count(*) FROM tracer_project WHERE name = $1`, hiddenNamePrefix+agent); n != 1 {
 			t.Fatalf("%d rows of that name", n)
+		}
+	})
+
+	t.Run("a racer that meets the row another transaction is inserting reports no insert", func(t *testing.T) {
+		agent := f.agent(org, &ownWS, false)
+		known := uuid.NewString()
+
+		// The row is held uncommitted, so the statement's read of existing
+		// projects cannot see it: only the insert's own conflict path, once the
+		// holder commits, can answer, and it must say the row was not inserted
+		// by this call.
+		tx, err := pool.Begin(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		held := true
+		defer func() {
+			if held {
+				_ = tx.Rollback(ctx)
+			}
+		}()
+		_, err = tx.Exec(ctx, `
+			INSERT INTO tracer_project (
+				id, name, organization_id, workspace_id, trace_type, model_type, source,
+				tags, metadata, config, session_config, user_id, deleted, created_at, updated_at,
+				simulation_agent_id
+			) VALUES ($1, $2, $3, $4, 'observe', 'GenerativeLLM', 'simulator',
+				'[]'::jsonb, '{}'::jsonb, $5::jsonb, '[]'::jsonb, NULL, false, now(), now(), $6)`,
+			known, hiddenNamePrefix+agent, org, ownWS, expectedProjectConfig, agent)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		type answer struct {
+			project SimulationProject
+			err     error
+		}
+		done := make(chan answer, 1)
+		go func() {
+			project, err := r.EnsureSimulationProject(ctx, org, agent)
+			done <- answer{project, err}
+		}()
+
+		// Wait until a backend of this database is blocked on a lock held by
+		// another transaction: that is the call, waiting for the holder.
+		waiting := false
+		deadline := time.Now().Add(5 * time.Second)
+		for !waiting && time.Now().Before(deadline) {
+			var n int
+			err := pool.QueryRow(ctx, `
+				SELECT count(*) FROM pg_stat_activity
+				WHERE datname = current_database() AND pid <> pg_backend_pid()
+				  AND wait_event_type = 'Lock' AND query LIKE '%INSERT INTO tracer_project%'`).Scan(&n)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if waiting = n > 0; !waiting {
+				time.Sleep(10 * time.Millisecond)
+			}
+		}
+		if !waiting {
+			_ = tx.Rollback(ctx)
+			held = false
+			<-done
+			t.Fatal("the call never blocked on the row held by the open transaction")
+		}
+
+		if err := tx.Commit(ctx); err != nil {
+			t.Fatal(err)
+		}
+		held = false
+		got := <-done
+		if got.err != nil {
+			t.Fatal(got.err)
+		}
+		if got.project.ID != known || got.project.Created {
+			t.Fatalf("project = %+v, want the existing row %s with no insert", got.project, known)
+		}
+		if n := f.count(`SELECT count(*) FROM tracer_project WHERE simulation_agent_id = $1`, agent); n != 1 {
+			t.Fatalf("%d rows", n)
+		}
+	})
+
+	t.Run("a unique violation other than the project name is a transient error", func(t *testing.T) {
+		o := uuid.NewString()
+		ws := f.workspace(o, false, true, false)
+		agent := f.agent(o, &ws, false)
+		f.exec(`INSERT INTO tracer_project (id, name, organization_id, workspace_id, model_type, trace_type, source, tags, deleted, created_at, updated_at)
+			VALUES ($1, $2, $3, $4, 'GenerativeLLM', 'observe', 'simulator', '[]', false, now(), now())`,
+			uuid.NewString(), "ordinary-"+agent, o, ws)
+		// Scoped to this organization so rows of the other subtests do not
+		// stop the index from being built.
+		index := "extra_unique_" + strings.ReplaceAll(o, "-", "")
+		f.exec(fmt.Sprintf(`CREATE UNIQUE INDEX %s ON tracer_project (organization_id, source) WHERE organization_id = '%s'`, index, o))
+		defer func() {
+			if _, err := pool.Exec(ctx, `DROP INDEX `+index); err != nil {
+				t.Error(err)
+			}
+		}()
+
+		_, err := r.EnsureSimulationProject(ctx, o, agent)
+		var pgErr *pgconn.PgError
+		if !errors.As(err, &pgErr) || pgErr.ConstraintName != index {
+			t.Fatalf("err = %v, want the violation of %s", err, index)
+		}
+		if errors.Is(err, ErrSimulationNameConflict) || errors.Is(err, ErrSimulationAgentDeleted) || errors.Is(err, ErrSimulationNoWorkspace) {
+			t.Fatalf("a retryable failure was taken for a refusal of the agent: %v", err)
+		}
+		if n := f.count(`SELECT count(*) FROM tracer_project WHERE simulation_agent_id = $1`, agent); n != 0 {
+			t.Fatalf("%d rows written", n)
 		}
 	})
 
