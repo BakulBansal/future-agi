@@ -13,6 +13,7 @@ import {
 import Iconify from "src/components/iconify";
 import { CustomTabs } from "src/components/tabs/tabs";
 import ComingSoonChip from "src/sections/simulate/environments/components/ComingSoonChip";
+import { ENV_TABS_SX } from "src/sections/simulate/environments/environmentOptions";
 import { CONNECTED_AGENTS_PATH } from "../../agentsTabs";
 import AgentDetailHeader from "./AgentDetailHeader";
 import {
@@ -108,6 +109,9 @@ export default function AgentDetailLayout() {
             onChange={(_, v) =>
               navigate(`${agentDetailPath(agentId, v)}${search}`)
             }
+            variant="scrollable"
+            scrollButtons={false}
+            sx={ENV_TABS_SX}
           >
             {DETAIL_TABS.map((t) => (
               <Tab key={t.id} value={t.id} label={tabLabel(t)} disableRipple />
