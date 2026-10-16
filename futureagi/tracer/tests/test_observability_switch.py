@@ -14,6 +14,7 @@ from unittest.mock import patch
 import pytest
 from django.db import connection
 from django.db.models import QuerySet
+from rest_framework.exceptions import ErrorDetail
 from structlog.testing import capture_logs
 
 import tracer.services.observability_switch as switch
@@ -506,16 +507,53 @@ def test_turn_on_of_an_existing_off_row_is_checked(organization, workspace, user
     assert _stored(row)[1] is True
 
 
-def test_row_of_a_deleted_project_is_cleared(organization, workspace, user):
-    agent = _agent_with_row(organization, workspace, enabled=True)
+def _delete_project(agent):
     Project._base_manager.filter(pk=agent.observability_provider.project_id).update(
         deleted=True
     )
+
+
+def _delete_row(agent):
+    agent.observability_provider.delete()
+
+
+@pytest.mark.parametrize("delete", [_delete_project, _delete_row])
+def test_dead_row_is_cleared_on_turn_off(organization, workspace, user, delete):
+    agent = _agent_with_row(organization, workspace, enabled=True)
+    delete(agent)
     agent = _stored_agent(agent)
+    with seams(make_summary()) as (read_summary, _):
+        assert _turn(agent, False, user, organization, workspace) is None
+    assert _stored_agent(agent).observability_provider_id is None
+    read_summary.assert_not_called()
+
+
+def test_turn_on_after_a_deleted_project_makes_nothing(organization, workspace, user):
+    # The agent page sends its stored "on" with every save, so a fresh project
+    # here would bring back the one the user deleted.
+    agent = _agent_with_row(organization, workspace, enabled=True)
+    _delete_project(agent)
+    agent = _stored_agent(agent)
+    created = _created()
     with seams(make_summary()) as (read_summary, _):
         assert _turn(agent, True, user, organization, workspace) is None
     assert _stored_agent(agent).observability_provider_id is None
+    assert _created() == created
     read_summary.assert_not_called()
+
+
+def test_turn_on_after_a_deleted_row_makes_a_fresh_one(organization, workspace, user):
+    agent = _agent_with_row(organization, workspace, enabled=False)
+    dead = agent.observability_provider
+    _delete_row(agent)
+
+    row = _turn_on(_stored_agent(agent), user, organization, workspace)
+
+    assert row is not None and row.pk != dead.pk
+    assert row.project_id != dead.project_id
+    linked = _stored_agent(agent).observability_provider_id
+    assert linked == row.pk
+    assert ObservabilityProvider.objects.filter(pk=linked, enabled=True).exists()
 
 
 @pytest.mark.parametrize("kind", [None, "hosted", "endpoint"])
@@ -1236,13 +1274,11 @@ def test_switch_writes_only_the_link_when_it_clears_a_deleted_projects_row(
     organization, workspace, user
 ):
     agent = _agent_with_row(organization, workspace, enabled=True)
-    Project._base_manager.filter(pk=agent.observability_provider.project_id).update(
-        deleted=True
-    )
+    _delete_project(agent)
     agent = _stored_agent(agent)
     seen, recording = _statements()
     with seams(make_summary()), recording:
-        _turn(agent, True, user, organization, workspace)
+        _turn(agent, False, user, organization, workspace)
 
     assert agent_update_columns(seen) == [{"observability_provider_id", "updated_at"}]
 
@@ -1260,3 +1296,130 @@ def test_switch_keeps_a_field_another_copy_wrote_meanwhile(
     stored = _stored_agent(agent)
     assert stored.description == "Written meanwhile"
     assert stored.observability_provider_id is not None
+
+
+def test_first_turn_on_reads_the_agent_once(organization, workspace, user):
+    agent = _agent(organization, workspace)
+    with seams(make_summary(agent_definition_id=agent.id)) as (read_summary, _):
+        row = _turn(agent, True, user, organization, workspace)
+    assert row is not None
+    assert read_summary.call_count == 1
+
+
+def test_project_error_is_logged_before_the_refusal(organization, workspace, user):
+    agent = _agent(organization, workspace)
+    # What the serializer's errors look like when the helper returns them.
+    errors = {
+        "provider": [
+            ErrorDetail('"phone x" is not a valid choice.', code="invalid_choice")
+        ]
+    }
+    with (
+        seams(make_summary(agent_definition_id=agent.id)),
+        patch.object(switch, "create_observability_provider", return_value=errors),
+        capture_logs() as logs,
+        pytest.raises(switch.ObservabilityProjectError),
+    ):
+        _turn(agent, True, user, organization, workspace)
+
+    [logged] = _events(logs, "observability_switch_project_error")
+    assert logged["log_level"] == "error"
+    assert logged["agent_definition_id"] == str(agent.id)
+    assert (logged["fields"], logged["codes"]) == (["provider"], ["invalid_choice"])
+    # The message text can carry free text, so it is never logged.
+    assert "phone x" not in str(logged)
+    assert _stored_agent(agent).observability_provider_id is None
+
+
+def test_project_error_from_an_exception_logs_its_type(organization, workspace, user):
+    agent = _agent(organization, workspace)
+    errors = {"error": "Invalid data", "details": ValueError("agent name here")}
+    with (
+        seams(make_summary(agent_definition_id=agent.id)),
+        patch.object(switch, "create_observability_provider", return_value=errors),
+        capture_logs() as logs,
+        pytest.raises(switch.ObservabilityProjectError),
+    ):
+        _turn(agent, True, user, organization, workspace)
+
+    [logged] = _events(logs, "observability_switch_project_error")
+    assert logged["error_type"] == "ValueError"
+    assert "agent name here" not in str(logged)
+
+
+@pytest.mark.parametrize("enabled", [True, False])
+def test_clearing_a_dead_link_switches_a_link_made_meanwhile(
+    organization, workspace, user, enabled
+):
+    # This copy still holds the dead link; another request already linked a new row.
+    agent = _agent_with_row(organization, workspace, enabled=True)
+    _delete_row(agent)
+    stale = _stored_agent(agent)
+    assert stale.observability_provider.deleted  # loaded while dead
+    newer = _row(organization, workspace, {})
+    ObservabilityProvider.no_workspace_objects.filter(pk=newer.pk).update(
+        enabled=not enabled
+    )
+    AgentDefinition.no_workspace_objects.filter(pk=agent.pk).update(
+        observability_provider=newer
+    )
+    created = _created()
+
+    with seams(make_summary(agent_definition_id=agent.id)):
+        _turn(stale, enabled, user, organization, workspace)
+
+    assert _stored_agent(agent).observability_provider_id == newer.pk
+    assert _stored(newer)[1] is enabled
+    assert _created() == created
+
+
+def _project_workspace(row):
+    return str(Project.no_workspace_objects.get(pk=row.project_id).workspace_id)
+
+
+def test_version_view_puts_the_project_in_the_agents_workspace(
+    auth_client, organization, user
+):
+    other = _other_workspace(organization, user)
+    auth_client.set_workspace(other)
+    agent = _agent(organization, other)
+
+    response = auth_client.post(
+        f"/simulate/agent-definitions/{agent.id}/versions/create/",
+        {"commit_message": "on", "observability_enabled": True},
+        format="json",
+    )
+
+    assert response.status_code == 201
+    assert _project_workspace(_stored_agent(agent).observability_provider) == str(
+        other.id
+    )
+
+
+def test_create_view_puts_the_project_in_the_request_workspace(
+    auth_client, organization, user
+):
+    other = _other_workspace(organization, user)
+    auth_client.set_workspace(other)
+
+    response = auth_client.post(
+        "/simulate/agent-definitions/create/",
+        {
+            "agent_name": f"Elsewhere {uuid.uuid4().hex[:8]}",
+            "agent_type": "voice",
+            "provider": "vapi",
+            "contact_number": "+12345678901",
+            "inbound": True,
+            "commit_message": "Initial version",
+            "languages": ["en"],
+            "api_key": "test-key",
+            "assistant_id": "assistant-1",
+            "observability_enabled": True,
+        },
+        format="json",
+    )
+
+    assert response.status_code == 201
+    agent = AgentDefinition.no_workspace_objects.get(pk=response.json()["agent"]["id"])
+    assert str(agent.workspace_id) == str(other.id)
+    assert _project_workspace(agent.observability_provider) == str(other.id)

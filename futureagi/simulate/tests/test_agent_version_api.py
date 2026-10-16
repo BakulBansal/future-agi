@@ -41,6 +41,8 @@ from tracer.tests.test_observability_switch import (
     _agent,
     _agent_with_row,
     _created,
+    _delete_project,
+    _delete_row,
     _row,
     _statements,
     _stored,
@@ -1214,6 +1216,23 @@ class TestCreateAgentVersionObservability:
             )
         assert response.status_code == status.HTTP_201_CREATED
         assert _stored(agent.observability_provider)[1] is False
+
+    @pytest.mark.parametrize("delete", [_delete_project, _delete_row])
+    def test_source_agent_absent_field_with_a_dead_row_stays_off(
+        self, auth_client, organization, workspace, delete
+    ):
+        # The link still points at the deleted row, whose enabled column says on.
+        agent = _agent_with_row(organization, workspace, enabled=True)
+        delete(agent)
+        created = _created()
+        summary = make_summary(agent_definition_id=agent.id, kind="source")
+        with seams(summary):
+            response = _create_version(auth_client, agent, {})
+
+        assert response.status_code == status.HTTP_201_CREATED
+        assert _stored_agent(agent).observability_provider_id is None
+        assert _created() == created
+        assert _newest_snapshot(agent)[1]["observability_enabled"] is False
 
     def test_project_error_is_500(self, auth_client, organization, workspace):
         agent = _agent(organization, workspace, agent_name="Before Rename")
