@@ -434,7 +434,10 @@ def send_to_harness(
     from simulate.tasks.hosted_harness_conversation import schedule_conversation_runtime
 
     conversation, _message, _created = enqueue_message(
-        job, content=content, client_request_id=client_request_id
+        job,
+        content=content,
+        client_request_id=client_request_id,
+        payload={"from_platform": True},
     )
     schedule_conversation_runtime(str(conversation.id), endpoint_base_url)
 
