@@ -27,7 +27,7 @@ export function Pill({ children }) {
 }
 Pill.propTypes = { children: PropTypes.node };
 
-export function Card({ title, action, children }) {
+export function Card({ title, action, children, sx }) {
   return (
     <Box
       sx={{
@@ -37,6 +37,9 @@ export function Card({ title, action, children }) {
         bgcolor: "background.paper",
         overflow: "hidden",
         minWidth: 0,
+        display: "flex",
+        flexDirection: "column",
+        ...sx,
       }}
     >
       <Stack
@@ -59,7 +62,11 @@ export function Card({ title, action, children }) {
         {action}
       </Stack>
       {/* Its own box, so rows can drop the first top border with :first-of-type. */}
-      <Box>{children}</Box>
+      <Box
+        sx={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}
+      >
+        {children}
+      </Box>
     </Box>
   );
 }
@@ -67,6 +74,7 @@ Card.propTypes = {
   title: PropTypes.node,
   action: PropTypes.node,
   children: PropTypes.node,
+  sx: PropTypes.object,
 };
 
 export function Row({ cells, header = false, onClick }) {

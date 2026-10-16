@@ -1,4 +1,12 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import {
+  afterAll,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
@@ -60,8 +68,36 @@ const servePages = (pages) =>
     return Promise.resolve({ data: HOSTED_AGENT_DETAIL });
   });
 
+// jsdom has no layout, so every box measures 0×0 and looks "not scrollable".
+// Tests that scroll give the versions list a real-looking size first.
+const sizeOf = { scrollHeight: 0, clientHeight: 0 };
+const realDescriptors = {};
+const fakeListSize = ({ scrollHeight, clientHeight }) => {
+  Object.assign(sizeOf, { scrollHeight, clientHeight });
+};
+beforeAll(() => {
+  ["scrollHeight", "clientHeight"].forEach((key) => {
+    realDescriptors[key] = Object.getOwnPropertyDescriptor(
+      Element.prototype,
+      key,
+    );
+    Object.defineProperty(Element.prototype, key, {
+      configurable: true,
+      get() {
+        return this.dataset?.testid === "versions-scroll" ? sizeOf[key] : 0;
+      },
+    });
+  });
+});
+afterAll(() => {
+  Object.entries(realDescriptors).forEach(([key, d]) => {
+    if (d) Object.defineProperty(Element.prototype, key, d);
+  });
+});
+
 beforeEach(() => {
   axios.get.mockReset();
+  fakeListSize({ scrollHeight: 800, clientHeight: 300 });
   servePages([[V2, V1]]);
 });
 
@@ -111,14 +147,6 @@ describe("AgentVersionsTab", () => {
     expect(screen.queryByTestId("version-skeleton")).toBeNull();
 
     const list = screen.getByTestId("versions-scroll");
-    Object.defineProperty(list, "scrollHeight", {
-      value: 800,
-      configurable: true,
-    });
-    Object.defineProperty(list, "clientHeight", {
-      value: 300,
-      configurable: true,
-    });
     Object.defineProperty(list, "scrollTop", {
       value: 500,
       configurable: true,
@@ -133,6 +161,14 @@ describe("AgentVersionsTab", () => {
     expect(screen.queryByTestId("version-skeleton")).toBeNull();
   });
 
+  it("keeps loading pages while the list is too short to scroll", async () => {
+    fakeListSize({ scrollHeight: 300, clientHeight: 300 });
+    servePages([[V2], [V1]]);
+    renderTab();
+    expect(await screen.findByText("First version")).toBeInTheDocument();
+    expect(screen.getAllByTestId("version-entry")).toHaveLength(2);
+  });
+
   it("loads older versions when the list is scrolled to the end", async () => {
     servePages([[V2], [V1]]);
     renderTab();
@@ -141,14 +177,6 @@ describe("AgentVersionsTab", () => {
     expect(screen.queryByRole("button")).toBeNull();
 
     const list = screen.getByTestId("versions-scroll");
-    Object.defineProperty(list, "scrollHeight", {
-      value: 800,
-      configurable: true,
-    });
-    Object.defineProperty(list, "clientHeight", {
-      value: 300,
-      configurable: true,
-    });
     Object.defineProperty(list, "scrollTop", {
       value: 500,
       configurable: true,

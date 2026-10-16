@@ -78,7 +78,16 @@ export default function AgentDetailLayout() {
       <Helmet>
         <title>{`${agent.name} · Agents`}</title>
       </Helmet>
-      <Box sx={{ p: 2, height: "100%", overflow: "auto" }}>
+      <Box
+        sx={{
+          px: 2,
+          pt: 2,
+          height: "100%",
+          overflow: "auto",
+          display: "flex",
+          flexDirection: "column",
+        }}
+      >
         <AgentDetailHeader
           agent={agent}
           onBack={back}
@@ -86,7 +95,14 @@ export default function AgentDetailLayout() {
             navigate(`${agentDetailPath(agentId, "environments")}${search}`)
           }
         />
-        <Box sx={{ borderBottom: "1px solid", borderColor: "divider", mb: 2 }}>
+        <Box
+          sx={{
+            borderBottom: "1px solid",
+            borderColor: "divider",
+            mb: 2,
+            flexShrink: 0,
+          }}
+        >
           <CustomTabs
             value={DETAIL_TABS.some((t) => t.id === tab) ? tab : false}
             onChange={(_, v) =>
@@ -119,7 +135,12 @@ export default function AgentDetailLayout() {
             </Box>
           }
         >
-          <Outlet />
+          {/* The tab gets the height left below the tabs; taller content
+              still scrolls the page. The bottom gap lives on the tab itself,
+              so it shows after content that overflows. */}
+          <Box sx={{ flex: "1 1 0", minHeight: 0, "& > *": { pb: 2 } }}>
+            <Outlet />
+          </Box>
         </Suspense>
       </Box>
     </>

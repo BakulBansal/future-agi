@@ -1,5 +1,5 @@
 import PropTypes from "prop-types";
-import React, { useMemo } from "react";
+import React, { useEffect, useMemo } from "react";
 import { format } from "date-fns";
 import { Box, Skeleton, Stack, Typography } from "@mui/material";
 import { useScrollEnd } from "src/hooks/use-scroll-end";
@@ -93,6 +93,19 @@ export default function AgentVersionsTab() {
     !!agent,
     versions.length,
   ]);
+  // A page that doesn't fill the list leaves nothing to scroll, so keep
+  // loading until the list overflows or every version is in.
+  useEffect(() => {
+    const list = scrollRef.current;
+    if (!list || !hasNextPage || isFetchingNextPage) return;
+    if (list.scrollHeight <= list.clientHeight + 5) fetchNextPage();
+  }, [
+    scrollRef,
+    hasNextPage,
+    isFetchingNextPage,
+    fetchNextPage,
+    versions.length,
+  ]);
   if (!agent) return null;
   const total = agent.versionCount;
 
@@ -101,18 +114,24 @@ export default function AgentVersionsTab() {
       sx={{
         display: "grid",
         gap: 2,
-        gridTemplateColumns: { xs: "1fr", lg: "300px 1fr" },
+        gridTemplateColumns: "300px 1fr",
         alignItems: "start",
+        // The timeline fills the tab's height and scrolls inside, at any width.
+        height: "100%",
       }}
     >
-      <Card title={`${total} version${total === 1 ? "" : "s"}`}>
+      <Card
+        title={`${total} version${total === 1 ? "" : "s"}`}
+        sx={{ height: "100%" }}
+      >
         <Box
           ref={scrollRef}
           data-testid="versions-scroll"
           sx={{
             px: 2,
             py: 1.75,
-            maxHeight: "calc(100vh - 300px)",
+            flex: 1,
+            minHeight: 0,
             overflowY: "auto",
           }}
         >
