@@ -8,6 +8,7 @@ import {
   mapVersionDetail,
   passRateOf,
   toRun,
+  toVersion,
   useAgentDetail,
   useAgentEnvironments,
   useAgentRuns,
@@ -115,21 +116,24 @@ describe("toRun", () => {
   });
 });
 
-describe("mapAgentDetail", () => {
-  it("lists versions newest first with their labels", () => {
-    const a = mapAgentDetail(HOSTED_AGENT_DETAIL);
-    expect(a.versions.map((v) => v.label)).toEqual(["v2", "v1"]);
-    expect(a.versions[0]).toEqual({
+describe("toVersion", () => {
+  it("maps a versions-list row to what a timeline row shows", () => {
+    const raw = HOSTED_AGENT_DETAIL.versions.find((v) => v.id === "v2-id");
+    expect(toVersion(raw)).toEqual({
       id: "v2-id",
       number: 2,
       label: "v2",
-      status: "active",
       isActive: true,
       isLatest: true,
       commitMessage: "Shorter greeting",
       createdAt: "2026-10-15T09:00:00Z",
     });
-    expect(a.activeVersionId).toBe("v2-id");
+  });
+});
+
+describe("mapAgentDetail", () => {
+  it("knows the active version", () => {
+    expect(mapAgentDetail(HOSTED_AGENT_DETAIL).activeVersionId).toBe("v2-id");
   });
 
   it("maps the header fields", () => {
@@ -150,9 +154,10 @@ describe("mapAgentDetail", () => {
       ...HOSTED_AGENT_DETAIL,
       versions: [],
       active_version: null,
+      version_count: 0,
     });
-    expect(a.versions).toEqual([]);
     expect(a.activeVersionId).toBeNull();
+    expect(a.versionCount).toBe(0);
   });
 });
 
@@ -161,11 +166,7 @@ describe("mapVersionDetail", () => {
     const v = mapVersionDetail(CODE_VERSION_DETAIL);
     expect(v.label).toBe("v1");
     expect(v.agentKind).toBe("source");
-    expect(v.agentDetails).toMatchObject({
-      sdkVersion: "0.2.3",
-      storedAt: "2026-10-14T11:50:22.212003Z",
-      setupStale: false,
-    });
+    expect(v.agentDetails.setupStale).toBe(false);
     expect(v.agentDetails.agent.name).toBe("uber_voice_agent");
   });
 

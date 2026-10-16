@@ -25,9 +25,7 @@ export const mapConnectedAgent = (raw) => ({
         ? "inbound"
         : "outbound"
       : null,
-  agentKind: raw.agent_kind ?? null,
   source: raw.source ?? null,
-  latestVersionId: raw.latest_version_id ?? null,
   latestLabel: raw.latest_version != null ? `v${raw.latest_version}` : null,
   versionCount: raw.version_count,
   environments: raw.environments,

@@ -98,10 +98,9 @@ const Note = ({ children, tone }) => (
     sx={{
       px: 2,
       py: 1,
-      borderTop: "1px solid",
-      borderColor: "divider",
-      // Right under the card title, which already draws that line.
-      "&:first-child": { borderTop: "none" },
+      // A line only between items; under the card title, which already
+      // draws one, there's none.
+      "* + &": { borderTop: "1px solid", borderColor: "divider" },
       typography: "s3",
       color: tone === "warning" ? "#D97706" : "text.subtitle",
     }}

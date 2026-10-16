@@ -168,7 +168,10 @@ describe("AgentVersionsTab", () => {
         },
       ),
     );
-    await waitFor(() => expect(labels()).toEqual(["v1", "v2"]));
+    await waitFor(() =>
+      expect(screen.queryAllByTestId("version-skeleton")).toHaveLength(0),
+    );
+    expect(labels()).toEqual(["v1", "v2"]);
   });
 
   it("doesn't pin a selected version that's on the first page", async () => {

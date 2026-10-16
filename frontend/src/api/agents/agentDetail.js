@@ -41,7 +41,6 @@ export const toVersion = (v) => ({
   id: v.id,
   number: v.version_number,
   label: v.version_name_display || `v${v.version_number}`,
-  status: v.status ?? null,
   isActive: !!v.is_active,
   isLatest: !!v.is_latest,
   commitMessage: v.commit_message ?? null,
@@ -51,14 +50,9 @@ export const toVersion = (v) => ({
 export const mapAgentDetail = (raw) => ({
   id: raw.id,
   name: raw.agent_name,
-  description: raw.description ?? null,
-  agentType: raw.agent_type ?? null,
   assistantId: raw.assistant_id || null,
   provider: raw.provider || null,
   createdAt: raw.created_at ?? null,
-  versions: (raw.versions ?? [])
-    .map(toVersion)
-    .sort((a, b) => b.number - a.number),
   activeVersionId: raw.active_version?.id ?? null,
   versionCount: raw.version_count,
   agentKind: raw.agent_kind ?? null,
@@ -71,8 +65,6 @@ const toAgentDetails = (d) =>
   d
     ? {
         agent: d.agent,
-        sdkVersion: d.sdk_version,
-        storedAt: d.stored_at,
         setupStale: !!d.setup_stale,
       }
     : null;
@@ -88,7 +80,6 @@ export const mapVersionDetail = (raw) => ({
   agentKind: raw.agent_kind ?? null,
   agentDetails: toAgentDetails(raw.agent_details),
   apiKey: raw.api_key ?? null,
-  description: raw.description ?? null,
   config: raw.configuration_snapshot ?? {},
 });
 

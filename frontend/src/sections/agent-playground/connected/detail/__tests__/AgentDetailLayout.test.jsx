@@ -232,7 +232,7 @@ describe("AgentDetailLayout", () => {
     );
   });
 
-  it("pins the picked version to the top of the menu until its page loads", async () => {
+  it("pins a picked version that isn't on the first page to the top of the menu", async () => {
     serve(HOSTED, { pageSize: 1 });
     renderAt(`${base(HOSTED)}/overview?v=v1-id`);
     const select = await screen.findByRole("combobox");

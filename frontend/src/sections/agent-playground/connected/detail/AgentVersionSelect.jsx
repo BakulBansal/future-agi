@@ -18,8 +18,8 @@ const loadingRows = (n) =>
 
 /**
  * Picks the version the tabs show. Versions come from the paginated list and
- * load as the menu scrolls; the selected one stays pinned at the top until
- * its page loads.
+ * load as the menu scrolls; a selected version that isn't on the first page
+ * stays pinned at the top.
  */
 export default function AgentVersionSelect({ agentId, value, onChange }) {
   const {
