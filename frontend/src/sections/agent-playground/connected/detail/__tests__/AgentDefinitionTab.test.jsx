@@ -199,6 +199,20 @@ describe("AgentDefinitionTab", () => {
     );
   });
 
+  it("turns observability on from its label too", async () => {
+    serve(HOSTED_AGENT_DETAIL, { "v2-id": HOSTED_VERSION_DETAIL });
+    axios.put.mockResolvedValue({ data: { message: "ok" } });
+    renderAt(HOSTED_AGENT_DETAIL);
+    await screen.findByRole("checkbox", { name: "Observability" });
+    fireEvent.click(screen.getByText("Observability"));
+    await waitFor(() =>
+      expect(axios.put).toHaveBeenCalledWith(
+        `/simulate/agent-definitions/${HOSTED_AGENT_DETAIL.id}/edit/`,
+        { observability_enabled: true },
+      ),
+    );
+  });
+
   it("puts the toggle back and shows why when it's refused", async () => {
     serve(HOSTED_AGENT_DETAIL, { "v2-id": HOSTED_VERSION_DETAIL });
     axios.put.mockRejectedValue(OBSERVABILITY_REFUSED);

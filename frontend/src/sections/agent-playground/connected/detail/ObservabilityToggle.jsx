@@ -68,37 +68,43 @@ export default function ObservabilityToggle({ agent }) {
         overflow: "hidden",
       }}
     >
+      {/* The switch sits next to its label, and the label toggles it too. */}
       <Stack
         direction="row"
         alignItems="center"
         spacing={1}
-        sx={{ px: 2, minHeight: 44 }}
+        sx={{ pl: 1, pr: 2, minHeight: 44 }}
       >
-        <Typography sx={{ typography: "s2", fontWeight: 600, flexShrink: 0 }}>
-          Observability
-        </Typography>
-        <Typography
-          noWrap
-          title={caption}
+        <Stack
+          component="label"
+          direction="row"
+          alignItems="center"
           sx={{
-            typography: "s3",
-            color: "text.subtitle",
-            flex: 1,
-            minWidth: 0,
+            flexShrink: 0,
+            cursor: supported && !mutation.isPending ? "pointer" : "default",
           }}
         >
-          {caption}
-        </Typography>
+          <Switch
+            size="small"
+            checked={checked}
+            disabled={!supported || mutation.isPending}
+            onChange={(e) => change(e.target.checked)}
+            inputProps={{ "aria-label": "Observability" }}
+          />
+          <Typography sx={{ typography: "s2", fontWeight: 600, ml: 0.5 }}>
+            Observability
+          </Typography>
+        </Stack>
         {mutation.isPending && (
           <CircularProgress size={12} aria-label="Saving" />
         )}
-        <Switch
-          size="small"
-          checked={checked}
-          disabled={!supported || mutation.isPending}
-          onChange={(e) => change(e.target.checked)}
-          inputProps={{ "aria-label": "Observability" }}
-        />
+        <Typography
+          noWrap
+          title={caption}
+          sx={{ typography: "s3", color: "text.subtitle", minWidth: 0 }}
+        >
+          {caption}
+        </Typography>
       </Stack>
       {error && (
         <Stack
