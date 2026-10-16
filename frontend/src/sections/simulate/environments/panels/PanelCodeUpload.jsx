@@ -1,7 +1,7 @@
 import PropTypes from "prop-types";
 import { useReducer, useRef } from "react";
 import { alpha } from "@mui/material/styles";
-import { Box, Stack, Typography, Button, LinearProgress, Checkbox, FormControlLabel } from "@mui/material";
+import { Box, Stack, Typography, Button, LinearProgress } from "@mui/material";
 import Iconify from "src/components/iconify";
 import { fData } from "src/utils/format-number";
 import { uploadHarnessSource } from "src/api/harness/harness";
@@ -11,6 +11,7 @@ import Field from "../components/Field";
 import ContinueRow from "../components/ContinueRow";
 import EnvironmentValues from "./EnvironmentValues";
 import ScenarioCount from "./ScenarioCount";
+import ObservabilityChoice from "./ObservabilityChoice";
 import { DEFAULT_SCENARIOS, isValidScenarioCount } from "./scenarioCountRules";
 import RuntimePreflight from "./RuntimePreflight";
 import { CreditExhaustionBanner } from "src/components/CreditExhaustionBanner";
@@ -293,22 +294,7 @@ export default function PanelCodeUpload() {
         secretFiles={secretFiles} onSecretFiles={set("secretFiles")}
       />
       <ScenarioCount value={scenarioCount} onChange={set("scenarioCount")} />
-      <Box>
-        <FormControlLabel
-          label="Turn on observability"
-          control={
-            <Checkbox
-              size="small"
-              checked={observabilityEnabled}
-              onChange={(e) => set("observabilityEnabled")(e.target.checked)}
-              inputProps={{ "aria-describedby": "observability-helper" }}
-            />
-          }
-        />
-        <Typography id="observability-helper" sx={{ typography: "s3", color: "text.subtitle", ml: 4 }}>
-          We can observe your agent only if its code already sends telemetry (OpenTelemetry or traceAI). If it doesn&apos;t, the Environment still builds, without observability.
-        </Typography>
-      </Box>
+      <ObservabilityChoice checked={observabilityEnabled} onChange={set("observabilityEnabled")} />
       <ParallelismField
         value={build.parallelism}
         input={build.parallelismInput}

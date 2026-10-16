@@ -1,5 +1,5 @@
 import { useReducer } from "react";
-import { Box, Checkbox, FormControlLabel, Stack, Typography } from "@mui/material";
+import { Box, Stack } from "@mui/material";
 import { parseGitHubInput } from "src/pages/dashboard/harness/requestMapper";
 import Field from "../components/Field";
 import Label from "../components/Label";
@@ -8,6 +8,7 @@ import ProviderRow from "../components/ProviderRow";
 import ContinueRow from "../components/ContinueRow";
 import EnvironmentValues from "./EnvironmentValues";
 import ScenarioCount from "./ScenarioCount";
+import ObservabilityChoice from "./ObservabilityChoice";
 import { DEFAULT_SCENARIOS, isValidScenarioCount } from "./scenarioCountRules";
 import RuntimePreflight from "./RuntimePreflight";
 import { CreditExhaustionBanner } from "src/components/CreditExhaustionBanner";
@@ -139,22 +140,7 @@ export default function PanelSourceRepo() {
         secretFiles={secretFiles} onSecretFiles={set("secretFiles")}
       />
       <ScenarioCount value={scenarioCount} onChange={set("scenarioCount")} />
-      <Box>
-        <FormControlLabel
-          label="Turn on observability"
-          control={
-            <Checkbox
-              size="small"
-              checked={observabilityEnabled}
-              onChange={(e) => set("observabilityEnabled")(e.target.checked)}
-              inputProps={{ "aria-describedby": "observability-helper" }}
-            />
-          }
-        />
-        <Typography id="observability-helper" sx={{ typography: "s3", color: "text.subtitle", ml: 4 }}>
-          We can observe your agent only if its code already sends telemetry (OpenTelemetry or traceAI). If it doesn&apos;t, the Environment still builds, without observability.
-        </Typography>
-      </Box>
+      <ObservabilityChoice checked={observabilityEnabled} onChange={set("observabilityEnabled")} />
       <ParallelismField
         value={build.parallelism}
         input={build.parallelismInput}

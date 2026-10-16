@@ -1,3 +1,4 @@
+from django.conf import settings
 from django.db import transaction
 from drf_yasg.utils import swagger_auto_schema
 from rest_framework import status
@@ -300,13 +301,25 @@ class CreateAgentVersionView(APIView):
                         creds_input.livekit_api_secret,
                         creds_input.livekit_agent_name,
                     )
+                    saved_config = creds_input.livekit_config_json
                 else:
                     saved_values = (creds_input.api_key, creds_input.assistant_id)
+                    saved_config = None
                 has_credential_value = any(
                     (value or "").strip() for value in saved_values
                 )
+                # Max Concurrency and Room Config are kept only on this row, and the
+                # page sends the default when nothing was changed.
+                has_setting_value = bool(saved_config) or (
+                    creds_input.livekit_max_concurrency is not None
+                    and creds_input.livekit_max_concurrency
+                    != settings.DEFAULT_LIVEKIT_MAX_CONCURRENCY
+                )
                 if not (
-                    sent_fields and not has_credential_value and agent_is_source(agent)
+                    sent_fields
+                    and not has_credential_value
+                    and not has_setting_value
+                    and agent_is_source(agent)
                 ):
                     sync_provider_credentials(version, creds_input)
 
