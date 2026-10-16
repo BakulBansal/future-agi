@@ -22,6 +22,7 @@ import PlaygroundAgentsTab from "../PlaygroundAgentsTab";
 import {
   CONNECTED_AGENTS_PATH,
   PLAYGROUND_AGENTS_PATH,
+  agentsSidebarPath,
   agentsTabPath,
   resolveAgentsTab,
 } from "../agentsTabs";
@@ -124,6 +125,34 @@ describe("agents tab paths", () => {
     expect(PLAYGROUND_AGENTS_PATH).toBe("/dashboard/agents/playground");
     expect(agentsTabPath("connected")).toBe(CONNECTED_AGENTS_PATH);
     expect(agentsTabPath("playground")).toBe(PLAYGROUND_AGENTS_PATH);
+  });
+});
+
+describe("agentsSidebarPath", () => {
+  it("keeps the tab you are on", () => {
+    expect(agentsSidebarPath("/dashboard/agents/playground")).toBe(
+      PLAYGROUND_AGENTS_PATH,
+    );
+    expect(agentsSidebarPath("/dashboard/agents/connected")).toBe(
+      CONNECTED_AGENTS_PATH,
+    );
+  });
+
+  it("returns to the tab a detail page belongs to", () => {
+    expect(agentsSidebarPath("/dashboard/agents/playground/abc/build")).toBe(
+      PLAYGROUND_AGENTS_PATH,
+    );
+    expect(agentsSidebarPath("/dashboard/agents/connected/abc")).toBe(
+      CONNECTED_AGENTS_PATH,
+    );
+  });
+
+  it("opens Connected agents from anywhere else", () => {
+    expect(agentsSidebarPath("/dashboard/prompt")).toBe(CONNECTED_AGENTS_PATH);
+    expect(agentsSidebarPath("/dashboard/agents")).toBe(CONNECTED_AGENTS_PATH);
+    expect(agentsSidebarPath("/dashboard/agents-other/playground")).toBe(
+      CONNECTED_AGENTS_PATH,
+    );
   });
 });
 
