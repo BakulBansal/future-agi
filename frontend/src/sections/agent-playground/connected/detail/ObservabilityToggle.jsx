@@ -9,33 +9,18 @@ import {
 } from "@mui/material";
 import { alpha } from "@mui/material/styles";
 import Iconify from "src/components/iconify";
-import {
-  useAgentVersion,
-  useSetObservability,
-} from "src/api/agents/agentDetail";
-
-const NOT_YET = "Turning observability on or off here is coming soon";
+import { useSetObservability } from "src/api/agents/agentDetail";
 
 /**
  * Observability on/off for the agent, from its observability_enabled. A
- * backend that doesn't send that yet can't change it either, so the switch
- * shows the active version's saved state, read-only. A refused change snaps
- * back and says why.
+ * refused change snaps back and says why.
  */
 export default function ObservabilityToggle({ agent }) {
-  const supported = agent.observabilityEnabled != null;
-  const active = useAgentVersion(
-    agent.id,
-    supported ? null : agent.activeVersionId,
-  );
-  const saved = supported
-    ? agent.observabilityEnabled
-    : !!active.data?.config?.observability_enabled;
   const [override, setOverride] = useState(null);
   const [error, setError] = useState(null);
   const mutation = useSetObservability(agent.id);
 
-  const checked = override ?? saved;
+  const checked = override ?? !!agent.observabilityEnabled;
   const change = (next) => {
     setOverride(next);
     setError(null);
@@ -52,11 +37,9 @@ export default function ObservabilityToggle({ agent }) {
     );
   };
 
-  let caption;
-  if (!supported) caption = NOT_YET;
-  else if (checked)
-    caption = "Tracking this agent's calls and logs in Observe.";
-  else caption = "Turn on to track calls, monitor logs and debug this agent.";
+  const caption = checked
+    ? "Tracking this agent's calls and logs in Observe."
+    : "Turn on to track calls, monitor logs and debug this agent.";
 
   return (
     <Box
@@ -82,13 +65,13 @@ export default function ObservabilityToggle({ agent }) {
           sx={{
             flexShrink: 0,
             userSelect: "none",
-            cursor: supported && !mutation.isPending ? "pointer" : "default",
+            cursor: mutation.isPending ? "default" : "pointer",
           }}
         >
           <Switch
             size="small"
             checked={checked}
-            disabled={!supported || mutation.isPending}
+            disabled={mutation.isPending}
             onChange={(e) => change(e.target.checked)}
             inputProps={{ "aria-label": "Observability" }}
           />

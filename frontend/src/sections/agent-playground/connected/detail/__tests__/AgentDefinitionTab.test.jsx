@@ -230,21 +230,6 @@ describe("AgentDefinitionTab", () => {
     expect(toggle).not.toBeChecked();
   });
 
-  it("shows the saved switch read-only while the backend can't change it", async () => {
-    const today = { ...HOSTED_AGENT_DETAIL };
-    delete today.observability_enabled;
-    serve(today, { "v2-id": HOSTED_VERSION_DETAIL });
-    renderAt(today);
-    const toggle = await screen.findByRole("checkbox", {
-      name: "Observability",
-    });
-    await waitFor(() => expect(toggle).toBeChecked());
-    expect(toggle).toBeDisabled();
-    expect(
-      screen.getByText(/Turning observability on or off here is coming soon/),
-    ).toBeInTheDocument();
-  });
-
   it("follows the server after a change it accepted", async () => {
     serve(HOSTED_AGENT_DETAIL, { "v2-id": HOSTED_VERSION_DETAIL });
     axios.put.mockResolvedValue({ data: { message: "ok" } });

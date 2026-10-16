@@ -106,13 +106,6 @@ describe("versionsParts", () => {
     });
   });
 
-  it("shows only the version while the count isn't sent", () => {
-    expect(versionsParts({ latestLabel: "v1", versionCount: null })).toEqual({
-      version: "v1",
-      rest: "",
-    });
-  });
-
   it("shows a dash for an agent with no versions", () => {
     expect(versionsParts({ latestLabel: null, versionCount: 0 })).toEqual({
       version: "",

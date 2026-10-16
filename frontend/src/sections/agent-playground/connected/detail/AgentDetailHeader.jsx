@@ -8,14 +8,13 @@ import { Pill } from "./bits";
 import { MONO } from "./format";
 
 const environmentsText = (count) => {
-  if (count == null) return null;
   if (count === 0) return "No environments";
   return `${count} environment${count === 1 ? "" : "s"}`;
 };
 
 /**
  * Back, name and source pill; then where the agent lives · created · how many
- * environments test it. Pieces the backend doesn't send yet are left out.
+ * environments test it.
  */
 export default function AgentDetailHeader({
   agent,
@@ -24,7 +23,7 @@ export default function AgentDetailHeader({
   action,
 }) {
   const isCode = agent.agentKind === "source";
-  const source = agent.source ?? agent.provider;
+  const { source } = agent;
   const where = isCode
     ? source
       ? sourceLabel(source)

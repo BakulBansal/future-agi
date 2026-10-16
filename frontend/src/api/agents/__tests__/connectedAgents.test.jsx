@@ -139,21 +139,6 @@ describe("mapConnectedAgent", () => {
     expect(a.versionCount).toBe(0);
   });
 
-  it("tolerates a row from before the new fields existed", () => {
-    const a = mapConnectedAgent({
-      id: "old",
-      agent_name: "Legacy",
-      agent_type: "voice",
-      inbound: true,
-      latest_version: 2,
-    });
-    expect(a.source).toBeNull();
-    expect(a.agentKind).toBeNull();
-    expect(a.versionCount).toBeNull();
-    expect(a.environments).toEqual([]);
-    expect(a.environmentCount).toBe(0);
-  });
-
   it("counts environments from environment_count, not the capped list", () => {
     const a = mapConnectedAgent({
       environment_count: 7,

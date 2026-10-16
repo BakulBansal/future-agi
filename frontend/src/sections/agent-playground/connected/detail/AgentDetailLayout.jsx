@@ -69,9 +69,8 @@ export default function AgentDetailLayout() {
 
   const tabLabel = (t) => {
     if (t.id === "versions") return `Versions ${agent.versionCount}`;
-    if (t.id === "environments" && agent.environmentCount != null) {
+    if (t.id === "environments")
       return `Environments ${agent.environmentCount}`;
-    }
     return t.label;
   };
 

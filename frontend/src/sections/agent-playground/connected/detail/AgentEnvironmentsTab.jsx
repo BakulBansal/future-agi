@@ -42,20 +42,16 @@ function LastResult({ env }) {
 
 LastResult.propTypes = { env: PropTypes.object.isRequired };
 
-/** Environments: every environment built for this code agent and how it did. */
+/** Environments: every environment testing this agent and how it last did. */
 export default function AgentEnvironmentsTab() {
-  const { agentId, agent } = useAgentRoute();
+  const { agentId } = useAgentRoute();
   const navigate = useNavigate();
   const {
     data: envs,
     isLoading,
     isError,
     error,
-  } = useAgentEnvironments(agentId, {
-    // The agent_definition_id filter ships with environment_count; asking
-    // before then would list every environment in the workspace.
-    enabled: agent?.environmentCount != null,
-  });
+  } = useAgentEnvironments(agentId);
 
   let body;
   if (isError && !envs) {

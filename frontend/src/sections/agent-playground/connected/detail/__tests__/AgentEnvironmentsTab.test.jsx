@@ -111,14 +111,6 @@ describe("AgentEnvironmentsTab", () => {
     ).toBeInTheDocument();
   });
 
-  it("asks for environments only once the backend sends a count", () => {
-    renderTab();
-    expect(envCalls.at(-1)).toEqual(["a1", { enabled: true }]);
-    agentState.current = { environmentCount: null };
-    renderTab();
-    expect(envCalls.at(-1)).toEqual(["a1", { enabled: false }]);
-  });
-
   it("shows a load error as an error", () => {
     envState.current = {
       isLoading: false,

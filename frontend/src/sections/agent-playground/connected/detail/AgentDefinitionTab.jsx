@@ -125,9 +125,7 @@ export default function AgentDefinitionTab() {
 
   const isCode = (version?.agentKind ?? agent.agentKind) === "source";
   const details = version?.agentDetails;
-  const readFrom = sourceLabel(
-    agent.source ?? version?.config?.provider ?? agent.provider,
-  );
+  const readFrom = sourceLabel(agent.source ?? version?.config?.provider);
 
   let body;
   if (!versionId) {

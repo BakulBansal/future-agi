@@ -34,13 +34,11 @@ export const hostedRows = ({ config = {}, apiKey }) => {
   };
   add("Provider", config.provider ? sourceLabel(config.provider) : null);
   add("Assistant ID", config.assistant_id, { mono: true });
-  if (apiKey !== undefined) {
-    rows.push({
-      label: "API key",
-      value: apiKey ?? "Not saved",
-      mono: apiKey != null,
-    });
-  }
+  rows.push({
+    label: "API key",
+    value: apiKey ?? "Not saved",
+    mono: apiKey != null,
+  });
   add("Contact number", config.contact_number, { mono: true });
   add("Direction", directionOf(config));
   if (config.languages?.length)

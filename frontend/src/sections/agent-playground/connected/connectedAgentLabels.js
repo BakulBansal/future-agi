@@ -42,6 +42,6 @@ export const versionsParts = ({ latestLabel, versionCount }) => {
   if (!latestLabel) return { version: "", rest: EMPTY };
   return {
     version: latestLabel,
-    rest: versionCount == null ? "" : ` · ${versionCount} total`,
+    rest: ` · ${versionCount} total`,
   };
 };

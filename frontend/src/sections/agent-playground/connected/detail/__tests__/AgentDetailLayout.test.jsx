@@ -155,20 +155,6 @@ describe("AgentDetailLayout", () => {
     expect(subline).toHaveTextContent("1 environment");
   });
 
-  it("leaves out pieces today's backend doesn't send", async () => {
-    const today = { ...HOSTED, provider: null };
-    [
-      "agent_kind",
-      "source",
-      "environment_count",
-      "observability_enabled",
-    ].forEach((k) => delete today[k]);
-    serve(today);
-    renderAt(`${base(HOSTED)}/overview`);
-    const subline = await screen.findByTestId("agent-detail-subline");
-    expect(subline).not.toHaveTextContent(/environment/i);
-  });
-
   it("goes back to Connected agents", async () => {
     serve(HOSTED);
     renderAt(`${base(HOSTED)}/overview`);

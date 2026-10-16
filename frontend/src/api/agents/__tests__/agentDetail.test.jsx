@@ -145,21 +145,6 @@ describe("mapAgentDetail", () => {
     });
   });
 
-  it("leaves new fields unknown on today's backend", () => {
-    const today = { ...HOSTED_AGENT_DETAIL };
-    [
-      "agent_kind",
-      "source",
-      "environment_count",
-      "observability_enabled",
-    ].forEach((k) => delete today[k]);
-    const a = mapAgentDetail(today);
-    expect(a.agentKind).toBeNull();
-    expect(a.source).toBeNull();
-    expect(a.environmentCount).toBeNull();
-    expect(a.observabilityEnabled).toBeNull();
-  });
-
   it("copes with an agent that has no versions", () => {
     const a = mapAgentDetail({
       ...HOSTED_AGENT_DETAIL,
@@ -199,15 +184,6 @@ describe("mapVersionDetail", () => {
     expect(v.agentDetails).toBeNull();
     expect(v.apiKey).toBe("sk-a...9f2c");
     expect(v.config.provider).toBe("vapi");
-  });
-
-  it("tells a missing key apart from a key that isn't saved", () => {
-    const today = { ...HOSTED_VERSION_DETAIL };
-    delete today.api_key;
-    expect(mapVersionDetail(today).apiKey).toBeUndefined();
-    expect(
-      mapVersionDetail({ ...HOSTED_VERSION_DETAIL, api_key: null }).apiKey,
-    ).toBeNull();
   });
 });
 
@@ -262,15 +238,6 @@ describe("hooks", () => {
       },
       { id: "e9999999", name: "Refund edge cases", lastRun: null },
     ]);
-  });
-
-  it("useAgentEnvironments doesn't call when disabled", async () => {
-    const { Wrapper } = makeWrapper();
-    renderHook(() => useAgentEnvironments("a1", { enabled: false }), {
-      wrapper: Wrapper,
-    });
-    await new Promise((r) => setTimeout(r, 20));
-    expect(listHarnessEnvironments).not.toHaveBeenCalled();
   });
 
   it("useSetObservability sends only the switch and refetches the agent", async () => {

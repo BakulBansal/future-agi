@@ -85,16 +85,6 @@ describe("ConnectedAgentsView", () => {
     ).toBeInTheDocument();
   });
 
-  it("shows a row from before the new fields existed without blanks", async () => {
-    renderView();
-    await screen.findByText("Legacy billing agent");
-    const row = screen
-      .getByText("Legacy billing agent")
-      .closest('[role="row"]');
-    expect(row.textContent).not.toMatch(/null|undefined|NaN/);
-    expect(row.textContent).toContain("v1");
-  });
-
   it("shows an error instead of the empty state when the list fails", async () => {
     axios.get.mockReset();
     axios.get.mockRejectedValue({ message: "Network Error" });

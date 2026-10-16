@@ -32,12 +32,6 @@ describe("hostedRows", () => {
     expect(rows["API key"].value).toBe("Not saved");
   });
 
-  it("leaves the key out when the backend doesn't send it yet", () => {
-    expect(
-      byLabel(hostedRows({ ...v, apiKey: undefined }))["API key"],
-    ).toBeUndefined();
-  });
-
   it("leaves out what wasn't set", () => {
     const rows = byLabel(
       hostedRows({ ...v, config: { provider: "retell", inbound: false } }),

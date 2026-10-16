@@ -14,8 +14,6 @@ export const buildConnectedAgentsParams = ({ page, pageSize, search }) => {
   return { page: page + 1, limit: pageSize, ...(q && { search: q }) };
 };
 
-// agent_kind, source, version_count, environment_count and environments are
-// new on this endpoint; rows from a backend without them still map.
 export const mapConnectedAgent = (raw) => ({
   id: raw.id,
   name: raw.agent_name,
@@ -31,9 +29,9 @@ export const mapConnectedAgent = (raw) => ({
   source: raw.source ?? null,
   latestVersionId: raw.latest_version_id ?? null,
   latestLabel: raw.latest_version != null ? `v${raw.latest_version}` : null,
-  versionCount: raw.version_count ?? null,
-  environments: raw.environments ?? [],
-  environmentCount: raw.environment_count ?? raw.environments?.length ?? 0,
+  versionCount: raw.version_count,
+  environments: raw.environments,
+  environmentCount: raw.environment_count,
   createdAt: raw.created_at ?? null,
 });
 

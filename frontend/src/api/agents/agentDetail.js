@@ -2,9 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import axios, { endpoints } from "src/utils/axios";
 import { listHarnessEnvironments } from "src/api/simulate-environments/harnessEnvironments";
 
-// Agent detail page data (agent pages contract, sections 2-6). Fields marked
-// new in the contract may be missing on an older backend; they map to null
-// so the page can hide what it doesn't know rather than show a guess.
+// Agent detail page data (agent pages contract, sections 2-6).
 
 const unwrap = (data) => data?.result ?? data;
 
@@ -50,8 +48,6 @@ export const toVersion = (v) => ({
   createdAt: v.created_at ?? null,
 });
 
-const newField = (raw, key) => (key in raw ? raw[key] : null);
-
 export const mapAgentDetail = (raw) => ({
   id: raw.id,
   name: raw.agent_name,
@@ -64,11 +60,11 @@ export const mapAgentDetail = (raw) => ({
     .map(toVersion)
     .sort((a, b) => b.number - a.number),
   activeVersionId: raw.active_version?.id ?? null,
-  versionCount: raw.version_count ?? (raw.versions ?? []).length,
-  agentKind: newField(raw, "agent_kind"),
-  source: newField(raw, "source"),
-  environmentCount: newField(raw, "environment_count"),
-  observabilityEnabled: newField(raw, "observability_enabled"),
+  versionCount: raw.version_count,
+  agentKind: raw.agent_kind ?? null,
+  source: raw.source ?? null,
+  environmentCount: raw.environment_count,
+  observabilityEnabled: raw.observability_enabled,
 });
 
 const toAgentDetails = (d) =>
@@ -81,8 +77,6 @@ const toAgentDetails = (d) =>
       }
     : null;
 
-// `apiKey` stays undefined when the backend doesn't send the field at all, and
-// null when it sends null (no key saved).
 export const mapVersionDetail = (raw) => ({
   id: raw.id,
   label: raw.version_name_display || `v${raw.version_number}`,
@@ -93,7 +87,7 @@ export const mapVersionDetail = (raw) => ({
   createdAt: raw.created_at ?? null,
   agentKind: raw.agent_kind ?? null,
   agentDetails: toAgentDetails(raw.agent_details),
-  apiKey: raw.api_key,
+  apiKey: raw.api_key ?? null,
   description: raw.description ?? null,
   config: raw.configuration_snapshot ?? {},
 });
@@ -142,7 +136,7 @@ export function useAgentVersion(agentId, versionId) {
   });
 }
 
-export function useAgentEnvironments(agentId, { enabled = true } = {}) {
+export function useAgentEnvironments(agentId) {
   return useQuery({
     queryKey: ["agents", "environments", agentId],
     queryFn: () =>
@@ -157,7 +151,7 @@ export function useAgentEnvironments(agentId, { enabled = true } = {}) {
         name: e.name,
         lastRun: e.last_run ? toRun(e.last_run) : null,
       })),
-    enabled: !!agentId && enabled,
+    enabled: !!agentId,
   });
 }
 
