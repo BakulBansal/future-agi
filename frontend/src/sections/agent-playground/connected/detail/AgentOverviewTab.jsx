@@ -1,26 +1,27 @@
 import React, { useMemo } from "react";
-import { useNavigate, useParams } from "react-router-dom";
-import { Stack, Typography } from "@mui/material";
+import { useLocation, useNavigate, useParams } from "react-router-dom";
+import { Button, Stack, Typography } from "@mui/material";
+import EmptyState from "src/sections/simulate/environments/components/EmptyState";
 import { useAgentRuns } from "src/api/agents/agentDetail";
 import FitDataTable from "./FitDataTable";
 import { QuietTag } from "./bits";
+import { agentDetailPath } from "./agentDetailTabs";
 import { MONO, ago } from "./format";
 import { PassRateCell, endTagOf, isRunning, runPath } from "./runCells";
 
-const EMPTY = "No simulations have run against this agent yet.";
 const RECENT_RUNS = 15;
-
-const errorText = (error) => error?.message || "Couldn't load recent runs";
 
 /** Overview: the agent's newest runs, across environments and Simulate. */
 export default function AgentOverviewTab() {
   const { agentId } = useParams();
   const navigate = useNavigate();
+  const { search } = useLocation();
   const {
     data: runs,
     isLoading,
     isError,
     error,
+    refetch,
   } = useAgentRuns(agentId, { limit: RECENT_RUNS });
 
   const columns = useMemo(
@@ -102,15 +103,35 @@ export default function AgentOverviewTab() {
   let body;
   if (isError && !runs) {
     body = (
-      <Typography sx={{ py: 1.5, typography: "s2", color: "text.secondary" }}>
-        {errorText(error)}
-      </Typography>
+      <EmptyState
+        icon="solar:danger-triangle-linear"
+        title="Couldn't load recent runs"
+        body={error?.message}
+        action={
+          <Button variant="outlined" size="small" onClick={() => refetch()}>
+            Retry
+          </Button>
+        }
+      />
     );
   } else if (!isLoading && !runs?.length) {
     body = (
-      <Typography sx={{ py: 1.5, typography: "s2", color: "text.secondary" }}>
-        {EMPTY}
-      </Typography>
+      <EmptyState
+        icon="solar:play-circle-linear"
+        title="No runs yet"
+        body="Runs of this agent from any environment will show up here."
+        action={
+          <Button
+            variant="outlined"
+            size="small"
+            onClick={() =>
+              navigate(`${agentDetailPath(agentId, "environments")}${search}`)
+            }
+          >
+            View environments
+          </Button>
+        }
+      />
     );
   } else {
     body = (

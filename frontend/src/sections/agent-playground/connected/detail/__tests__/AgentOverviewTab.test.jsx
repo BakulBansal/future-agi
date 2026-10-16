@@ -132,30 +132,35 @@ describe("AgentOverviewTab", () => {
     );
   });
 
-  it("says when nothing has run yet", () => {
+  it("invites a first run when nothing has run yet", () => {
     runsState.current = loaded([]);
     renderTab();
+    expect(screen.getByText("No runs yet")).toBeInTheDocument();
     expect(
-      screen.getByText("No simulations have run against this agent yet."),
+      screen.getByText(
+        "Runs of this agent from any environment will show up here.",
+      ),
     ).toBeInTheDocument();
+    expect(screen.queryAllByRole("columnheader")).toHaveLength(0);
+    fireEvent.click(screen.getByRole("button", { name: "View environments" }));
+    expect(currentLocation.pathname).toBe(
+      "/dashboard/agents/connected/a1/environments",
+    );
   });
 
-  it("shows the server's reason when the runs can't load", () => {
+  it("shows the server's reason and a retry when the runs can't load", () => {
+    const refetch = vi.fn();
     runsState.current = {
       isLoading: false,
       isError: true,
       error: { code: "not_found", message: "Agent definition not found." },
+      refetch,
     };
     renderTab();
-    expect(screen.getByText("Agent definition not found.")).toBeInTheDocument();
-    expect(
-      screen.queryByText("No simulations have run against this agent yet."),
-    ).toBeNull();
-  });
-
-  it("shows other load errors as errors, not as no runs", () => {
-    runsState.current = { isLoading: false, isError: true, error: {} };
-    renderTab();
     expect(screen.getByText("Couldn't load recent runs")).toBeInTheDocument();
+    expect(screen.getByText("Agent definition not found.")).toBeInTheDocument();
+    expect(screen.queryByText("No runs yet")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    expect(refetch).toHaveBeenCalled();
   });
 });
