@@ -1,5 +1,7 @@
 import PropTypes from "prop-types";
 import { useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { CONNECTED_AGENTS_PATH } from "../agentsTabs";
 import { Box, Button, Stack, Typography } from "@mui/material";
 import { format } from "date-fns";
 import Iconify from "src/components/iconify";
@@ -127,6 +129,7 @@ const columns = [
  * test it.
  */
 export default function ConnectedAgentsView({ onConnect }) {
+  const navigate = useNavigate();
   const [query, setQuery] = useState("");
   const [page, setPage] = useState(0);
   const [pageSize, setPageSize] = useState(PAGE_SIZE_DEFAULT);
@@ -216,6 +219,7 @@ export default function ConnectedAgentsView({ onConnect }) {
         rowCount={total}
         getRowId={(r) => r.id}
         rowHeight={rowHeight}
+        onRowClick={(r) => navigate(`${CONNECTED_AGENTS_PATH}/${r.id}`)}
         emptyMessage={
           isError
             ? "Couldn't load connected agents"

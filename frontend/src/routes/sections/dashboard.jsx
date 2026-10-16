@@ -478,6 +478,36 @@ const ConnectedAgentsTab = lazyWithRetry(
 const PlaygroundAgentsTab = lazyWithRetry(
   () => import("src/sections/agent-playground/PlaygroundAgentsTab"),
 );
+const AgentDetailLayout = lazyWithRetry(
+  () =>
+    import(
+      "src/sections/agent-playground/connected/detail/AgentDetailLayout"
+    ),
+);
+const AgentDetailIndexRedirect = lazyWithRetry(
+  () =>
+    import(
+      "src/sections/agent-playground/connected/detail/AgentDetailIndexRedirect"
+    ),
+);
+const AgentOverviewTab = lazyWithRetry(
+  () =>
+    import("src/sections/agent-playground/connected/detail/AgentOverviewTab"),
+);
+const AgentDefinitionTab = lazyWithRetry(
+  () =>
+    import("src/sections/agent-playground/connected/detail/AgentDefinitionTab"),
+);
+const AgentVersionsTab = lazyWithRetry(
+  () =>
+    import("src/sections/agent-playground/connected/detail/AgentVersionsTab"),
+);
+const AgentEnvironmentsTab = lazyWithRetry(
+  () =>
+    import(
+      "src/sections/agent-playground/connected/detail/AgentEnvironmentsTab"
+    ),
+);
 const AgentPlayground = lazyWithRetry(
   () => import("src/sections/agent-playground/AgentPlayground"),
 );
@@ -1282,6 +1312,17 @@ export const dashboardRoutes = (
             { index: true, element: <AgentsIndexRedirect /> },
             { path: "connected", element: <ConnectedAgentsTab /> },
             { path: "playground", element: <PlaygroundAgentsTab /> },
+          ],
+        },
+        {
+          path: "connected/:agentId",
+          element: <AgentDetailLayout />,
+          children: [
+            { index: true, element: <AgentDetailIndexRedirect /> },
+            { path: "overview", element: <AgentOverviewTab /> },
+            { path: "definition", element: <AgentDefinitionTab /> },
+            { path: "versions", element: <AgentVersionsTab /> },
+            { path: "environments", element: <AgentEnvironmentsTab /> },
           ],
         },
         {

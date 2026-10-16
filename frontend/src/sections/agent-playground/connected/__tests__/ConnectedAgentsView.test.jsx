@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, useLocation } from "react-router-dom";
 import axios from "src/utils/axios";
 import { connectedAgentsPage } from "src/api/agents/_fixtures/connectedAgents";
 import ConnectedAgentsView from "../ConnectedAgentsView";
@@ -20,6 +20,12 @@ beforeEach(() => {
   );
 });
 
+let currentLocation;
+const LocationProbe = () => {
+  currentLocation = useLocation();
+  return null;
+};
+
 const renderView = (props = {}) => {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
@@ -28,6 +34,7 @@ const renderView = (props = {}) => {
     <QueryClientProvider client={queryClient}>
       <MemoryRouter initialEntries={["/dashboard/agents/connected"]}>
         <ConnectedAgentsView onConnect={vi.fn()} {...props} />
+        <LocationProbe />
       </MemoryRouter>
     </QueryClientProvider>,
   );
@@ -96,6 +103,12 @@ describe("ConnectedAgentsView", () => {
       await screen.findByText("Couldn't load connected agents"),
     ).toBeInTheDocument();
     expect(screen.queryByText("No connected agents yet")).toBeNull();
+  });
+
+  it("opens an agent's detail page from its row", async () => {
+    renderView();
+    fireEvent.click(await screen.findByText("Clinic receptionist"));
+    expect(currentLocation.pathname).toBe("/dashboard/agents/connected/ca-03");
   });
 
   it("asks the server for the next page", async () => {
