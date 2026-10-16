@@ -659,9 +659,12 @@ func TestReservedNameIsNeverCreated(t *testing.T) {
 }
 
 func TestIsReservedProjectName(t *testing.T) {
-	upper := hiddenNamePrefix + strings.ToUpper(routeAgent)
+	// routeAgent has no hex letters, so upper-casing it would change nothing.
+	lettered := "abcdef01-2345-4678-89ab-cdef01234567"
+	upper := hiddenNamePrefix + strings.ToUpper(lettered)
 	cases := map[string]bool{
 		routeHiddenKey:                       true,
+		hiddenNamePrefix + lettered:          true,
 		hiddenNamePrefix + "not-an-agent-id": false,
 		hiddenNamePrefix:                     false,
 		upper:                                false,
