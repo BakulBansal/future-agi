@@ -93,9 +93,7 @@ def _authenticate_and_set_context(
     # An ingest key may only write spans to the collector, even if a user was
     # attached to it.
     if org_api_key.type == "ingest":
-        logger.warning(
-            "mcp_auth_ingest_key_refused", org=str(org_api_key.organization)
-        )
+        logger.warning("mcp_auth_ingest_key_refused", org=str(org_api_key.organization))
         return None
 
     if org_api_key.type == "system":
