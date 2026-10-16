@@ -1,9 +1,10 @@
 import PropTypes from "prop-types";
 import React, { useEffect } from "react";
 import { format } from "date-fns";
-import { Box, Skeleton, Stack, Typography } from "@mui/material";
+import { Box, Button, Skeleton, Stack, Typography } from "@mui/material";
 import { useScrollEnd } from "src/hooks/use-scroll-end";
 import { alpha } from "@mui/material/styles";
+import EmptyState from "src/sections/simulate/environments/components/EmptyState";
 import ComingSoonPreview from "./ComingSoonPreview";
 import CompareVersionsPreview from "./previews/CompareVersionsPreview";
 import { Card } from "./bits";
@@ -82,6 +83,9 @@ export default function AgentVersionsTab() {
     hasNextPage,
     isFetchingNextPage,
     isLoading,
+    isError,
+    error,
+    refetch,
   } = usePinnedVersions(agentId, versionId);
   // Like the Agent Definition page: the next page loads at the list's end.
   // The listener attaches once the list exists, so it waits for the agent.
@@ -136,6 +140,22 @@ export default function AgentVersionsTab() {
             overflowY: "auto",
           }}
         >
+          {isError && (
+            <EmptyState
+              icon="solar:danger-triangle-linear"
+              title="Couldn't load versions"
+              body={error?.message}
+              action={
+                <Button
+                  variant="outlined"
+                  size="small"
+                  onClick={() => refetch()}
+                >
+                  Retry
+                </Button>
+              }
+            />
+          )}
           {isLoading && skeletons(3)}
           {loaded && versions.length === 0 && (
             <Typography sx={{ typography: "s2", color: "text.secondary" }}>

@@ -181,6 +181,25 @@ describe("AgentVersionsTab", () => {
     await waitFor(() => expect(labels()).toEqual(["v2", "v1"]));
   });
 
+  it("says why the versions couldn't load and retries", async () => {
+    let fail = true;
+    const ok = axios.get.getMockImplementation();
+    axios.get.mockImplementation((url, config) =>
+      fail && url.endsWith("/versions/")
+        ? Promise.reject({ message: "Versions are unavailable." })
+        : ok(url, config),
+    );
+    renderTab();
+    expect(
+      await screen.findByText("Couldn't load versions"),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Versions are unavailable.")).toBeInTheDocument();
+    expect(screen.queryByTestId("version-skeleton")).toBeNull();
+    fail = false;
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    expect(await screen.findAllByTestId("version-entry")).toHaveLength(2);
+  });
+
   it("selects a version from the timeline", async () => {
     renderTab();
     const [, oldest] = await screen.findAllByTestId("version-entry");
