@@ -1,5 +1,5 @@
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
-import { CONNECTED_AGENTS_FIXTURE } from "./_fixtures/connectedAgents";
+import axios, { endpoints } from "src/utils/axios";
 
 export const connectedAgentsQueryKey = ({ page, pageSize, search }) => [
   "agents",
@@ -7,43 +7,52 @@ export const connectedAgentsQueryKey = ({ page, pageSize, search }) => [
   { page, pageSize, search },
 ];
 
+// The list takes a 1-based page; the table keeps a 0-based one. Unknown
+// params are a 400, so send only these.
+export const buildConnectedAgentsParams = ({ page, pageSize, search }) => {
+  const q = (search || "").trim();
+  return { page: page + 1, limit: pageSize, ...(q && { search: q }) };
+};
+
+// agent_kind, source, version_count, environment_count and environments are
+// new on this endpoint; rows from a backend without them still map.
 export const mapConnectedAgent = (raw) => ({
   id: raw.id,
-  name: raw.name,
+  name: raw.agent_name,
   description: raw.description ?? null,
-  modality: raw.modality ?? null,
-  direction: raw.direction ?? null,
+  modality: raw.agent_type ?? null,
+  direction:
+    raw.agent_type === "voice" && typeof raw.inbound === "boolean"
+      ? raw.inbound
+        ? "inbound"
+        : "outbound"
+      : null,
+  agentKind: raw.agent_kind ?? null,
   source: raw.source ?? null,
-  sourceLabel: raw.source_label ?? null,
-  latestVersionId: raw.latest_version?.id ?? null,
-  latestLabel: raw.latest_version?.label ?? null,
-  versionCount: raw.version_count ?? 0,
-  usedIn: raw.used_in ?? [],
+  latestVersionId: raw.latest_version_id ?? null,
+  latestLabel: raw.latest_version != null ? `v${raw.latest_version}` : null,
+  versionCount: raw.version_count ?? null,
+  environments: raw.environments ?? [],
+  environmentCount: raw.environment_count ?? raw.environments?.length ?? 0,
   createdAt: raw.created_at ?? null,
 });
 
-// Pages and searches the fixture the way the server will, so swapping the
-// queryFn to axios is the only change once the list API lands.
-const fetchFixturePage = ({ page, pageSize, search }) => {
-  const q = (search || "").trim().toLowerCase();
-  const matching = structuredClone(CONNECTED_AGENTS_FIXTURE).filter(
-    (a) => !q || `${a.name} ${a.description || ""}`.toLowerCase().includes(q),
-  );
-  const start = page * pageSize;
-  return {
-    results: matching.slice(start, start + pageSize),
-    count: matching.length,
-  };
+// The generated client types this response as a bare array, but the server
+// sends the paginated envelope, so read it here rather than through it.
+const fetchConnectedAgents = async (args) => {
+  const res = await axios.get(endpoints.agentDefinitions.list, {
+    params: buildConnectedAgentsParams(args),
+  });
+  return res.data;
 };
 
-// TODO: swap to axios(endpoints.agents.connected) once the list API lands
 export function useConnectedAgents({ page, pageSize, search }) {
   return useQuery({
     queryKey: connectedAgentsQueryKey({ page, pageSize, search }),
-    queryFn: async () => fetchFixturePage({ page, pageSize, search }),
+    queryFn: () => fetchConnectedAgents({ page, pageSize, search }),
     select: (d) => ({
-      items: d.results.map(mapConnectedAgent),
-      total: d.count,
+      items: (d.results ?? []).map(mapConnectedAgent),
+      total: d.count ?? 0,
     }),
     placeholderData: keepPreviousData,
   });

@@ -67,7 +67,7 @@ const columns = [
     header: "Source",
     size: 150,
     enableSorting: false,
-    cell: ({ row }) => <CellText>{sourceLabel(row.original)}</CellText>,
+    cell: ({ row }) => <CellText>{sourceLabel(row.original.source)}</CellText>,
   },
   {
     id: "versions",
@@ -91,13 +91,13 @@ const columns = [
   },
   {
     id: "usedIn",
-    accessorKey: "usedIn",
+    accessorKey: "environmentCount",
     header: "Used in",
     meta: { flex: 1 },
     minSize: 200,
     enableSorting: false,
     cell: ({ row }) => {
-      const { text, empty } = usedInLabel(row.original.usedIn);
+      const { text, empty } = usedInLabel(row.original);
       return (
         <CellText color={empty ? "text.disabled" : "text.primary"}>
           {text}
@@ -132,7 +132,11 @@ export default function ConnectedAgentsView({ onConnect }) {
   const [pageSize, setPageSize] = useState(PAGE_SIZE_DEFAULT);
   const search = useDebounce(query.trim(), 500);
 
-  const { data, isLoading } = useConnectedAgents({ page, pageSize, search });
+  const { data, isLoading, isError } = useConnectedAgents({
+    page,
+    pageSize,
+    search,
+  });
   const items = data?.items ?? [];
   const total = data?.total ?? 0;
   const rowHeight = useMemo(
@@ -140,7 +144,7 @@ export default function ConnectedAgentsView({ onConnect }) {
     [items],
   );
 
-  if (!isLoading && !search && !query && total === 0) {
+  if (!isLoading && !isError && !search && !query && total === 0) {
     return (
       <Box
         sx={{
@@ -212,7 +216,11 @@ export default function ConnectedAgentsView({ onConnect }) {
         rowCount={total}
         getRowId={(r) => r.id}
         rowHeight={rowHeight}
-        emptyMessage="No agents match your search"
+        emptyMessage={
+          isError
+            ? "Couldn't load connected agents"
+            : "No agents match your search"
+        }
       />
       <DataTablePagination
         page={page}

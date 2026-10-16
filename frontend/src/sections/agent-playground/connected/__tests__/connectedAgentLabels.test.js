@@ -25,8 +25,11 @@ describe("modalityLabel", () => {
     );
   });
 
+  it("calls a text agent Chat, as the ticket does", () => {
+    expect(modalityLabel({ modality: "text", direction: null })).toBe("Chat");
+  });
+
   it("shows the modality alone without a direction", () => {
-    expect(modalityLabel({ modality: "chat", direction: null })).toBe("Chat");
     expect(modalityLabel({ modality: "voice" })).toBe("Voice");
   });
 
@@ -40,48 +43,58 @@ describe("modalityLabel", () => {
 });
 
 describe("sourceLabel", () => {
-  it("prefers the label the API sends", () => {
-    expect(sourceLabel({ source: "livekit", sourceLabel: "LiveKit" })).toBe(
-      "LiveKit",
-    );
+  it("spells known providers and code sources properly", () => {
+    expect(sourceLabel("github")).toBe("GitHub");
+    expect(sourceLabel("archive")).toBe("Upload");
+    expect(sourceLabel("livekit")).toBe("LiveKit");
+    expect(sourceLabel("vapi")).toBe("Vapi");
+    expect(sourceLabel("retell")).toBe("Retell");
   });
 
-  it("humanises a raw source it has never seen", () => {
-    expect(sourceLabel({ source: "vonage_sip" })).toBe("Vonage Sip");
+  it("humanises a source it has never seen", () => {
+    expect(sourceLabel("vonage_sip")).toBe("Vonage Sip");
   });
 
   it("falls back to a dash with no source", () => {
-    expect(sourceLabel({ source: null })).toBe("—");
+    expect(sourceLabel(null)).toBe("—");
+    expect(sourceLabel(undefined)).toBe("—");
   });
 });
 
 describe("usedInLabel", () => {
   it("says so when no environment uses it", () => {
-    expect(usedInLabel([])).toEqual({
-      text: "No environments yet",
-      empty: true,
-    });
-    expect(usedInLabel(undefined)).toEqual({
+    expect(usedInLabel({ environments: [], environmentCount: 0 })).toEqual({
       text: "No environments yet",
       empty: true,
     });
   });
 
   it("names a single environment", () => {
-    expect(usedInLabel([{ id: "e1", name: "Support line" }])).toEqual({
-      text: "Support line",
+    expect(
+      usedInLabel({
+        environments: [{ id: "e1", name: "Support line" }],
+        environmentCount: 1,
+      }),
+    ).toEqual({ text: "Support line", empty: false });
+  });
+
+  it("counts a single environment whose name didn't come back", () => {
+    expect(usedInLabel({ environments: [], environmentCount: 1 })).toEqual({
+      text: "1 environment",
       empty: false,
     });
   });
 
-  it("counts several environments", () => {
+  it("uses the true total, not the capped list of five", () => {
     expect(
-      usedInLabel([
-        { id: "e1", name: "A" },
-        { id: "e2", name: "B" },
-        { id: "e3", name: "C" },
-      ]),
-    ).toEqual({ text: "3 environments", empty: false });
+      usedInLabel({
+        environments: [
+          { id: "e1", name: "A" },
+          { id: "e2", name: "B" },
+        ],
+        environmentCount: 7,
+      }),
+    ).toEqual({ text: "7 environments", empty: false });
   });
 });
 
@@ -93,10 +106,17 @@ describe("versionsParts", () => {
     });
   });
 
-  it("shows only the total when there is no latest label", () => {
+  it("shows only the version while the count isn't sent", () => {
+    expect(versionsParts({ latestLabel: "v1", versionCount: null })).toEqual({
+      version: "v1",
+      rest: "",
+    });
+  });
+
+  it("shows a dash for an agent with no versions", () => {
     expect(versionsParts({ latestLabel: null, versionCount: 0 })).toEqual({
       version: "",
-      rest: "0 total",
+      rest: "—",
     });
   });
 });

@@ -1,8 +1,24 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
+import axios from "src/utils/axios";
+import { connectedAgentsPage } from "src/api/agents/_fixtures/connectedAgents";
 import ConnectedAgentsView from "../ConnectedAgentsView";
+
+vi.mock("src/utils/axios", () => ({
+  default: { get: vi.fn() },
+  endpoints: {
+    agentDefinitions: { list: "/simulate/agent-definitions/" },
+  },
+}));
+
+beforeEach(() => {
+  axios.get.mockReset();
+  axios.get.mockImplementation((_, { params }) =>
+    Promise.resolve({ data: connectedAgentsPage(params) }),
+  );
+});
 
 const renderView = (props = {}) => {
   const queryClient = new QueryClient({
@@ -10,7 +26,7 @@ const renderView = (props = {}) => {
   });
   return render(
     <QueryClientProvider client={queryClient}>
-      <MemoryRouter initialEntries={["/dashboard/agents?tab=connected"]}>
+      <MemoryRouter initialEntries={["/dashboard/agents/connected"]}>
         <ConnectedAgentsView onConnect={vi.fn()} {...props} />
       </MemoryRouter>
     </QueryClientProvider>,
@@ -46,15 +62,50 @@ describe("ConnectedAgentsView", () => {
     renderView();
     await screen.findByText("Clinic receptionist");
     expect(screen.getAllByText("Voice · Inbound").length).toBeGreaterThan(0);
-    expect(screen.getByText("Video Call · Inbound")).toBeInTheDocument();
+    expect(screen.getAllByText("Voice · Outbound").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Chat").length).toBeGreaterThan(0);
+    expect(screen.getByText("Video Call")).toBeInTheDocument();
+    expect(screen.getAllByText("GitHub").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Upload").length).toBeGreaterThan(0);
     expect(screen.getByText("Vonage Sip")).toBeInTheDocument();
     expect(screen.getAllByText("No environments yet").length).toBeGreaterThan(
       0,
     );
-    expect(screen.getAllByText("3 environments").length).toBeGreaterThan(0);
+    expect(screen.getByText("7 environments")).toBeInTheDocument();
+    expect(screen.getByText("ride-voice-agent")).toBeInTheDocument();
     expect(
       screen.getByText("Inbound phone support for an online storefront"),
     ).toBeInTheDocument();
+  });
+
+  it("shows a row from before the new fields existed without blanks", async () => {
+    renderView();
+    await screen.findByText("Legacy billing agent");
+    const row = screen
+      .getByText("Legacy billing agent")
+      .closest('[role="row"]');
+    expect(row.textContent).not.toMatch(/null|undefined|NaN/);
+    expect(row.textContent).toContain("v1");
+  });
+
+  it("shows an error instead of the empty state when the list fails", async () => {
+    axios.get.mockReset();
+    axios.get.mockRejectedValue({ message: "Network Error" });
+    renderView();
+    expect(
+      await screen.findByText("Couldn't load connected agents"),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("No connected agents yet")).toBeNull();
+  });
+
+  it("asks the server for the next page", async () => {
+    renderView();
+    await screen.findByText("1–25 of 37");
+    fireEvent.click(nextPageButton());
+    await screen.findByText("Voice agent 37");
+    expect(axios.get).toHaveBeenLastCalledWith("/simulate/agent-definitions/", {
+      params: { page: 2, limit: 25 },
+    });
   });
 
   it("pages through the list 25 at a time", async () => {

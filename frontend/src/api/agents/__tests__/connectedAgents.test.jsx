@@ -1,13 +1,22 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import PropTypes from "prop-types";
 import { renderHook, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import axios from "src/utils/axios";
 import {
+  buildConnectedAgentsParams,
   connectedAgentsQueryKey,
   mapConnectedAgent,
   useConnectedAgents,
 } from "../connectedAgents";
-import { CONNECTED_AGENTS_FIXTURE } from "../_fixtures/connectedAgents";
+import { connectedAgentsPage } from "../_fixtures/connectedAgents";
+
+vi.mock("src/utils/axios", () => ({
+  default: { get: vi.fn() },
+  endpoints: {
+    agentDefinitions: { list: "/simulate/agent-definitions/" },
+  },
+}));
 
 const makeWrapper = () => {
   const queryClient = new QueryClient({
@@ -17,52 +26,56 @@ const makeWrapper = () => {
     <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
   );
   Wrapper.propTypes = { children: PropTypes.node };
-  return { queryClient, Wrapper };
+  return Wrapper;
 };
 
 const load = async (params) => {
-  const { Wrapper } = makeWrapper();
   const { result } = renderHook(() => useConnectedAgents(params), {
-    wrapper: Wrapper,
+    wrapper: makeWrapper(),
   });
   await waitFor(() => expect(result.current.isSuccess).toBe(true));
   return result.current.data;
 };
 
+beforeEach(() => {
+  axios.get.mockReset();
+  axios.get.mockImplementation((_, { params }) =>
+    Promise.resolve({ data: connectedAgentsPage(params) }),
+  );
+});
+
+describe("buildConnectedAgentsParams", () => {
+  it("sends a 1-based page and the page size as limit", () => {
+    expect(
+      buildConnectedAgentsParams({ page: 0, pageSize: 25, search: "" }),
+    ).toEqual({ page: 1, limit: 25 });
+  });
+
+  it("sends a trimmed search only when there is one", () => {
+    expect(
+      buildConnectedAgentsParams({ page: 2, pageSize: 50, search: "  uber " }),
+    ).toEqual({ page: 3, limit: 50, search: "uber" });
+    expect(
+      buildConnectedAgentsParams({ page: 0, pageSize: 25, search: "   " }),
+    ).toEqual({ page: 1, limit: 25 });
+  });
+});
+
 describe("useConnectedAgents", () => {
-  it("serves the first page and the full total", async () => {
+  it("calls the agent definitions list with exactly the contract's params", async () => {
+    await load({ page: 1, pageSize: 25, search: "voice" });
+    expect(axios.get).toHaveBeenCalledWith("/simulate/agent-definitions/", {
+      params: { page: 2, limit: 25, search: "voice" },
+    });
+  });
+
+  it("returns mapped rows and the server's total", async () => {
     const data = await load({ page: 0, pageSize: 25, search: "" });
     expect(data.items).toHaveLength(25);
     expect(data.total).toBe(37);
-  });
-
-  it("serves the remainder on the second page", async () => {
-    const data = await load({ page: 1, pageSize: 25, search: "" });
-    expect(data.items).toHaveLength(12);
-    expect(data.total).toBe(37);
-  });
-
-  it("filters by name or description, case-insensitively", async () => {
-    const data = await load({ page: 0, pageSize: 25, search: "SUPPORT" });
-    const matching = CONNECTED_AGENTS_FIXTURE.filter((a) =>
-      `${a.name} ${a.description || ""}`.toLowerCase().includes("support"),
-    );
-    expect(matching.length).toBeGreaterThan(0);
-    expect(data.total).toBe(matching.length);
-    data.items.forEach((a) =>
-      expect(`${a.name} ${a.description || ""}`.toLowerCase()).toContain(
-        "support",
-      ),
-    );
-  });
-
-  it("does not hand out the fixture's own objects", async () => {
-    const first = await load({ page: 0, pageSize: 25, search: "" });
-    first.items[0].usedIn.push({ id: "x", name: "mutated" });
-    const second = await load({ page: 0, pageSize: 25, search: "" });
-    expect(second.items[0].usedIn).not.toContainEqual({
-      id: "x",
-      name: "mutated",
+    expect(data.items[0]).toMatchObject({
+      id: "ca-01",
+      name: "Customer support line",
     });
   });
 
@@ -74,43 +87,78 @@ describe("useConnectedAgents", () => {
 });
 
 describe("mapConnectedAgent", () => {
-  it("camel-cases the API fields and keeps nulls", () => {
+  it("maps a code agent row from the contract", () => {
     expect(
       mapConnectedAgent({
-        id: "a1",
-        name: "Support",
-        description: null,
-        modality: "voice",
-        direction: "inbound",
-        source: "livekit",
-        source_label: "LiveKit",
-        latest_version: { id: "v-3", label: "v3" },
-        version_count: 5,
-        used_in: [{ id: "e1", name: "Support line" }],
-        created_at: "2026-10-01T10:00:00Z",
+        id: "a48511b2",
+        agent_name: "Uber Voice Agent",
+        agent_type: "voice",
+        inbound: true,
+        description: "# ROLE\nYou are the Uber phone-booking assistant.",
+        created_at: "2026-10-14T11:50:22.093543Z",
+        latest_version: 1,
+        latest_version_id: "93956ae6",
+        agent_kind: "source",
+        source: "github",
+        version_count: 1,
+        environment_count: 1,
+        environments: [{ id: "e5391b8a", name: "ride-voice-agent" }],
       }),
     ).toEqual({
-      id: "a1",
-      name: "Support",
-      description: null,
+      id: "a48511b2",
+      name: "Uber Voice Agent",
+      description: "# ROLE\nYou are the Uber phone-booking assistant.",
       modality: "voice",
       direction: "inbound",
-      source: "livekit",
-      sourceLabel: "LiveKit",
-      latestVersionId: "v-3",
-      latestLabel: "v3",
-      versionCount: 5,
-      usedIn: [{ id: "e1", name: "Support line" }],
-      createdAt: "2026-10-01T10:00:00Z",
+      agentKind: "source",
+      source: "github",
+      latestVersionId: "93956ae6",
+      latestLabel: "v1",
+      versionCount: 1,
+      environments: [{ id: "e5391b8a", name: "ride-voice-agent" }],
+      environmentCount: 1,
+      createdAt: "2026-10-14T11:50:22.093543Z",
     });
   });
 
-  it("tolerates a missing source label, version and environments", () => {
-    const a = mapConnectedAgent({ id: "a2", name: "Bare" });
-    expect(a.sourceLabel).toBeNull();
-    expect(a.latestVersionId).toBeNull();
+  it("gives a voice agent its direction from inbound", () => {
+    expect(
+      mapConnectedAgent({ agent_type: "voice", inbound: false }).direction,
+    ).toBe("outbound");
+  });
+
+  it("gives a text agent no direction", () => {
+    expect(
+      mapConnectedAgent({ agent_type: "text", inbound: true }).direction,
+    ).toBeNull();
+  });
+
+  it("has no version label when the agent has no versions", () => {
+    const a = mapConnectedAgent({ latest_version: null, version_count: 0 });
     expect(a.latestLabel).toBeNull();
     expect(a.versionCount).toBe(0);
-    expect(a.usedIn).toEqual([]);
+  });
+
+  it("tolerates a row from before the new fields existed", () => {
+    const a = mapConnectedAgent({
+      id: "old",
+      agent_name: "Legacy",
+      agent_type: "voice",
+      inbound: true,
+      latest_version: 2,
+    });
+    expect(a.source).toBeNull();
+    expect(a.agentKind).toBeNull();
+    expect(a.versionCount).toBeNull();
+    expect(a.environments).toEqual([]);
+    expect(a.environmentCount).toBe(0);
+  });
+
+  it("counts environments from environment_count, not the capped list", () => {
+    const a = mapConnectedAgent({
+      environment_count: 7,
+      environments: [{ id: "e1", name: "A" }],
+    });
+    expect(a.environmentCount).toBe(7);
   });
 });
