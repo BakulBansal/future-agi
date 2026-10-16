@@ -15,7 +15,9 @@ import { CustomTabs } from "src/components/tabs/tabs";
 import ComingSoonChip from "src/sections/simulate/environments/components/ComingSoonChip";
 import { ENV_TABS_SX } from "src/sections/simulate/environments/environmentOptions";
 import { CONNECTED_AGENTS_PATH } from "../../agentsTabs";
-import AgentDetailHeader from "./AgentDetailHeader";
+import AgentDetailHeader, {
+  AgentDetailHeaderSkeleton,
+} from "./AgentDetailHeader";
 import AgentVersionSelect from "./AgentVersionSelect";
 import {
   COMING_SOON_TABS,
@@ -57,17 +59,9 @@ export default function AgentDetailLayout() {
     );
   }
 
-  if (!agent) {
-    return (
-      <Stack spacing={1.5} sx={{ p: 2 }}>
-        <Skeleton variant="text" width={280} height={32} />
-        <Skeleton variant="text" width={420} />
-        <Skeleton variant="rounded" height={36} />
-      </Stack>
-    );
-  }
-
+  // Counts arrive with the agent; until then the tabs show their names.
   const tabLabel = (t) => {
+    if (!agent) return t.label;
     if (t.id === "versions") return `Versions ${agent.versionCount}`;
     if (t.id === "environments")
       return `Environments ${agent.environmentCount}`;
@@ -77,7 +71,7 @@ export default function AgentDetailLayout() {
   return (
     <>
       <Helmet>
-        <title>{`${agent.name} · Agents`}</title>
+        <title>{agent ? `${agent.name} · Agents` : "Agents"}</title>
       </Helmet>
       <Box
         sx={{
@@ -89,22 +83,26 @@ export default function AgentDetailLayout() {
           flexDirection: "column",
         }}
       >
-        <AgentDetailHeader
-          agent={agent}
-          onBack={back}
-          onOpenEnvironments={() =>
-            navigate(`${agentDetailPath(agentId, "environments")}${search}`)
-          }
-          action={
-            versionId ? (
-              <AgentVersionSelect
-                agentId={agentId}
-                value={versionId}
-                onChange={selectVersion}
-              />
-            ) : null
-          }
-        />
+        {agent ? (
+          <AgentDetailHeader
+            agent={agent}
+            onBack={back}
+            onOpenEnvironments={() =>
+              navigate(`${agentDetailPath(agentId, "environments")}${search}`)
+            }
+            action={
+              versionId ? (
+                <AgentVersionSelect
+                  agentId={agentId}
+                  value={versionId}
+                  onChange={selectVersion}
+                />
+              ) : null
+            }
+          />
+        ) : (
+          <AgentDetailHeaderSkeleton onBack={back} />
+        )}
         <Box
           sx={{
             borderBottom: "1px solid",

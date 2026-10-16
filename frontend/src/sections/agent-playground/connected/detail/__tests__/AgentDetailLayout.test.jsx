@@ -155,6 +155,17 @@ describe("AgentDetailLayout", () => {
     expect(subline).toHaveTextContent("1 environment");
   });
 
+  it("keeps the header and tabs in place while the agent loads", async () => {
+    axios.get.mockImplementation(() => new Promise(() => {}));
+    renderAt(`${base(HOSTED)}/overview`);
+    expect(
+      await screen.findByTestId("agent-header-skeleton"),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Back" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Overview" })).toBeInTheDocument();
+    expect(screen.getByTestId("tab-overview")).toBeInTheDocument();
+  });
+
   it("goes back to Connected agents", async () => {
     serve(HOSTED);
     renderAt(`${base(HOSTED)}/overview`);

@@ -1,10 +1,10 @@
 import PropTypes from "prop-types";
 import React from "react";
 import { format } from "date-fns";
-import { Box, IconButton, Stack, Typography } from "@mui/material";
+import { Box, IconButton, Skeleton, Stack, Typography } from "@mui/material";
 import Iconify from "src/components/iconify";
 import { sourceLabel } from "../connectedAgentLabels";
-import { Pill } from "./bits";
+import { LineSkeleton, Pill } from "./bits";
 import { MONO } from "./format";
 
 const environmentsText = (count) => {
@@ -104,3 +104,34 @@ AgentDetailHeader.propTypes = {
   onOpenEnvironments: PropTypes.func,
   action: PropTypes.node,
 };
+
+/** The header while the agent loads: Back works, the rest holds its place. */
+export function AgentDetailHeaderSkeleton({ onBack }) {
+  return (
+    <Stack
+      data-testid="agent-header-skeleton"
+      direction="row"
+      alignItems="center"
+      spacing={1.5}
+      sx={{ mb: 1.5 }}
+    >
+      <IconButton size="small" onClick={onBack} aria-label="Back">
+        <Iconify icon="eva:arrow-ios-back-fill" width={18} />
+      </IconButton>
+      <Box flex={1} minWidth={0}>
+        <Stack direction="row" alignItems="center" spacing={1}>
+          <Typography sx={{ typography: "m3" }}>
+            <LineSkeleton width={240} />
+          </Typography>
+          <Skeleton variant="rounded" width={48} height={20} />
+        </Stack>
+        <Typography sx={{ typography: "s3", mt: 0.25 }}>
+          <LineSkeleton width={220} />
+        </Typography>
+      </Box>
+      <Skeleton variant="rounded" width={120} height={32} />
+    </Stack>
+  );
+}
+
+AgentDetailHeaderSkeleton.propTypes = { onBack: PropTypes.func.isRequired };

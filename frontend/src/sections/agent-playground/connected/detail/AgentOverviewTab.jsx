@@ -1,17 +1,46 @@
 import React, { useMemo } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
-import { Box, Button, Stack, Typography } from "@mui/material";
+import { Box, Button, Skeleton, Stack, Typography } from "@mui/material";
 import EmptyState from "src/sections/simulate/environments/components/EmptyState";
 import StatusChip from "src/sections/simulate/environments/workspace/runs/StatusChip";
 import { runStateFor } from "src/sections/simulate/environments/workspace/runs/runs.constants";
 import { useAgentRuns } from "src/api/agents/agentDetail";
 import FitDataTable from "./FitDataTable";
-import { QuietTag } from "./bits";
+import { LineSkeleton, QuietTag } from "./bits";
 import { agentDetailPath } from "./agentDetailTabs";
 import { MONO, ago } from "./format";
 import { PassRateCell, runPath } from "./runCells";
 
 const RECENT_RUNS = 15;
+const SKELETON_ROWS = 8;
+
+// What each column shows while the runs load, sized like the real cell.
+const text = (typography, width, props) => (
+  <Typography sx={{ typography, width: "100%" }}>
+    <LineSkeleton width={width} {...props} />
+  </Typography>
+);
+const SKELETON_CELLS = {
+  run: text("s2", 44, { "data-testid": "run-row-skeleton" }),
+  status: <Skeleton variant="rounded" width={88} height={22} />,
+  environment: text("s2", 120),
+  version: text("s3", 20),
+  passRate: (
+    <Stack
+      direction="row"
+      alignItems="center"
+      spacing={1}
+      sx={{ width: "100%" }}
+    >
+      <Skeleton variant="rounded" height={6} sx={{ flex: 1 }} />
+      <LineSkeleton width={56} />
+    </Stack>
+  ),
+  when: text("s3", 48),
+};
+const SKELETON_DATA = Array.from({ length: SKELETON_ROWS }, (_, i) => ({
+  testExecutionId: `skeleton-${i}`,
+}));
 
 /** Overview: the agent's newest runs, across environments and Simulate. */
 export default function AgentOverviewTab() {
@@ -142,11 +171,14 @@ export default function AgentOverviewTab() {
   } else {
     body = (
       <FitDataTable
-        columns={columns}
-        data={runs ?? []}
-        isLoading={isLoading}
+        columns={
+          isLoading
+            ? columns.map((c) => ({ ...c, cell: () => SKELETON_CELLS[c.id] }))
+            : columns
+        }
+        data={isLoading ? SKELETON_DATA : runs}
         getRowId={(r) => r.testExecutionId}
-        onRowClick={(r) => navigate(runPath(r))}
+        onRowClick={isLoading ? undefined : (r) => navigate(runPath(r))}
       />
     );
   }

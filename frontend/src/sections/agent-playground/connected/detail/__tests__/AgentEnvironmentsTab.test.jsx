@@ -103,6 +103,15 @@ describe("AgentEnvironmentsTab", () => {
     );
   });
 
+  it("holds the table's shape with skeleton rows while it loads", () => {
+    envState.current = { isLoading: true, isError: false, data: undefined };
+    renderTab();
+    expect(screen.getByText("Environment")).toBeInTheDocument();
+    expect(screen.getByText("Last result")).toBeInTheDocument();
+    expect(screen.getAllByTestId("environment-row-skeleton")).toHaveLength(3);
+    expect(screen.queryByText("Loading…")).toBeNull();
+  });
+
   it("says when no environment tests the agent", () => {
     envState.current = { isLoading: false, isError: false, data: [] };
     renderTab();

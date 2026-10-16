@@ -138,6 +138,23 @@ describe("AgentOverviewTab", () => {
     );
   });
 
+  it("holds the table's shape with skeleton rows while runs load", () => {
+    runsState.current = { isLoading: true, isError: false, data: undefined };
+    renderTab();
+    expect(
+      screen.getAllByRole("columnheader").map((h) => h.textContent.trim()),
+    ).toEqual([
+      "Run",
+      "Status",
+      "Environment",
+      "Agent version",
+      "Pass rate",
+      "When",
+    ]);
+    expect(screen.getAllByTestId("run-row-skeleton")).toHaveLength(8);
+    expect(screen.queryByRole("progressbar")).toBeNull();
+  });
+
   it("invites a first run when nothing has run yet", () => {
     runsState.current = loaded([]);
     renderTab();

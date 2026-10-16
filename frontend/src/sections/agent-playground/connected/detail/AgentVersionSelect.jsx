@@ -3,6 +3,7 @@ import React from "react";
 import { Box, MenuItem, Select, Skeleton } from "@mui/material";
 import { MONO, ago } from "./format";
 import usePinnedVersions from "./usePinnedVersions";
+import { LineSkeleton } from "./bits";
 
 const loadingRows = (n) =>
   Array.from({ length: n }, (_, i) => (
@@ -11,8 +12,10 @@ const loadingRows = (n) =>
       key={`loading-${i}`}
       disabled
       data-testid="version-option-skeleton"
+      sx={{ typography: "s2" }}
     >
-      <Skeleton variant="text" width={120} height={20} />
+      <LineSkeleton width={26} sx={{ mr: 1 }} />
+      <LineSkeleton width={52} />
     </MenuItem>
   ));
 

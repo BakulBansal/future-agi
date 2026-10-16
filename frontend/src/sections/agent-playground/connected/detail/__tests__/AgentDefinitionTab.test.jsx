@@ -152,6 +152,18 @@ describe("AgentDefinitionTab", () => {
     );
   });
 
+  it("shows label and value rows while the version loads", async () => {
+    axios.get.mockImplementation((url) =>
+      url.includes("/versions/")
+        ? new Promise(() => {})
+        : Promise.resolve({ data: HOSTED_AGENT_DETAIL }),
+    );
+    renderAt(HOSTED_AGENT_DETAIL);
+    expect(
+      await screen.findAllByTestId("definition-row-skeleton"),
+    ).toHaveLength(4);
+  });
+
   it("says what observability does while it's off", async () => {
     serve(HOSTED_AGENT_DETAIL, { "v2-id": HOSTED_VERSION_DETAIL });
     renderAt(HOSTED_AGENT_DETAIL);

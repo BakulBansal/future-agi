@@ -7,7 +7,7 @@ import { alpha } from "@mui/material/styles";
 import EmptyState from "src/sections/simulate/environments/components/EmptyState";
 import ComingSoonPreview from "./ComingSoonPreview";
 import CompareVersionsPreview from "./previews/CompareVersionsPreview";
-import { Card } from "./bits";
+import { Card, LineSkeleton } from "./bits";
 import { MONO } from "./format";
 import useAgentRoute from "./useAgentRoute";
 import usePinnedVersions from "./usePinnedVersions";
@@ -40,25 +40,30 @@ function Chip({ label, tone }) {
 
 Chip.propTypes = { label: PropTypes.string, tone: PropTypes.string };
 
-// A timeline row while it loads: the dot, then label, message and date.
+// A timeline row while it loads, laid out like a real one: the dot and its
+// line, then label, message and date at the same sizes and spacing.
 function VersionSkeleton() {
   return (
     <Stack
       data-testid="version-skeleton"
       direction="row"
       spacing={1.5}
-      sx={{ pb: 2.25 }}
+      sx={{ mx: -1, px: 1, pt: 0.75, pb: 1.5, mb: 0.75 }}
     >
-      <Skeleton
-        variant="circular"
-        width={10}
-        height={10}
-        sx={{ mt: 0.5, flexShrink: 0 }}
-      />
+      <Stack alignItems="center" sx={{ flexShrink: 0, pt: 0.25 }}>
+        <Skeleton variant="circular" width={10} height={10} />
+        <Box sx={{ width: 1.5, flex: 1, mt: 0.5, bgcolor: "divider" }} />
+      </Stack>
       <Box flex={1} minWidth={0}>
-        <Skeleton variant="text" width="35%" height={20} />
-        <Skeleton variant="text" width="70%" height={16} />
-        <Skeleton variant="text" width="45%" height={16} />
+        <Typography sx={{ typography: "s2" }}>
+          <LineSkeleton width={36} />
+        </Typography>
+        <Typography sx={{ typography: "s3", mt: 0.375 }}>
+          <LineSkeleton width="80%" />
+        </Typography>
+        <Typography sx={{ typography: "s3", mt: 0.25 }}>
+          <LineSkeleton width={110} />
+        </Typography>
       </Box>
     </Stack>
   );
@@ -111,8 +116,7 @@ export default function AgentVersionsTab() {
     fetchNextPage,
     versions.length,
   ]);
-  if (!agent) return null;
-  const total = agent.versionCount;
+  const total = agent?.versionCount;
 
   return (
     <Box
@@ -126,7 +130,13 @@ export default function AgentVersionsTab() {
       }}
     >
       <Card
-        title={`${total} version${total === 1 ? "" : "s"}`}
+        title={
+          agent ? (
+            `${total} version${total === 1 ? "" : "s"}`
+          ) : (
+            <LineSkeleton width={72} />
+          )
+        }
         sx={{ height: "100%" }}
       >
         <Box

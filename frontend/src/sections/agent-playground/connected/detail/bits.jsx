@@ -1,5 +1,5 @@
 import PropTypes from "prop-types";
-import { Box, Stack, Typography } from "@mui/material";
+import { Box, Skeleton, Stack, Typography } from "@mui/material";
 
 // Small pieces shared by the agent detail tabs, from the designer prototype.
 
@@ -164,3 +164,11 @@ export function QuietTag({ children }) {
   );
 }
 QuietTag.propTypes = { children: PropTypes.node };
+
+// A text skeleton as tall as the line of text it stands in for. MUI's text
+// Skeleton is 1.2em, which is shorter than our line heights, so a loading
+// row would be shorter than the row that replaces it.
+export function LineSkeleton({ sx, ...rest }) {
+  return <Skeleton sx={{ height: "1lh", ...sx }} {...rest} />;
+}
+LineSkeleton.propTypes = { sx: PropTypes.object };

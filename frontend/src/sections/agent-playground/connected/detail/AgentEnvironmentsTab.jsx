@@ -1,14 +1,15 @@
 import PropTypes from "prop-types";
 import React from "react";
 import { useNavigate } from "react-router-dom";
-import { Box, Typography } from "@mui/material";
+import { Box, Skeleton, Typography } from "@mui/material";
 import { useAgentEnvironments } from "src/api/agents/agentDetail";
 import { paths } from "src/routes/paths";
-import { Card, Row } from "./bits";
+import { Card, LineSkeleton, Row } from "./bits";
 import { MONO, ago, rateTone } from "./format";
 import useAgentRoute from "./useAgentRoute";
 
 const COLUMNS = ["Environment", "Testing", "Last result"];
+const SKELETON_ROWS = 3;
 
 function LastResult({ env }) {
   const run = env.lastRun;
@@ -64,11 +65,24 @@ export default function AgentEnvironmentsTab() {
     );
   } else if (isLoading) {
     body = (
-      <Typography
-        sx={{ px: 2, py: 1.5, typography: "s2", color: "text.secondary" }}
-      >
-        Loading…
-      </Typography>
+      <>
+        <Row header cells={COLUMNS} />
+        {Array.from({ length: SKELETON_ROWS }, (_, i) => (
+          <Row
+            // eslint-disable-next-line react/no-array-index-key
+            key={i}
+            cells={[
+              <LineSkeleton
+                key="name"
+                width={140}
+                data-testid="environment-row-skeleton"
+              />,
+              <Skeleton key="testing" width={24} />,
+              <Skeleton key="last" width={150} />,
+            ]}
+          />
+        ))}
+      </>
     );
   } else if (!envs?.length) {
     body = (
@@ -111,5 +125,10 @@ export default function AgentEnvironmentsTab() {
     );
   }
 
-  return <Card title="Environments testing this agent">{body}</Card>;
+  // Wrapped, so the page's bottom gap falls below the card, not inside it.
+  return (
+    <Box>
+      <Card title="Environments testing this agent">{body}</Card>
+    </Box>
+  );
 }

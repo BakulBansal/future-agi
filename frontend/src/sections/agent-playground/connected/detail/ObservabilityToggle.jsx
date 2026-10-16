@@ -3,6 +3,7 @@ import React, { useState } from "react";
 import {
   Box,
   CircularProgress,
+  Skeleton,
   Stack,
   Switch,
   Typography,
@@ -10,6 +11,7 @@ import {
 import { alpha } from "@mui/material/styles";
 import Iconify from "src/components/iconify";
 import { useSetObservability } from "src/api/agents/agentDetail";
+import { LineSkeleton } from "./bits";
 
 /**
  * Observability on/off for the agent, from its observability_enabled. A
@@ -121,3 +123,39 @@ export default function ObservabilityToggle({ agent }) {
 }
 
 ObservabilityToggle.propTypes = { agent: PropTypes.object.isRequired };
+
+/** The toggle's row while the agent loads: same box, label and height. */
+export function ObservabilityToggleSkeleton() {
+  return (
+    <Box
+      sx={{
+        border: "1px solid",
+        borderColor: "divider",
+        borderRadius: 1.5,
+        bgcolor: "background.paper",
+      }}
+    >
+      <Stack
+        direction="row"
+        alignItems="center"
+        spacing={1}
+        sx={{ pl: 1, pr: 2, minHeight: 44 }}
+      >
+        <Stack direction="row" alignItems="center" sx={{ flexShrink: 0 }}>
+          <Skeleton
+            variant="rounded"
+            width={34}
+            height={20}
+            sx={{ mx: 0.75, borderRadius: 10 }}
+          />
+          <Typography sx={{ typography: "s2", fontWeight: 600, ml: 0.5 }}>
+            Observability
+          </Typography>
+        </Stack>
+        <Typography sx={{ typography: "s3" }}>
+          <LineSkeleton width={260} />
+        </Typography>
+      </Stack>
+    </Box>
+  );
+}

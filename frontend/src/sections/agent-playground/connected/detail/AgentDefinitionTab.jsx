@@ -3,11 +3,13 @@ import React from "react";
 import { Box, Skeleton, Stack, Typography } from "@mui/material";
 import { useAgentVersion } from "src/api/agents/agentDetail";
 import { sourceLabel } from "../connectedAgentLabels";
-import { Card } from "./bits";
+import { Card, LineSkeleton } from "./bits";
 import { MONO } from "./format";
 import { hostedRows, storedAgentRows } from "./definitionRows";
 import ComingSoonPreview from "./ComingSoonPreview";
-import ObservabilityToggle from "./ObservabilityToggle";
+import ObservabilityToggle, {
+  ObservabilityToggleSkeleton,
+} from "./ObservabilityToggle";
 import FileStructurePreview from "./previews/FileStructurePreview";
 import useAgentRoute from "./useAgentRoute";
 
@@ -93,6 +95,38 @@ function DefinitionRow({ row }) {
 
 DefinitionRow.propTypes = { row: PropTypes.object.isRequired };
 
+// A loading row in the shape of DefinitionRow: label column, then the value.
+const SKELETON_VALUES = [72, 96, 180, "70%"];
+function DefinitionRowSkeleton({ value }) {
+  return (
+    <Stack
+      data-testid="definition-row-skeleton"
+      direction="row"
+      spacing={2}
+      sx={{
+        px: 2,
+        py: 1,
+        borderTop: "1px solid",
+        borderColor: "divider",
+        "&:first-of-type": { borderTop: "none" },
+      }}
+    >
+      <Typography
+        sx={{ typography: "s2", lineHeight: "24px", width: 150, flexShrink: 0 }}
+      >
+        <LineSkeleton width={80} />
+      </Typography>
+      <Typography sx={{ typography: "s2", lineHeight: "24px", flex: 1 }}>
+        <LineSkeleton width={value} />
+      </Typography>
+    </Stack>
+  );
+}
+
+DefinitionRowSkeleton.propTypes = {
+  value: PropTypes.oneOfType([PropTypes.number, PropTypes.string]),
+};
+
 const Note = ({ children, tone }) => (
   <Typography
     sx={{
@@ -120,23 +154,20 @@ export default function AgentDefinitionTab() {
     isError,
   } = useAgentVersion(agentId, versionId);
 
-  if (!agent) return null;
-
-  const isCode = (version?.agentKind ?? agent.agentKind) === "source";
+  const loading = !agent || isLoading;
+  const isCode = (version?.agentKind ?? agent?.agentKind) === "source";
   const details = version?.agentDetails;
-  const readFrom = sourceLabel(agent.source ?? version?.config?.provider);
+  const readFrom = agent
+    ? sourceLabel(agent.source ?? version?.config?.provider)
+    : "—";
 
   let body;
-  if (!versionId) {
+  if (loading) {
+    body = SKELETON_VALUES.map((value) => (
+      <DefinitionRowSkeleton key={value} value={value} />
+    ));
+  } else if (!versionId) {
     body = <Note>No definition stored for this version</Note>;
-  } else if (isLoading) {
-    body = (
-      <Box sx={{ px: 2, py: 1.5 }}>
-        <Skeleton variant="text" />
-        <Skeleton variant="text" />
-        <Skeleton variant="text" width="60%" />
-      </Box>
-    );
   } else if (isError && !version) {
     body = <Note>Couldn&apos;t load this version</Note>;
   } else if (details) {
@@ -170,7 +201,13 @@ export default function AgentDefinitionTab() {
         title={
           <>
             <span>What we read</span>{" "}
-            {version && (
+            {loading && (
+              <LineSkeleton
+                width={28}
+                sx={{ display: "inline-block", verticalAlign: "middle" }}
+              />
+            )}
+            {!loading && version && (
               <Box
                 component="span"
                 sx={{
@@ -197,7 +234,11 @@ export default function AgentDefinitionTab() {
       >
         {body}
       </Card>
-      <ObservabilityToggle agent={agent} />
+      {agent ? (
+        <ObservabilityToggle agent={agent} />
+      ) : (
+        <ObservabilityToggleSkeleton />
+      )}
       <ComingSoonPreview
         title="File structure"
         description="Browse the files we read from your agent, version by version."
