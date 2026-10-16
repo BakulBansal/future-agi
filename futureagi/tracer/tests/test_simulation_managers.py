@@ -4,6 +4,8 @@ import pytest
 from django.db import IntegrityError, transaction
 from rest_framework import status
 
+from ai_tools.base import ToolContext
+from ai_tools.registry import registry
 from model_hub.models.ai_model import AIModel
 from simulate.models.agent_definition import AgentDefinition
 from tfc.utils.error_codes import get_error_message
@@ -157,13 +159,15 @@ def test_save_full_clean_does_not_see_a_hidden_name_but_the_database_does(
 
 
 VIEW_PATHS = ("view_create", "view_rename", "view_patch")
+TOOL_PATHS = {"tool_create": "create_project", "tool_rename": "update_project"}
+EXACT_NAME_PATHS = ("get_or_create_project", *TOOL_PATHS)
 VIEW_NOT_RESERVED_NAMES = [name for name in NOT_RESERVED_NAMES if name == name.strip()]
 HARMLESS_NAME = "A harmless name"
 RESERVED_PATH_CASES = (
-    [(path, RESERVED_NAME, True) for path in (*VIEW_PATHS, "get_or_create_project")]
+    [(path, RESERVED_NAME, True) for path in (*VIEW_PATHS, *EXACT_NAME_PATHS)]
     + [(path, f" {RESERVED_NAME} ", True) for path in VIEW_PATHS]
     + [(path, name, False) for path in VIEW_PATHS for name in VIEW_NOT_RESERVED_NAMES]
-    + [("get_or_create_project", name, False) for name in NOT_RESERVED_NAMES]
+    + [(path, name, False) for path in EXACT_NAME_PATHS for name in NOT_RESERVED_NAMES]
 )
 
 
@@ -193,6 +197,27 @@ def test_reserved_name_is_refused_by_create_rename_tools_and_get_or_create(
             )
             assert project.name == name
             assert Project.no_workspace_objects.filter(pk=project.pk).exists()
+    elif path in TOOL_PATHS:
+        context = ToolContext(user=user, organization=organization, workspace=workspace)
+        if path == "tool_create":
+            params = {
+                "name": name,
+                "trace_type": "observe",
+                "model_type": "GenerativeLLM",
+            }
+        else:
+            params = {"project_id": str(target.id), "name": name}
+        result = registry.get(TOOL_PATHS[path]).run(params, context)
+        if refused:
+            assert result.is_error
+            assert result.error_code == "VALIDATION_ERROR"
+            assert RESERVED_PROJECT_NAME_MESSAGE in result.content
+        else:
+            assert not result.is_error, result.content
+            if path == "tool_create":
+                assert Project.objects.get(name=name).trace_type == "observe"
+            else:
+                assert Project.objects.get(pk=target.pk).name == name
     elif path == "view_create":
         response = auth_client.post(
             "/tracer/project/",
@@ -234,7 +259,7 @@ def test_reserved_name_is_refused_by_create_rename_tools_and_get_or_create(
         assert not Project.with_simulation.filter(
             name__in={name, name.strip()}
         ).exists()
-        if path in ("view_rename", "view_patch"):
+        if path in ("view_rename", "view_patch", "tool_rename"):
             assert Project.objects.get(pk=target.pk).name == "Target project"
 
 

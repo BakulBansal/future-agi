@@ -12,8 +12,10 @@ from django.db import IntegrityError, connection
 from django.db.migrations import AddField, AlterModelOptions
 from django.db.migrations.loader import MigrationLoader
 from django.db.models import CASCADE, OneToOneField
+from django.test.utils import CaptureQueriesContext
 
 from accounts.models.workspace import Workspace
+from model_hub.management.commands import backfill_score_tracer_project
 from model_hub.models.ai_model import AIModel
 from simulate.models.agent_definition import AgentDefinition
 from simulate.models.run_test import RunTest
@@ -136,6 +138,34 @@ def test_migration_adds_one_nullable_unique_column():
     )
 
 
+def test_score_backfill_that_runs_before_0115_never_names_the_column(
+    organization, workspace
+):
+    plan = MigrationLoader(connection).graph.forwards_plan(
+        ("tracer", "0115_project_simulation_agent")
+    )
+    assert ("model_hub", "0120_backfill_score_tracer_project") in plan
+    visible = Project.objects.create(
+        name="A visible project",
+        organization=organization,
+        workspace=workspace,
+        model_type=AIModel.ModelTypes.GENERATIVE_LLM,
+        trace_type="observe",
+    )
+    # Any queryset with organization_id stands in for the pending scores.
+    base = Project._base_manager.filter(pk=visible.pk)
+
+    for only_project in (str(visible.id), None):
+        with CaptureQueriesContext(connection) as queries:
+            projects, _ = backfill_score_tracer_project._projects_for_pending_scores(
+                base, only_project
+            )
+        assert str(visible.id) in {ref.project_id for ref in projects}
+        assert queries.captured_queries
+        for query in queries.captured_queries:
+            assert "simulation_agent" not in query["sql"]
+
+
 def test_hard_delete_of_the_agent_removes_the_project(organization, workspace):
     agent = _agent(organization, workspace)
     project = Project.with_simulation.create(
@@ -226,8 +256,7 @@ def test_ensure_is_idempotent_and_race_safe(organization, workspace, monkeypatch
     assert len(project_ids) == 2
     assert project_ids[0] == project_ids[1]
     assert (
-        Project.with_simulation.filter(simulation_agent_id=racing_agent.id).count()
-        == 1
+        Project.with_simulation.filter(simulation_agent_id=racing_agent.id).count() == 1
     )
     assert [e["event"] for e in race_events].count("simulation_project_created") == 1
 
@@ -383,9 +412,9 @@ def test_public_signatures_and_constants():
     assert list(inspect.signature(simulation_project_name).parameters) == [
         "agent_definition_id"
     ]
-    assert list(
-        inspect.signature(agent_id_in_simulation_project_name).parameters
-    ) == ["name"]
+    assert list(inspect.signature(agent_id_in_simulation_project_name).parameters) == [
+        "name"
+    ]
     assert list(inspect.signature(ensure_simulation_project).parameters) == [
         "agent_definition"
     ]
@@ -410,7 +439,7 @@ def test_agent_id_in_name_is_exact():
 def test_ensure_refuses_a_deleted_hidden_project(organization, workspace):
     agent = _agent_without_context(organization, workspace)
     project = ensure_simulation_project(agent)
-    visible = Project.objects.create(
+    Project.objects.create(
         name="A visible project",
         organization=organization,
         workspace=workspace,
