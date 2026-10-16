@@ -105,6 +105,17 @@ describe("ConnectedAgentsView", () => {
     expect(screen.queryByText("No connected agents yet")).toBeNull();
   });
 
+  it("explains how to connect an agent when there are none", async () => {
+    axios.get.mockReset();
+    axios.get.mockResolvedValue({ data: { count: 0, results: [] } });
+    renderView();
+    expect(
+      await screen.findByText(
+        "Connect your agent from a hosted platform, an endpoint, a repository or an upload. Simulations run against a copy of it.",
+      ),
+    ).toBeInTheDocument();
+  });
+
   it("opens an agent's detail page from its row", async () => {
     renderView();
     fireEvent.click(await screen.findByText("Clinic receptionist"));

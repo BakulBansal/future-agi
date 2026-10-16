@@ -148,7 +148,7 @@ export default function AgentDefinitionTab() {
         ))}
         {details.setupStale && (
           <Note tone="warning">
-            This setup may be out of date — the agent has changed since it was
+            This setup may be out of date. The agent changed after it was
             stored.
           </Note>
         )}

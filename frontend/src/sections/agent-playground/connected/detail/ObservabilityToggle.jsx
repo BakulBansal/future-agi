@@ -47,8 +47,9 @@ export default function ObservabilityToggle({ agent }) {
   let caption;
   if (error) caption = error;
   else if (!supported) caption = NOT_YET;
-  else if (checked) caption = "Production calls land in Observe";
-  else caption = "Not watched — you only see what simulations find";
+  else if (checked)
+    caption = "Tracking this agent's calls and logs in Observe.";
+  else caption = "Turn on to track calls, monitor logs and debug this agent.";
 
   return (
     <Box

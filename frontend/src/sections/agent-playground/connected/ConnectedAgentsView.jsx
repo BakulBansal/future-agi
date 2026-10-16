@@ -176,8 +176,8 @@ export default function ConnectedAgentsView({ onConnect }) {
             mx: "auto",
           }}
         >
-          Connect your agent — a hosted platform, an endpoint, a repository or
-          an upload — and we make the copy simulations run against.
+          Connect your agent from a hosted platform, an endpoint, a repository
+          or an upload. Simulations run against a copy of it.
         </Typography>
         <Button
           variant="contained"

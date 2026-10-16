@@ -105,7 +105,11 @@ describe("AgentDefinitionTab", () => {
       },
     });
     renderAt(CODE_AGENT_DETAIL);
-    expect(await screen.findByText(/may be out of date/i)).toBeInTheDocument();
+    expect(
+      await screen.findByText(
+        "This setup may be out of date. The agent changed after it was stored.",
+      ),
+    ).toBeInTheDocument();
   });
 
   it("says when a code agent's version has nothing stored", async () => {
@@ -131,6 +135,29 @@ describe("AgentDefinitionTab", () => {
     expect(within(region).getByTestId("coming-soon-preview")).toHaveTextContent(
       "agent.yaml",
     );
+  });
+
+  it("says what observability does while it's off", async () => {
+    serve(HOSTED_AGENT_DETAIL, { "v2-id": HOSTED_VERSION_DETAIL });
+    renderAt(HOSTED_AGENT_DETAIL);
+    expect(
+      await screen.findByText(
+        "Turn on to track calls, monitor logs and debug this agent.",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("says where the calls go while it's on", async () => {
+    serve(
+      { ...HOSTED_AGENT_DETAIL, observability_enabled: true },
+      { "v2-id": HOSTED_VERSION_DETAIL },
+    );
+    renderAt(HOSTED_AGENT_DETAIL);
+    expect(
+      await screen.findByText(
+        "Tracking this agent's calls and logs in Observe.",
+      ),
+    ).toBeInTheDocument();
   });
 
   it("turns observability on and refetches the agent", async () => {
