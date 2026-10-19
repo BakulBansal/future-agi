@@ -6,6 +6,7 @@ import pytest
 from django.test import override_settings
 from django.utils import timezone
 from rest_framework import status
+from rest_framework.test import APIClient
 
 from accounts.models import Organization
 from simulate.models import (
@@ -27,6 +28,8 @@ from simulate.services.hosted_harness import (
 )
 from simulate.tests.test_agent_setup_service import source_agent
 from simulate.tests.test_harness_provider import _v1_payload
+from tfc.constants.levels import Level
+from tfc.constants.roles import OrganizationRoles
 from tracer.models.observability_provider import ObservabilityProvider, ProviderChoices
 from tracer.models.project import Project
 from tracer.services.observability_switch import PREREQUISITES, ObservabilityRefused
@@ -296,6 +299,45 @@ def test_runs_list_environment_and_simulate_runs_newest_first(
 
 
 @pytest.mark.django_db
+def test_runs_of_a_deleted_test_are_left_out(auth_client, organization, workspace):
+    agent = _agent(organization, workspace, "Northwind")
+    kept = _execution(_run_test(agent, "Kept"), 10)
+    removed_test = _run_test(agent, "Removed")
+    _execution(removed_test, 20)
+    RunTest.all_objects.filter(id=removed_test.id).update(deleted=True)
+
+    runs = auth_client.get(f"{AGENTS}{agent.id}/runs/").json()["results"]
+
+    assert [run["test_execution_id"] for run in runs] == [str(kept.id)]
+
+
+@pytest.mark.django_db
+def test_runs_of_a_deleted_environment_are_left_out_and_the_count_agrees(
+    auth_client, organization, workspace
+):
+    agent = _agent(organization, workspace, "Northwind")
+    live = _environment(agent, 1)
+    live_run = _execution(live.run_test, 10)
+    HostedHarnessJob.no_workspace_objects.filter(id=live.id).update(
+        test_execution=live_run
+    )
+    gone = _environment(agent, 2)
+    own_run = _execution(gone.run_test, 20)
+    HostedHarnessJob.no_workspace_objects.filter(id=gone.id).update(
+        test_execution=own_run
+    )
+    rerun_execution = _execution(gone.run_test, 30)
+    _job(gone.run_test, minutes=30, environment=gone, execution=rerun_execution)
+    HostedHarnessJob.all_objects.filter(id=gone.id).update(deleted=True)
+
+    runs = auth_client.get(f"{AGENTS}{agent.id}/runs/").json()["results"]
+    detail = auth_client.get(f"{AGENTS}{agent.id}/").json()
+
+    assert [run["test_execution_id"] for run in runs] == [str(live_run.id)]
+    assert detail["environment_count"] == 1
+
+
+@pytest.mark.django_db
 def test_runs_limit_defaults_to_five_and_rejects_out_of_range(
     auth_client, organization, workspace
 ):
@@ -394,6 +436,101 @@ def test_edit_passes_the_switch_through(auth_client, organization, workspace):
     assert all(call.kwargs["workspace"] == workspace for call in switch.call_args_list)
 
 
+def _signed_in(organization, workspace, *, org_role, org_level, ws_role, ws_level):
+    """A client that goes through the real login and auth class, unlike the
+    forced-auth fixture, so the workspace write-role check actually runs."""
+    from accounts.models.organization_membership import OrganizationMembership
+    from accounts.models.user import User
+    from accounts.models.workspace import WorkspaceMembership
+
+    member = User.objects.create_user(
+        email=f"switch-{uuid.uuid4().hex[:8]}@futureagi.com",
+        password="testpassword123",
+        name="Switch tester",
+        organization=organization,
+        organization_role=org_role,
+    )
+    org_membership, _ = OrganizationMembership.no_workspace_objects.update_or_create(
+        user=member,
+        organization=organization,
+        defaults={"role": org_role, "level": org_level, "is_active": True},
+    )
+    WorkspaceMembership.no_workspace_objects.update_or_create(
+        user=member,
+        workspace=workspace,
+        defaults={
+            "role": ws_role,
+            "level": ws_level,
+            "organization_membership": org_membership,
+            "is_active": True,
+        },
+    )
+    client = APIClient()
+    login = client.post(
+        "/accounts/token/",
+        {"email": member.email, "password": "testpassword123"},
+        format="json",
+    )
+    assert login.status_code == status.HTTP_200_OK, login.content
+    client.credentials(
+        HTTP_AUTHORIZATION=f"Bearer {login.data['access']}",
+        HTTP_X_ORGANIZATION_ID=str(organization.id),
+        HTTP_X_WORKSPACE_ID=str(workspace.id),
+    )
+    return client
+
+
+@pytest.mark.django_db
+def test_a_workspace_viewer_cannot_flip_the_switch_or_save_anything(
+    organization, workspace
+):
+    agent = _agent(organization, workspace, "Northwind")
+    viewer = _signed_in(
+        organization,
+        workspace,
+        org_role=OrganizationRoles.MEMBER_VIEW_ONLY,
+        org_level=Level.VIEWER,
+        ws_role=OrganizationRoles.WORKSPACE_VIEWER,
+        ws_level=Level.WORKSPACE_VIEWER,
+    )
+
+    with patch("simulate.views.agent_definition.set_agent_observability") as switch:
+        response = viewer.put(
+            f"{AGENTS}{agent.id}/edit/",
+            {"observability_enabled": True, "agent_name": "Renamed"},
+            format="json",
+        )
+
+    assert response.status_code == status.HTTP_403_FORBIDDEN, response.content
+    assert "Write access denied to this workspace" in str(response.data)
+    switch.assert_not_called()
+    agent.refresh_from_db()
+    assert agent.agent_name == "Northwind"
+
+
+@pytest.mark.django_db
+def test_a_workspace_member_can_still_flip_the_switch(organization, workspace):
+    agent = _agent(organization, workspace, "Northwind")
+    member = _signed_in(
+        organization,
+        workspace,
+        org_role=OrganizationRoles.MEMBER,
+        org_level=Level.MEMBER,
+        ws_role=OrganizationRoles.WORKSPACE_MEMBER,
+        ws_level=Level.WORKSPACE_MEMBER,
+    )
+
+    with patch("simulate.views.agent_definition.set_agent_observability") as switch:
+        response = member.put(
+            f"{AGENTS}{agent.id}/edit/",
+            {"observability_enabled": True},
+            format="json",
+        )
+
+    assert response.status_code == status.HTTP_200_OK, response.content
+    assert [call.kwargs["enabled"] for call in switch.call_args_list] == [True]
+
+
 @pytest.mark.django_db
 def test_a_refused_switch_saves_nothing_from_the_same_edit(
     auth_client, organization, workspace
@@ -417,7 +554,7 @@ def test_a_refused_switch_saves_nothing_from_the_same_edit(
 
 
 @pytest.mark.django_db
-def test_version_detail_embeds_the_stored_agent_or_null(
+def test_version_detail_leaves_the_stored_agent_to_its_own_endpoint(
     auth_client, organization, workspace
 ):
     agent = _agent(organization, workspace, "Harbor Hotels", provider="")
@@ -425,12 +562,13 @@ def test_version_detail_embeds_the_stored_agent_or_null(
     store_agent(agent_version_id=stored.id, agent=source_agent(), sdk_version="0.2.3")
     bare = agent.create_version(description="", commit_message="v2", status="active")
 
-    with_agent = auth_client.get(f"{AGENTS}{agent.id}/versions/{stored.id}/").json()
-    without = auth_client.get(f"{AGENTS}{agent.id}/versions/{bare.id}/").json()
-    endpoint = auth_client.get(f"{AGENTS}{agent.id}/versions/{stored.id}/agent/").json()
-
-    assert with_agent["agent_details"] == endpoint
-    assert without["agent_details"] is None
+    for version in (stored, bare):
+        detail = auth_client.get(f"{AGENTS}{agent.id}/versions/{version.id}/")
+        assert detail.status_code == status.HTTP_200_OK, detail.content
+        assert "agent_details" not in detail.json()
+    endpoint = auth_client.get(f"{AGENTS}{agent.id}/versions/{stored.id}/agent/")
+    assert endpoint.status_code == status.HTTP_200_OK, endpoint.content
+    assert endpoint.json()
 
 
 @pytest.mark.django_db

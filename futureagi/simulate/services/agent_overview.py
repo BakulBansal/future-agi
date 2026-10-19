@@ -110,8 +110,14 @@ def observability_on(agent: AgentDefinition) -> bool:
 
 
 def recent_agent_runs(agent: AgentDefinition, limit: int) -> list[dict[str, Any]]:
+    # A run of a deleted test or environment links to a page that no longer
+    # exists, and the environment count already leaves those environments out.
     executions = list(
-        TestExecution.no_workspace_objects.filter(agent_definition=agent, deleted=False)
+        TestExecution.no_workspace_objects.filter(
+            agent_definition=agent, deleted=False, run_test__deleted=False
+        )
+        .exclude(hosted_harness_job__deleted=True)
+        .exclude(hosted_harness_job__environment__deleted=True)
         .select_related("agent_version", "run_test")
         .order_by("-created_at")[:limit]
     )

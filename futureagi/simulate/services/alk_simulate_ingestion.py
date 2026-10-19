@@ -655,11 +655,10 @@ def _create_persona_scenarios_legacy(
 
 
 def resolved_agent_version(run_test: RunTest) -> AgentVersion | None:
-    if run_test.agent_version is not None:
-        return run_test.agent_version
-    if run_test.agent_definition is None:
-        return None
-    return run_test.agent_definition.latest_version
+    # Same ladder the runner uses, so a run is filed under the version it ran.
+    from simulate.services.hosted_runner import resolve_run_agent_version
+
+    return resolve_run_agent_version(run_test)
 
 
 def create_alk_sim_test_execution(
