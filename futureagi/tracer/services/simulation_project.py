@@ -3,7 +3,8 @@
 Every agent definition owns at most one project that holds the traces of its
 simulated calls. The project is created here, named from the agent's id, and is
 returned only by ``Project.with_simulation``; the project managers used by the
-rest of the application leave it out.
+rest of the application leave it out. The one reader that opens it for a run the
+caller can read is ``simulation_scope_for_run``.
 """
 
 from __future__ import annotations
@@ -153,3 +154,82 @@ def agent_of_run(test_execution: TestExecution) -> AgentDefinition | None:
     if test_execution.agent_definition_id is not None:
         return test_execution.agent_definition
     return test_execution.run_test.agent_definition
+
+
+def simulation_scope_for_run(
+    request, test_execution_id=None, call_execution_id=None
+) -> Project | None:
+    """Return the hidden project a by-id read may open for a run, else ``None``.
+
+    The run must be readable by the caller the way the run pages read it: same
+    organization, same workspace rule, neither the run test nor the execution
+    deleted. Its agent definition (see ``agent_of_run``) must be live and in
+    that organization. Nothing is raised for a missing, foreign or unreadable
+    id, and nothing is queried when neither id or both ids are given.
+    """
+    if (test_execution_id is None) == (call_execution_id is None):
+        return None
+    organization = getattr(request, "organization", None) or getattr(
+        request.user, "organization", None
+    )
+    if organization is None:
+        return None
+
+    # Function-local: importing the scoping module loads every simulate view.
+    from simulate.models.test_execution import CallExecution, TestExecution
+    from simulate.views.scoping import run_test_workspace_filter
+
+    if test_execution_id is not None:
+        execution = (
+            TestExecution.no_workspace_objects.select_related(
+                "run_test", "agent_definition", "run_test__agent_definition"
+            )
+            .filter(
+                run_test_workspace_filter(request, "run_test"),
+                id=test_execution_id,
+                run_test__organization=organization,
+                run_test__deleted=False,
+            )
+            .first()
+        )
+    else:
+        call = (
+            CallExecution.no_workspace_objects.select_related(
+                "test_execution__run_test",
+                "test_execution__agent_definition",
+                "test_execution__run_test__agent_definition",
+            )
+            .filter(
+                run_test_workspace_filter(request, "test_execution__run_test"),
+                id=call_execution_id,
+                test_execution__run_test__organization=organization,
+                test_execution__run_test__deleted=False,
+                test_execution__deleted=False,
+            )
+            .first()
+        )
+        execution = call.test_execution if call is not None else None
+    if execution is None:
+        return None
+
+    agent = agent_of_run(execution)
+    if agent is None or agent.deleted or agent.organization_id != organization.id:
+        return None
+    return Project.with_simulation.filter(
+        simulation_agent_id=agent.pk,
+        deleted=False,
+        organization_id=organization.id,
+    ).first()
+
+
+def run_scope_project_ids(project: Project, pinned_project_id=None) -> list[str]:
+    """Return the project ids a by-id read may query with a run's scope.
+
+    A ``project_id`` sent next to the run must name the scope's project; if it
+    names another project the list is empty, which reads like a missing trace.
+    """
+    if pinned_project_id in (None, ""):
+        return [str(project.id)]
+    if str(pinned_project_id) == str(project.id):
+        return [str(project.id)]
+    return []
