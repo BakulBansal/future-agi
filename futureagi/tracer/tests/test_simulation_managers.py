@@ -407,6 +407,37 @@ def test_the_published_schema_lists_the_run_parameters(path):
         assert by_name[key]["format"] == "uuid"
 
 
+def test_only_the_expected_operations_name_the_run_parameters():
+    swagger = REPO_ROOT / "api_contracts/openapi/swagger.json"
+    paths = json.loads(swagger.read_text())["paths"]
+
+    found = {}
+    for path, item in paths.items():
+        for method, operation in item.items():
+            if not isinstance(operation, dict):
+                continue
+            # Path parameters of other routes share these names; only the
+            # query string is in question here.
+            declared = item.get("parameters", []) + operation.get("parameters", [])
+            names = {p.get("name") for p in declared if p.get("in") == "query"}
+            named = frozenset(names & set(RUN_PARAMETERS))
+            if named:
+                found[(path, method)] = named
+
+    both = frozenset(RUN_PARAMETERS)
+    expected = {
+        # The three detail reads that take the run parameters.
+        ("/tracer/trace/{id}/", "get"): both,
+        ("/tracer/trace/voice_call_detail/", "get"): both,
+        ("/tracer/observation-span/{id}/", "get"): both,
+        # Unrelated listings that already carried one filter of their own.
+        ("/sdk/api/v1/simulation/metrics/", "get"): frozenset({"call_execution_id"}),
+        ("/sdk/api/v1/simulation/runs/", "get"): frozenset({"call_execution_id"}),
+        ("/simulate/api/call-executions/", "get"): frozenset({"test_execution_id"}),
+    }
+    assert found == expected
+
+
 @pytest.mark.parametrize(
     ("path", "zod_name"),
     [
