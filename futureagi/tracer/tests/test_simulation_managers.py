@@ -184,22 +184,15 @@ def test_save_full_clean_does_not_see_a_hidden_name_but_the_database_does(
 
 
 VIEW_PATHS = ("view_create", "view_rename", "view_patch")
-# The assistant's tools do not trim a name, so only the exact name is reserved.
-TOOL_PATHS = ("tool_create", "tool_rename")
+TOOL_PATHS = {"tool_create": "create_project", "tool_rename": "update_project"}
+EXACT_NAME_PATHS = ("get_or_create_project", *TOOL_PATHS)
 VIEW_NOT_RESERVED_NAMES = [name for name in NOT_RESERVED_NAMES if name == name.strip()]
 HARMLESS_NAME = "A harmless name"
 RESERVED_PATH_CASES = (
-    [
-        (path, RESERVED_NAME, True)
-        for path in (*VIEW_PATHS, *TOOL_PATHS, "get_or_create_project")
-    ]
+    [(path, RESERVED_NAME, True) for path in (*VIEW_PATHS, *EXACT_NAME_PATHS)]
     + [(path, f" {RESERVED_NAME} ", True) for path in VIEW_PATHS]
     + [(path, name, False) for path in VIEW_PATHS for name in VIEW_NOT_RESERVED_NAMES]
-    + [
-        (path, name, False)
-        for path in (*TOOL_PATHS, "get_or_create_project")
-        for name in NOT_RESERVED_NAMES
-    ]
+    + [(path, name, False) for path in EXACT_NAME_PATHS for name in NOT_RESERVED_NAMES]
 )
 
 
@@ -235,24 +228,26 @@ def test_reserved_name_is_refused_by_create_rename_tools_and_get_or_create(
             assert project.name == name
             assert Project.no_workspace_objects.filter(pk=project.pk).exists()
     elif path in TOOL_PATHS:
+        context = ToolContext(user=user, organization=organization, workspace=workspace)
         if path == "tool_create":
-            params = {"name": name, "model_type": "GenerativeLLM"}
+            params = {
+                "name": name,
+                "trace_type": "observe",
+                "model_type": "GenerativeLLM",
+            }
         else:
             params = {"project_id": str(target.id), "name": name}
-        result = _run_tool(
-            "create_project" if path == "tool_create" else "update_project",
-            params,
-            user,
-            organization,
-            workspace,
-        )
+        result = registry.get(TOOL_PATHS[path]).run(params, context)
         if refused:
             assert result.is_error
+            assert result.error_code == "VALIDATION_ERROR"
             assert RESERVED_PROJECT_NAME_MESSAGE in result.content
         else:
             assert not result.is_error, result.content
-            assert result.data["name"] == name
-            assert Project.objects.filter(pk=result.data["project_id"]).exists()
+            if path == "tool_create":
+                assert Project.objects.get(name=name).trace_type == "observe"
+            else:
+                assert Project.objects.get(pk=target.pk).name == name
     elif path == "view_create":
         response = auth_client.post(
             "/tracer/project/",

@@ -35,10 +35,7 @@ class UpdateProjectTool(BaseTool):
             agent_id_in_simulation_project_name,
         )
 
-        if (
-            params.name is not None
-            and agent_id_in_simulation_project_name(params.name) is not None
-        ):
+        if agent_id_in_simulation_project_name(params.name) is not None:
             return ToolResult.error(
                 RESERVED_PROJECT_NAME_MESSAGE, error_code="VALIDATION_ERROR"
             )
