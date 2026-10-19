@@ -29,6 +29,7 @@ from tracer.models.observability_provider import (
     ProviderChoices,
 )
 from tracer.models.project import Project
+from tracer.services.simulation_project import agent_id_in_simulation_project_name
 from tracer.utils.observability_provider import create_observability_provider
 
 if TYPE_CHECKING:
@@ -183,24 +184,30 @@ def _refuse(agent_id: str, provider: str, missing: tuple[MissingPrerequisite, ..
     raise ObservabilityRefused(missing)
 
 
-def _resolved_workspace_id(organization: Organization, workspace) -> str:
+def _project_error(agent_id: str, reason: str) -> ObservabilityProjectError:
+    # The reason is one of our own words; the agent id is the only other field.
+    logger.error(
+        "observability_switch_project_error",
+        agent_definition_id=agent_id,
+        reason=reason,
+    )
+    return ObservabilityProjectError("observability project could not be created")
+
+
+def _resolved_workspace_id(organization: Organization, workspace, agent_id: str) -> str:
     # The project lands in the organization's default workspace when none is
     # given, so the name is checked there too.
     if workspace:
         try:
             return str(uuid.UUID(str(getattr(workspace, "id", workspace))))
         except ValueError as error:
-            raise ObservabilityProjectError(
-                "observability project could not be created"
-            ) from error
+            raise _project_error(agent_id, "bad_workspace_id") from error
     try:
         default = Workspace.objects.get(
             organization=organization, is_default=True, is_active=True
         )
     except Workspace.DoesNotExist as error:
-        raise ObservabilityProjectError(
-            "observability project could not be created"
-        ) from error
+        raise _project_error(agent_id, "no_default_workspace") from error
     return str(default.id)
 
 
@@ -258,7 +265,8 @@ def _project_name_for_new_row(
 
     Must run inside the transaction that creates the row, which keeps the lock.
     """
-    workspace_id = _resolved_workspace_id(organization, workspace)
+    agent_id = str(agent_definition.id)
+    workspace_id = _resolved_workspace_id(organization, workspace, agent_id)
     _lock_workspace_projects(organization, workspace_id)
     name = agent_definition.agent_name
     candidates = (
@@ -266,9 +274,13 @@ def _project_name_for_new_row(
         *(_tagged_name(name, tag) for tag in _agent_tags(agent_definition)),
     )
     for candidate in candidates:
+        if agent_id_in_simulation_project_name(candidate) is not None:
+            # A name reserved for a hidden project is refused at the create, and
+            # the name check cannot see hidden projects, so it is never offered.
+            continue
         if not _project_name_taken(organization, workspace_id, candidate):
             return candidate
-    raise ObservabilityProjectError("observability project could not be created")
+    raise _project_error(agent_id, "names_exhausted")
 
 
 def set_agent_observability(
@@ -288,7 +300,10 @@ def set_agent_observability(
             pk=agent_definition.pk, observability_provider_id=row.pk
         ).update(observability_provider=None, updated_at=timezone.now())
         if not cleared:
-            agent_definition.refresh_from_db(fields=["observability_provider"])
+            # The primary: a lagging replica would still show the dead link.
+            agent_definition.refresh_from_db(
+                using="default", fields=["observability_provider"]
+            )
             if agent_definition.observability_provider_id != row.pk:
                 return set_agent_observability(
                     agent_definition=agent_definition,

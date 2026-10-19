@@ -1226,8 +1226,36 @@ class TestCreateAgentVersionObservability:
         delete(agent)
         created = _created()
         summary = make_summary(agent_definition_id=agent.id, kind="source")
-        with seams(summary):
+        with (
+            seams(summary),
+            patch.object(
+                agent_version_views,
+                "set_agent_observability",
+                wraps=agent_version_views.set_agent_observability,
+            ) as switch_call,
+        ):
             response = _create_version(auth_client, agent, {})
+
+        assert response.status_code == status.HTTP_201_CREATED
+        # The view reads the dead link as off, not the stored column.
+        switch_call.assert_called_once()
+        assert switch_call.call_args.kwargs["enabled"] is False
+        assert _stored_agent(agent).observability_provider_id is None
+        assert _created() == created
+        assert _newest_snapshot(agent)[1]["observability_enabled"] is False
+
+    def test_turn_on_with_the_project_deleted_makes_nothing(
+        self, auth_client, organization, workspace
+    ):
+        # The agent page sends its stored "on" with every save; a fresh project
+        # here would bring back the one the user deleted.
+        agent = _agent_with_row(organization, workspace, enabled=True)
+        _delete_project(agent)
+        created = _created()
+        with seams(make_summary(agent_definition_id=agent.id)):
+            response = _create_version(
+                auth_client, agent, {"observability_enabled": True}
+            )
 
         assert response.status_code == status.HTTP_201_CREATED
         assert _stored_agent(agent).observability_provider_id is None
