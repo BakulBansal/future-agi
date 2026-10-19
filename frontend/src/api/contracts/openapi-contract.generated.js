@@ -5,7 +5,7 @@
 export const OPENAPI_CONTRACT = Object.freeze({
   generatedFrom: "api_contracts/openapi/swagger.json",
   swaggerVersion: "2.0",
-  endpointCount: 1060,
+  endpointCount: 1073,
   endpoints: {
     "/accounts/2fa/recovery-codes/": {
       get: {
@@ -9836,6 +9836,31 @@ export const OPENAPI_CONTRACT = Object.freeze({
         },
       },
     },
+    "/integrations/connections/{connection_id}/slack/channels/": {
+      get: {
+        operationId: "integrations_connections_slack_channels_list",
+        runtimeRequestValidation: true,
+        runtimeResponseValidation: true,
+        requestBody: null,
+        queryParameters: {
+          cursor: {
+            required: false,
+            schema: {
+              type: "string",
+              maxLength: 512,
+            },
+          },
+        },
+        responses: {
+          200: {
+            $ref: "#/definitions/SlackChannelsResponse",
+          },
+          default: {
+            $ref: "#/definitions/ManagementAPIErrorResponse",
+          },
+        },
+      },
+    },
     "/integrations/connections/{id}/": {
       get: {
         operationId: "integrations_connections_read",
@@ -10015,6 +10040,25 @@ export const OPENAPI_CONTRACT = Object.freeze({
           },
           500: {
             $ref: "#/definitions/IntegrationErrorResponse",
+          },
+          default: {
+            $ref: "#/definitions/ManagementAPIErrorResponse",
+          },
+        },
+      },
+    },
+    "/integrations/slack/install/": {
+      post: {
+        operationId: "integrations_slack_install_create",
+        runtimeRequestValidation: true,
+        runtimeResponseValidation: true,
+        requestBody: {
+          $ref: "#/definitions/SlackInstall",
+        },
+        queryParameters: {},
+        responses: {
+          200: {
+            $ref: "#/definitions/SlackInstallResponse",
           },
           default: {
             $ref: "#/definitions/ManagementAPIErrorResponse",
@@ -10444,6 +10488,9 @@ export const OPENAPI_CONTRACT = Object.freeze({
             $ref: "#/definitions/MCPOAuthTokenErrorResponse",
           },
           401: {
+            $ref: "#/definitions/MCPOAuthTokenErrorResponse",
+          },
+          429: {
             $ref: "#/definitions/MCPOAuthTokenErrorResponse",
           },
           default: {
@@ -15643,11 +15690,31 @@ export const OPENAPI_CONTRACT = Object.freeze({
     "/model-hub/develops/delete_dataset/": {
       delete: {
         operationId: "model-hub_develops_delete_dataset_delete",
-        runtimeRequestValidation: false,
-        runtimeResponseValidation: false,
-        requestBody: null,
+        runtimeRequestValidation: true,
+        runtimeResponseValidation: true,
+        requestBody: {
+          $ref: "#/definitions/DatasetDelete",
+        },
         queryParameters: {},
         responses: {
+          200: {
+            $ref: "#/definitions/DevelopDatasetMessageResponse",
+          },
+          400: {
+            $ref: "#/definitions/ModelHubErrorResponse",
+          },
+          403: {
+            $ref: "#/definitions/ModelHubErrorResponse",
+          },
+          404: {
+            $ref: "#/definitions/ModelHubErrorResponse",
+          },
+          409: {
+            $ref: "#/definitions/ModelHubErrorResponse",
+          },
+          500: {
+            $ref: "#/definitions/ModelHubErrorResponse",
+          },
           default: {
             $ref: "#/definitions/ManagementAPIErrorResponse",
           },
@@ -26172,6 +26239,30 @@ export const OPENAPI_CONTRACT = Object.freeze({
         },
       },
     },
+    "/saml2_auth/complete/": {
+      get: {
+        operationId: "saml2_auth_complete_list",
+        runtimeRequestValidation: false,
+        runtimeResponseValidation: false,
+        requestBody: null,
+        queryParameters: {
+          c: {
+            required: true,
+            schema: {
+              type: "string",
+            },
+          },
+        },
+        responses: {
+          400: {
+            $ref: "#/definitions/SAMLErrorResponse",
+          },
+          default: {
+            $ref: "#/definitions/ManagementAPIErrorResponse",
+          },
+        },
+      },
+    },
     "/saml2_auth/github/callback/": {
       get: {
         operationId: "saml2_auth_github_callback_list",
@@ -28809,6 +28900,44 @@ export const OPENAPI_CONTRACT = Object.freeze({
         },
       },
     },
+    "/simulate/api/harness/conversations/{id}/overview/": {
+      post: {
+        operationId: "simulate_api_harness_conversations_overview",
+        runtimeRequestValidation: true,
+        runtimeResponseValidation: true,
+        requestBody: {
+          $ref: "#/definitions/HarnessConversationOverviewQuery",
+        },
+        queryParameters: {},
+        responses: {
+          200: {
+            $ref: "#/definitions/HarnessConversationOverview",
+          },
+          default: {
+            $ref: "#/definitions/ManagementAPIErrorResponse",
+          },
+        },
+      },
+    },
+    "/simulate/api/harness/conversations/{id}/publish/": {
+      post: {
+        operationId: "simulate_api_harness_conversations_publish",
+        runtimeRequestValidation: true,
+        runtimeResponseValidation: false,
+        requestBody: {
+          $ref: "#/definitions/HarnessConversationPublish",
+        },
+        queryParameters: {},
+        responses: {
+          201: {
+            $ref: "#/definitions/HarnessConversationPublish",
+          },
+          default: {
+            $ref: "#/definitions/ManagementAPIErrorResponse",
+          },
+        },
+      },
+    },
     "/simulate/api/harness/conversations/{id}/rerun/": {
       post: {
         operationId: "simulate_api_harness_conversations_rerun",
@@ -28838,6 +28967,63 @@ export const OPENAPI_CONTRACT = Object.freeze({
         responses: {
           200: {
             $ref: "#/definitions/HarnessConversationRunStatus",
+          },
+          default: {
+            $ref: "#/definitions/ManagementAPIErrorResponse",
+          },
+        },
+      },
+    },
+    "/simulate/api/harness/conversations/{id}/runs/": {
+      post: {
+        operationId: "simulate_api_harness_conversations_runs",
+        runtimeRequestValidation: true,
+        runtimeResponseValidation: false,
+        requestBody: {
+          $ref: "#/definitions/HarnessConversationRunsQuery",
+        },
+        queryParameters: {},
+        responses: {
+          201: {
+            $ref: "#/definitions/HarnessConversationRunsQuery",
+          },
+          default: {
+            $ref: "#/definitions/ManagementAPIErrorResponse",
+          },
+        },
+      },
+    },
+    "/simulate/api/harness/conversations/{id}/runs/start/": {
+      post: {
+        operationId: "simulate_api_harness_conversations_runs_start_run",
+        runtimeRequestValidation: true,
+        runtimeResponseValidation: false,
+        requestBody: {
+          $ref: "#/definitions/HarnessConversationRunStart",
+        },
+        queryParameters: {},
+        responses: {
+          201: {
+            $ref: "#/definitions/HarnessConversationRunStart",
+          },
+          default: {
+            $ref: "#/definitions/ManagementAPIErrorResponse",
+          },
+        },
+      },
+    },
+    "/simulate/api/harness/conversations/{id}/scenarios/": {
+      post: {
+        operationId: "simulate_api_harness_conversations_scenarios",
+        runtimeRequestValidation: true,
+        runtimeResponseValidation: false,
+        requestBody: {
+          $ref: "#/definitions/HarnessConversationScenarioQuery",
+        },
+        queryParameters: {},
+        responses: {
+          201: {
+            $ref: "#/definitions/HarnessConversationScenarioQuery",
           },
           default: {
             $ref: "#/definitions/ManagementAPIErrorResponse",
@@ -32208,6 +32394,141 @@ export const OPENAPI_CONTRACT = Object.freeze({
         responses: {
           200: {
             $ref: "#/definitions/DeploymentRegistrationResponse",
+          },
+          default: {
+            $ref: "#/definitions/ManagementAPIErrorResponse",
+          },
+        },
+      },
+    },
+    "/tracer/alerts/": {
+      get: {
+        operationId: "tracer_alerts_list",
+        runtimeRequestValidation: true,
+        runtimeResponseValidation: true,
+        requestBody: null,
+        queryParameters: {
+          kind: {
+            required: false,
+            schema: {
+              type: "string",
+              enum: ["metric", "error_feed"],
+            },
+          },
+        },
+        responses: {
+          200: {
+            $ref: "#/definitions/AlertListResponse",
+          },
+          default: {
+            $ref: "#/definitions/ManagementAPIErrorResponse",
+          },
+        },
+      },
+      post: {
+        operationId: "tracer_alerts_create",
+        runtimeRequestValidation: true,
+        runtimeResponseValidation: true,
+        requestBody: {
+          $ref: "#/definitions/AlertWriteRequest",
+        },
+        queryParameters: {},
+        responses: {
+          201: {
+            $ref: "#/definitions/AlertItemResponse",
+          },
+          default: {
+            $ref: "#/definitions/ManagementAPIErrorResponse",
+          },
+        },
+      },
+    },
+    "/tracer/alerts/error_feed/{alert_id}/test/": {
+      post: {
+        operationId: "tracer_alerts_error_feed_test_create",
+        runtimeRequestValidation: true,
+        runtimeResponseValidation: true,
+        requestBody: {
+          $ref: "#/definitions/AlertTestRequest",
+        },
+        queryParameters: {},
+        responses: {
+          200: {
+            $ref: "#/definitions/AlertTestResponse",
+          },
+          default: {
+            $ref: "#/definitions/ManagementAPIErrorResponse",
+          },
+        },
+      },
+    },
+    "/tracer/alerts/options/": {
+      get: {
+        operationId: "tracer_alerts_options_list",
+        runtimeRequestValidation: true,
+        runtimeResponseValidation: true,
+        requestBody: null,
+        queryParameters: {
+          kind: {
+            required: false,
+            schema: {
+              type: "string",
+              enum: ["metric", "error_feed"],
+            },
+          },
+        },
+        responses: {
+          200: {
+            $ref: "#/definitions/AlertOptionsResponse",
+          },
+          default: {
+            $ref: "#/definitions/ManagementAPIErrorResponse",
+          },
+        },
+      },
+    },
+    "/tracer/alerts/{kind}/{alert_id}/": {
+      get: {
+        operationId: "tracer_alerts_read",
+        runtimeRequestValidation: false,
+        runtimeResponseValidation: true,
+        requestBody: null,
+        queryParameters: {},
+        responses: {
+          200: {
+            $ref: "#/definitions/AlertItemResponse",
+          },
+          default: {
+            $ref: "#/definitions/ManagementAPIErrorResponse",
+          },
+        },
+      },
+      patch: {
+        operationId: "tracer_alerts_partial_update",
+        runtimeRequestValidation: true,
+        runtimeResponseValidation: true,
+        requestBody: {
+          $ref: "#/definitions/AlertWriteRequest",
+        },
+        queryParameters: {},
+        responses: {
+          200: {
+            $ref: "#/definitions/AlertItemResponse",
+          },
+          default: {
+            $ref: "#/definitions/ManagementAPIErrorResponse",
+          },
+        },
+      },
+      delete: {
+        operationId: "tracer_alerts_delete",
+        runtimeRequestValidation: false,
+        runtimeResponseValidation: true,
+        requestBody: null,
+        queryParameters: {},
+        responses: {
+          200: {
+            $ref: "#/definitions/AlertDeletedResponse",
           },
           default: {
             $ref: "#/definitions/ManagementAPIErrorResponse",
@@ -40415,48 +40736,84 @@ export const OPENAPI_CONTRACT = Object.freeze({
     "/tracer/user-alerts/list_monitors/": {
       get: {
         operationId: "tracer_user-alerts_list_monitors",
-        runtimeRequestValidation: false,
-        runtimeResponseValidation: false,
+        runtimeRequestValidation: true,
+        runtimeResponseValidation: true,
         requestBody: null,
         queryParameters: {
-          page: {
+          page_number: {
             required: false,
             schema: {
               type: "integer",
+              minimum: 0,
+              default: 0,
             },
           },
-          limit: {
+          page_size: {
             required: false,
             schema: {
               type: "integer",
+              minimum: 1,
+              maximum: 100,
+              default: 30,
+            },
+          },
+          search_text: {
+            required: false,
+            schema: {
+              type: "string",
+            },
+          },
+          project_id: {
+            required: false,
+            schema: {
+              type: "array",
+              items: {
+                type: "string",
+                format: "uuid",
+              },
+            },
+          },
+          status: {
+            required: false,
+            schema: {
+              type: "array",
+              items: {
+                type: "string",
+                enum: ["triggered", "healthy"],
+              },
+            },
+          },
+          metric_type: {
+            required: false,
+            schema: {
+              type: "array",
+              items: {
+                type: "string",
+                minLength: 1,
+              },
+            },
+          },
+          sort_by: {
+            required: false,
+            schema: {
+              type: "string",
+              minLength: 1,
+            },
+          },
+          sort_direction: {
+            required: false,
+            schema: {
+              type: "string",
+              enum: ["asc", "desc"],
             },
           },
         },
         responses: {
           200: {
-            required: ["count", "results"],
-            type: "object",
-            properties: {
-              count: {
-                type: "integer",
-              },
-              next: {
-                type: "string",
-                format: "uri",
-                "x-nullable": true,
-              },
-              previous: {
-                type: "string",
-                format: "uri",
-                "x-nullable": true,
-              },
-              results: {
-                type: "array",
-                items: {
-                  $ref: "#/definitions/UserAlertMonitor",
-                },
-              },
-            },
+            $ref: "#/definitions/UserAlertMonitorListResponse",
+          },
+          400: {
+            $ref: "#/definitions/ApiErrorResponse",
           },
           default: {
             $ref: "#/definitions/ManagementAPIErrorResponse",
@@ -50435,6 +50792,205 @@ export const OPENAPI_CONTRACT = Object.freeze({
         },
       },
     },
+    AlertDeletedResponse: {
+      required: ["status", "result"],
+      type: "object",
+      properties: {
+        status: {
+          title: "Status",
+          type: "boolean",
+        },
+        result: {
+          $ref: "#/definitions/AlertDeletedResult",
+        },
+      },
+    },
+    AlertItemResponse: {
+      required: ["status", "result"],
+      type: "object",
+      properties: {
+        status: {
+          title: "Status",
+          type: "boolean",
+        },
+        result: {
+          $ref: "#/definitions/AlertItem",
+        },
+      },
+    },
+    AlertListResponse: {
+      required: ["status", "result"],
+      type: "object",
+      properties: {
+        status: {
+          title: "Status",
+          type: "boolean",
+        },
+        result: {
+          $ref: "#/definitions/AlertListResult",
+        },
+      },
+    },
+    AlertOptionsResponse: {
+      required: ["status", "result"],
+      type: "object",
+      properties: {
+        status: {
+          title: "Status",
+          type: "boolean",
+        },
+        result: {
+          $ref: "#/definitions/AlertOptionsResult",
+        },
+      },
+    },
+    AlertTestRequest: {
+      type: "object",
+      properties: {},
+    },
+    AlertTestResponse: {
+      required: ["status", "result"],
+      type: "object",
+      properties: {
+        status: {
+          title: "Status",
+          type: "boolean",
+        },
+        result: {
+          $ref: "#/definitions/AlertTestResult",
+        },
+      },
+    },
+    AlertWriteRequest: {
+      type: "object",
+      properties: {
+        kind: {
+          title: "Kind",
+          type: "string",
+          enum: ["metric", "error_feed"],
+        },
+        name: {
+          title: "Name",
+          type: "string",
+          minLength: 1,
+        },
+        enabled: {
+          title: "Enabled",
+          type: "boolean",
+        },
+        project_id: {
+          title: "Project id",
+          type: "string",
+          format: "uuid",
+          "x-nullable": true,
+        },
+        trigger_type: {
+          title: "Trigger type",
+          type: "string",
+          minLength: 1,
+        },
+        severity_threshold: {
+          title: "Severity threshold",
+          type: "string",
+          enum: ["low", "medium", "high", "critical"],
+        },
+        occurrence_threshold: {
+          title: "Occurrence threshold",
+          type: "integer",
+          maximum: 1000000,
+          minimum: 1,
+        },
+        filters: {
+          title: "Filters",
+          type: "object",
+        },
+        slack_connection_id: {
+          title: "Slack connection id",
+          type: "string",
+          format: "uuid",
+        },
+        slack_channel_id: {
+          title: "Slack channel id",
+          type: "string",
+          minLength: 1,
+        },
+        cooldown_seconds: {
+          title: "Cooldown seconds",
+          type: "integer",
+          minimum: 0,
+        },
+        project: {
+          title: "Project",
+          type: "string",
+          format: "uuid",
+          "x-nullable": true,
+        },
+        metric_type: {
+          title: "Metric type",
+          type: "string",
+          minLength: 1,
+        },
+        metric: {
+          title: "Metric",
+          type: "string",
+          "x-nullable": true,
+        },
+        threshold_type: {
+          title: "Threshold type",
+          type: "string",
+          minLength: 1,
+        },
+        threshold_operator: {
+          title: "Threshold operator",
+          type: "string",
+          minLength: 1,
+        },
+        threshold_metric_value: {
+          title: "Threshold metric value",
+          type: "string",
+          "x-nullable": true,
+        },
+        critical_threshold_value: {
+          title: "Critical threshold value",
+          type: "number",
+        },
+        warning_threshold_value: {
+          title: "Warning threshold value",
+          type: "number",
+        },
+        alert_frequency: {
+          title: "Alert frequency",
+          type: "integer",
+        },
+        auto_threshold_time_window: {
+          title: "Auto threshold time window",
+          type: "integer",
+        },
+        slack_webhook_url: {
+          title: "Slack webhook url",
+          type: "string",
+          format: "uri",
+          "x-nullable": true,
+        },
+        slack_notes: {
+          title: "Slack notes",
+          type: "string",
+          "x-nullable": true,
+        },
+        is_mute: {
+          title: "Is mute",
+          type: "boolean",
+        },
+        notification_emails: {
+          type: "array",
+          items: {
+            type: "string",
+            format: "email",
+            minLength: 1,
+          },
+        },
+      },
+    },
     AllActiveTests: {
       required: ["active_tests", "total_active"],
       type: "object",
@@ -52769,6 +53325,9 @@ export const OPENAPI_CONTRACT = Object.freeze({
         "cost_breakdown_cents",
         "evaluations",
         "function_calls",
+        "scoring_status",
+        "csat_status",
+        "csat_reason",
       ],
       type: "object",
       properties: {
@@ -53237,6 +53796,35 @@ export const OPENAPI_CONTRACT = Object.freeze({
           items: {
             $ref: "#/definitions/SimulateRunV3FunctionCall",
           },
+        },
+        scoring_status: {
+          title: "Scoring status",
+          type: "string",
+          enum: [
+            "not_applicable",
+            "pending",
+            "succeeded",
+            "failed",
+            "timed_out",
+          ],
+        },
+        csat_status: {
+          title: "Csat status",
+          type: "string",
+          enum: [
+            "not_applicable",
+            "pending",
+            "succeeded",
+            "failed",
+            "timed_out",
+            "skipped",
+          ],
+        },
+        csat_reason: {
+          title: "Csat reason",
+          type: "string",
+          minLength: 1,
+          "x-nullable": true,
         },
       },
     },
@@ -56330,6 +56918,20 @@ export const OPENAPI_CONTRACT = Object.freeze({
         },
         result: {
           $ref: "#/definitions/DatasetCreationProgressResult",
+        },
+      },
+    },
+    DatasetDelete: {
+      required: ["dataset_ids"],
+      type: "object",
+      properties: {
+        dataset_ids: {
+          type: "array",
+          items: {
+            type: "string",
+            format: "uuid",
+          },
+          maxItems: 50,
         },
       },
     },
@@ -62696,6 +63298,16 @@ export const OPENAPI_CONTRACT = Object.freeze({
           maxLength: 128,
           minLength: 1,
         },
+        target_stage: {
+          title: "Target stage",
+          type: "string",
+          enum: ["understand", "environment", "scenarios"],
+        },
+        scenario_delta: {
+          title: "Scenario delta",
+          type: "integer",
+          minimum: 1,
+        },
       },
     },
     HarnessConversationAdjustmentResponse: {
@@ -62820,6 +63432,96 @@ export const OPENAPI_CONTRACT = Object.freeze({
         },
       },
     },
+    HarnessConversationOverview: {
+      required: [
+        "environment",
+        "scenario_count",
+        "use_cases",
+        "coverage",
+        "recent_runs",
+        "build_changes",
+        "earlier_messages",
+      ],
+      type: "object",
+      properties: {
+        environment: {
+          title: "Environment",
+          type: "object",
+          additionalProperties: {
+            type: "string",
+            "x-nullable": true,
+          },
+        },
+        scenario_count: {
+          title: "Scenario count",
+          type: "integer",
+        },
+        use_cases: {
+          type: "array",
+          items: {
+            type: "object",
+            additionalProperties: {
+              type: "string",
+              "x-nullable": true,
+            },
+          },
+        },
+        coverage: {
+          title: "Coverage",
+          type: "object",
+          additionalProperties: {
+            type: "string",
+            "x-nullable": true,
+          },
+        },
+        recent_runs: {
+          type: "array",
+          items: {
+            type: "object",
+            additionalProperties: {
+              type: "string",
+              "x-nullable": true,
+            },
+          },
+        },
+        build_changes: {
+          type: "array",
+          items: {
+            type: "object",
+            additionalProperties: {
+              type: "string",
+              "x-nullable": true,
+            },
+          },
+        },
+        earlier_messages: {
+          type: "array",
+          items: {
+            type: "object",
+            additionalProperties: {
+              type: "string",
+              "x-nullable": true,
+            },
+          },
+        },
+      },
+    },
+    HarnessConversationOverviewQuery: {
+      type: "object",
+      properties: {},
+    },
+    HarnessConversationPublish: {
+      required: ["digest"],
+      type: "object",
+      properties: {
+        digest: {
+          title: "Digest",
+          type: "string",
+          maxLength: 128,
+          minLength: 1,
+        },
+      },
+    },
     HarnessConversationRead: {
       required: [
         "conversation_id",
@@ -62893,6 +63595,42 @@ export const OPENAPI_CONTRACT = Object.freeze({
       type: "object",
       properties: {},
     },
+    HarnessConversationRunStart: {
+      type: "object",
+      properties: {
+        numbers: {
+          type: "array",
+          items: {
+            type: "integer",
+            minimum: 1,
+          },
+          maxItems: 5000,
+        },
+        ranges: {
+          type: "array",
+          items: {
+            type: "object",
+            additionalProperties: {
+              type: "integer",
+              minimum: 1,
+            },
+          },
+          maxItems: 100,
+        },
+        trials: {
+          title: "Trials",
+          type: "integer",
+          default: 1,
+          maximum: 20,
+          minimum: 1,
+        },
+        operation_id: {
+          title: "Operation id",
+          type: "string",
+          maxLength: 64,
+        },
+      },
+    },
     HarnessConversationRunStatus: {
       required: [
         "job_id",
@@ -62938,6 +63676,93 @@ export const OPENAPI_CONTRACT = Object.freeze({
         receipts: {
           title: "Receipts",
           type: "object",
+        },
+      },
+    },
+    HarnessConversationRunsQuery: {
+      type: "object",
+      properties: {
+        run_id: {
+          title: "Run id",
+          type: "string",
+          maxLength: 64,
+        },
+        limit: {
+          title: "Limit",
+          type: "integer",
+          maximum: 50,
+          minimum: 1,
+        },
+      },
+    },
+    HarnessConversationScenarioQuery: {
+      type: "object",
+      properties: {
+        numbers: {
+          type: "array",
+          items: {
+            type: "integer",
+            minimum: 1,
+          },
+          maxItems: 5000,
+        },
+        ranges: {
+          type: "array",
+          items: {
+            type: "object",
+            additionalProperties: {
+              type: "integer",
+              minimum: 1,
+            },
+          },
+          maxItems: 100,
+        },
+        names: {
+          type: "array",
+          items: {
+            type: "string",
+            maxLength: 255,
+            minLength: 1,
+          },
+          maxItems: 500,
+        },
+        ids: {
+          type: "array",
+          items: {
+            type: "string",
+            maxLength: 64,
+            minLength: 1,
+          },
+          maxItems: 1000,
+        },
+        search: {
+          title: "Search",
+          type: "string",
+          maxLength: 500,
+        },
+        filters: {
+          title: "Filters",
+          type: "object",
+          additionalProperties: {
+            type: "string",
+            "x-nullable": true,
+          },
+        },
+        page: {
+          title: "Page",
+          type: "integer",
+          minimum: 1,
+        },
+        page_size: {
+          title: "Page size",
+          type: "integer",
+          maximum: 100,
+          minimum: 1,
+        },
+        full: {
+          title: "Full",
+          type: "boolean",
+          default: false,
         },
       },
     },
@@ -63422,6 +64247,16 @@ export const OPENAPI_CONTRACT = Object.freeze({
           type: "string",
           maxLength: 128,
           minLength: 1,
+        },
+        target_stage: {
+          title: "Target stage",
+          type: "string",
+          enum: ["understand", "environment", "scenarios"],
+        },
+        scenario_delta: {
+          title: "Scenario delta",
+          type: "integer",
+          minimum: 1,
         },
       },
     },
@@ -64424,6 +65259,7 @@ export const OPENAPI_CONTRACT = Object.freeze({
             "cloud_storage",
             "message_queue",
             "linear",
+            "slack",
           ],
         },
         host_url: {
@@ -64542,6 +65378,7 @@ export const OPENAPI_CONTRACT = Object.freeze({
             "cloud_storage",
             "message_queue",
             "linear",
+            "slack",
           ],
         },
         display_name: {
@@ -68787,7 +69624,7 @@ export const OPENAPI_CONTRACT = Object.freeze({
       },
     },
     OrgConfigBulkResponse: {
-      required: ["status", "result"],
+      required: ["status", "result", "unbuilt_org_ids"],
       type: "object",
       properties: {
         status: {
@@ -68799,6 +69636,15 @@ export const OPENAPI_CONTRACT = Object.freeze({
           type: "object",
           additionalProperties: {
             $ref: "#/definitions/OrgConfigBulkItem",
+          },
+        },
+        unbuilt_org_ids: {
+          description:
+            "Orgs with an active config that could not be built. The gateway keeps their last good config instead of dropping them.",
+          type: "array",
+          items: {
+            type: "string",
+            minLength: 1,
           },
         },
       },
@@ -73315,6 +74161,7 @@ export const OPENAPI_CONTRACT = Object.freeze({
         "results",
         "groups",
         "facets",
+        "status_counts",
         "evaluation_columns",
       ],
       type: "object",
@@ -73323,7 +74170,7 @@ export const OPENAPI_CONTRACT = Object.freeze({
           $ref: "#/definitions/RunExecution",
         },
         summary: {
-          $ref: "#/definitions/RunSummary",
+          $ref: "#/definitions/SimulateRunV3CallsSummary",
         },
         count: {
           title: "Count",
@@ -73355,6 +74202,9 @@ export const OPENAPI_CONTRACT = Object.freeze({
         },
         facets: {
           $ref: "#/definitions/RunFacets",
+        },
+        status_counts: {
+          $ref: "#/definitions/OutcomeCounts",
         },
         evaluation_columns: {
           type: "array",
@@ -76741,6 +77591,42 @@ export const OPENAPI_CONTRACT = Object.freeze({
         is_active: {
           title: "Is active",
           type: "boolean",
+        },
+      },
+    },
+    SlackChannelsResponse: {
+      required: ["status", "result"],
+      type: "object",
+      properties: {
+        status: {
+          title: "Status",
+          type: "boolean",
+        },
+        result: {
+          $ref: "#/definitions/SlackChannelsResult",
+        },
+      },
+    },
+    SlackInstall: {
+      type: "object",
+      properties: {
+        connection_id: {
+          title: "Connection id",
+          type: "string",
+          format: "uuid",
+        },
+      },
+    },
+    SlackInstallResponse: {
+      required: ["status", "result"],
+      type: "object",
+      properties: {
+        status: {
+          title: "Status",
+          type: "boolean",
+        },
+        result: {
+          $ref: "#/definitions/SlackInstallResult",
         },
       },
     },
@@ -81599,6 +82485,19 @@ export const OPENAPI_CONTRACT = Object.freeze({
         },
       },
     },
+    UserAlertMonitorListResponse: {
+      required: ["status", "result"],
+      type: "object",
+      properties: {
+        status: {
+          title: "Status",
+          type: "boolean",
+        },
+        result: {
+          $ref: "#/definitions/UserAlertMonitorListResult",
+        },
+      },
+    },
     UserAlertMonitorLog: {
       required: ["type", "message"],
       type: "object",
@@ -82683,6 +83582,7 @@ export const OPENAPI_CONTRACT = Object.freeze({
             "cloud_storage",
             "message_queue",
             "linear",
+            "slack",
           ],
         },
         host_url: {
@@ -85166,6 +86066,298 @@ export const OPENAPI_CONTRACT = Object.freeze({
         },
       },
     },
+    AlertDeletedResult: {
+      required: ["id", "deleted"],
+      type: "object",
+      properties: {
+        id: {
+          title: "Id",
+          type: "string",
+          format: "uuid",
+        },
+        deleted: {
+          title: "Deleted",
+          type: "boolean",
+        },
+      },
+    },
+    AlertItem: {
+      required: ["id", "kind", "name", "enabled"],
+      type: "object",
+      properties: {
+        id: {
+          title: "Id",
+          type: "string",
+          format: "uuid",
+        },
+        kind: {
+          title: "Kind",
+          type: "string",
+          enum: ["metric", "error_feed"],
+        },
+        name: {
+          title: "Name",
+          type: "string",
+          minLength: 1,
+        },
+        enabled: {
+          title: "Enabled",
+          type: "boolean",
+        },
+        project_id: {
+          title: "Project id",
+          type: "string",
+          format: "uuid",
+          "x-nullable": true,
+        },
+        trigger_type: {
+          title: "Trigger type",
+          type: "string",
+          minLength: 1,
+        },
+        severity_threshold: {
+          title: "Severity threshold",
+          type: "string",
+          enum: ["low", "medium", "high", "critical"],
+        },
+        occurrence_threshold: {
+          title: "Occurrence threshold",
+          type: "integer",
+        },
+        filters: {
+          title: "Filters",
+          type: "object",
+        },
+        slack_connection_id: {
+          title: "Slack connection id",
+          type: "string",
+          format: "uuid",
+        },
+        slack_channel_id: {
+          title: "Slack channel id",
+          type: "string",
+          minLength: 1,
+        },
+        slack_channel_name: {
+          title: "Slack channel name",
+          type: "string",
+          minLength: 1,
+        },
+        cooldown_seconds: {
+          title: "Cooldown seconds",
+          type: "integer",
+        },
+        last_triggered_at: {
+          title: "Last triggered at",
+          type: "string",
+          format: "date-time",
+          "x-nullable": true,
+        },
+        health: {
+          title: "Health",
+          type: "string",
+          minLength: 1,
+        },
+        failure_reason: {
+          title: "Failure reason",
+          type: "string",
+          minLength: 1,
+          "x-nullable": true,
+        },
+        created_at: {
+          title: "Created at",
+          type: "string",
+          format: "date-time",
+        },
+        updated_at: {
+          title: "Updated at",
+          type: "string",
+          format: "date-time",
+        },
+        project: {
+          title: "Project",
+          type: "string",
+          format: "uuid",
+        },
+        organization: {
+          title: "Organization",
+          type: "string",
+          format: "uuid",
+        },
+        workspace: {
+          title: "Workspace",
+          type: "string",
+          format: "uuid",
+          "x-nullable": true,
+        },
+        created_by: {
+          title: "Created by",
+          type: "string",
+          format: "uuid",
+          "x-nullable": true,
+        },
+        metric_type: {
+          title: "Metric type",
+          type: "string",
+          minLength: 1,
+        },
+        metric: {
+          title: "Metric",
+          type: "string",
+          "x-nullable": true,
+        },
+        metric_name: {
+          title: "Metric name",
+          type: "string",
+          minLength: 1,
+        },
+        threshold_type: {
+          title: "Threshold type",
+          type: "string",
+          minLength: 1,
+        },
+        threshold_operator: {
+          title: "Threshold operator",
+          type: "string",
+          minLength: 1,
+        },
+        threshold_metric_value: {
+          title: "Threshold metric value",
+          type: "string",
+          "x-nullable": true,
+        },
+        critical_threshold_value: {
+          title: "Critical threshold value",
+          type: "number",
+          "x-nullable": true,
+        },
+        warning_threshold_value: {
+          title: "Warning threshold value",
+          type: "number",
+          "x-nullable": true,
+        },
+        alert_frequency: {
+          title: "Alert frequency",
+          type: "integer",
+        },
+        auto_threshold_time_window: {
+          title: "Auto threshold time window",
+          type: "integer",
+        },
+        last_checked_at: {
+          title: "Last checked at",
+          type: "string",
+          format: "date-time",
+          "x-nullable": true,
+        },
+        slack_webhook_url: {
+          title: "Slack webhook url",
+          type: "string",
+          format: "uri",
+          "x-nullable": true,
+        },
+        slack_notes: {
+          title: "Slack notes",
+          type: "string",
+          "x-nullable": true,
+        },
+        is_mute: {
+          title: "Is mute",
+          type: "boolean",
+        },
+        deleted: {
+          title: "Deleted",
+          type: "boolean",
+        },
+        deleted_at: {
+          title: "Deleted at",
+          type: "string",
+          format: "date-time",
+          "x-nullable": true,
+        },
+        logs: {
+          type: "array",
+          items: {
+            type: "object",
+          },
+          "x-nullable": true,
+        },
+        notification_emails: {
+          type: "array",
+          items: {
+            type: "string",
+            format: "email",
+            minLength: 1,
+          },
+        },
+      },
+    },
+    AlertListResult: {
+      required: ["alerts"],
+      type: "object",
+      properties: {
+        alerts: {
+          type: "array",
+          items: {
+            $ref: "#/definitions/AlertItem",
+          },
+        },
+      },
+    },
+    AlertOptionsResult: {
+      required: ["triggers", "severities", "statuses", "sources", "projects"],
+      type: "object",
+      properties: {
+        triggers: {
+          type: "array",
+          items: {
+            $ref: "#/definitions/AlertOption",
+          },
+        },
+        severities: {
+          type: "array",
+          items: {
+            type: "string",
+            minLength: 1,
+          },
+        },
+        statuses: {
+          type: "array",
+          items: {
+            type: "string",
+            minLength: 1,
+          },
+        },
+        sources: {
+          type: "array",
+          items: {
+            type: "string",
+            minLength: 1,
+          },
+        },
+        projects: {
+          type: "array",
+          items: {
+            $ref: "#/definitions/AlertProjectOption",
+          },
+        },
+      },
+    },
+    AlertTestResult: {
+      required: ["sent", "slack_ts"],
+      type: "object",
+      properties: {
+        sent: {
+          title: "Sent",
+          type: "boolean",
+        },
+        slack_ts: {
+          title: "Slack ts",
+          type: "string",
+          minLength: 1,
+        },
+      },
+    },
     AnnotationActionMessageResult: {
       required: ["message"],
       type: "object",
@@ -86221,7 +87413,6 @@ export const OPENAPI_CONTRACT = Object.freeze({
         type: {
           title: "Type",
           type: "string",
-          minLength: 1,
         },
         value: {
           title: "Value",
@@ -86245,7 +87436,7 @@ export const OPENAPI_CONTRACT = Object.freeze({
         status: {
           title: "Status",
           type: "string",
-          minLength: 1,
+          enum: ["pending", "succeeded", "failed", "timed_out", "skipped"],
         },
       },
     },
@@ -99814,6 +101005,43 @@ export const OPENAPI_CONTRACT = Object.freeze({
         },
       },
     },
+    OutcomeCounts: {
+      required: [
+        "queued",
+        "in_progress",
+        "passed",
+        "failed",
+        "error",
+        "inconclusive",
+      ],
+      type: "object",
+      properties: {
+        queued: {
+          title: "Queued",
+          type: "integer",
+        },
+        in_progress: {
+          title: "In progress",
+          type: "integer",
+        },
+        passed: {
+          title: "Passed",
+          type: "integer",
+        },
+        failed: {
+          title: "Failed",
+          type: "integer",
+        },
+        error: {
+          title: "Error",
+          type: "integer",
+        },
+        inconclusive: {
+          title: "Inconclusive",
+          type: "integer",
+        },
+      },
+    },
     RunCall: {
       required: [
         "id",
@@ -99847,6 +101075,9 @@ export const OPENAPI_CONTRACT = Object.freeze({
         "ended_reason",
         "error_message",
         "evaluations",
+        "scoring_status",
+        "csat_status",
+        "csat_reason",
       ],
       type: "object",
       properties: {
@@ -100025,6 +101256,35 @@ export const OPENAPI_CONTRACT = Object.freeze({
             $ref: "#/definitions/SimulateRunV3EvaluationResult",
           },
         },
+        scoring_status: {
+          title: "Scoring status",
+          type: "string",
+          enum: [
+            "not_applicable",
+            "pending",
+            "succeeded",
+            "failed",
+            "timed_out",
+          ],
+        },
+        csat_status: {
+          title: "Csat status",
+          type: "string",
+          enum: [
+            "not_applicable",
+            "pending",
+            "succeeded",
+            "failed",
+            "timed_out",
+            "skipped",
+          ],
+        },
+        csat_reason: {
+          title: "Csat reason",
+          type: "string",
+          minLength: 1,
+          "x-nullable": true,
+        },
       },
     },
     RunExecution: {
@@ -100200,7 +101460,7 @@ export const OPENAPI_CONTRACT = Object.freeze({
         },
       },
     },
-    RunSummary: {
+    SimulateRunV3CallsSummary: {
       required: [
         "total",
         "outcomes",
@@ -100210,6 +101470,7 @@ export const OPENAPI_CONTRACT = Object.freeze({
         "latency",
         "tokens",
         "cost_cents",
+        "scoring",
       ],
       type: "object",
       properties: {
@@ -100240,6 +101501,9 @@ export const OPENAPI_CONTRACT = Object.freeze({
         },
         cost_cents: {
           $ref: "#/definitions/TotalMetricStats",
+        },
+        scoring: {
+          $ref: "#/definitions/SimulateRunV3ScoringCounts",
         },
       },
     },
@@ -102041,6 +103305,36 @@ export const OPENAPI_CONTRACT = Object.freeze({
         },
       },
     },
+    SlackChannelsResult: {
+      required: ["channels", "next_cursor"],
+      type: "object",
+      properties: {
+        channels: {
+          type: "array",
+          items: {
+            $ref: "#/definitions/SlackChannel",
+          },
+        },
+        next_cursor: {
+          title: "Next cursor",
+          type: "string",
+          minLength: 1,
+          "x-nullable": true,
+        },
+      },
+    },
+    SlackInstallResult: {
+      required: ["authorization_url"],
+      type: "object",
+      properties: {
+        authorization_url: {
+          title: "Authorization url",
+          type: "string",
+          format: "uri",
+          minLength: 1,
+        },
+      },
+    },
     SpanAttributeNumericStats: {
       type: "object",
       properties: {
@@ -103277,7 +104571,7 @@ export const OPENAPI_CONTRACT = Object.freeze({
         observation_spans: {
           type: "array",
           items: {
-            type: "object",
+            $ref: "#/definitions/TraceDetailSpan",
           },
         },
         summary: {
@@ -103482,6 +104776,8 @@ export const OPENAPI_CONTRACT = Object.freeze({
           $ref: "#/definitions/TraceObserveListMetadata",
         },
         table: {
+          description:
+            "Observe eval bool and choice cells are counts of completed attempts; a detail eval_rollup separately selects the latest completed row per span.",
           type: "array",
           items: {
             type: "object",
@@ -103830,6 +105126,28 @@ export const OPENAPI_CONTRACT = Object.freeze({
           type: "object",
           additionalProperties: true,
         },
+        eval_rollup: {
+          required: ["scope", "evals"],
+          type: "object",
+          properties: {
+            scope: {
+              title: "Scope",
+              type: "string",
+              enum: ["trace", "span"],
+            },
+            evals: {
+              type: "array",
+              items: {
+                $ref: "#/definitions/EvalRollupEval",
+              },
+            },
+            error: {
+              title: "Error",
+              type: "boolean",
+            },
+          },
+          "x-nullable": true,
+        },
         call_execution_id: {
           title: "Call execution id",
           type: "string",
@@ -103985,6 +105303,12 @@ export const OPENAPI_CONTRACT = Object.freeze({
           title: "Eval template id",
           type: "string",
           minLength: 1,
+          "x-nullable": true,
+        },
+        target_type: {
+          title: "Target type",
+          type: "string",
+          enum: ["span", "trace"],
           "x-nullable": true,
         },
         annotators: {
@@ -104568,6 +105892,27 @@ export const OPENAPI_CONTRACT = Object.freeze({
           title: "Message",
           type: "string",
           minLength: 1,
+        },
+      },
+    },
+    UserAlertMonitorListResult: {
+      required: ["column_config", "table", "metadata"],
+      type: "object",
+      properties: {
+        column_config: {
+          type: "array",
+          items: {
+            $ref: "#/definitions/UserAlertMonitorListColumn",
+          },
+        },
+        table: {
+          type: "array",
+          items: {
+            $ref: "#/definitions/UserAlertMonitorListItem",
+          },
+        },
+        metadata: {
+          $ref: "#/definitions/UserAlertMonitorListMetadata",
         },
       },
     },
@@ -105689,6 +107034,38 @@ export const OPENAPI_CONTRACT = Object.freeze({
         },
       },
       "x-nullable": true,
+    },
+    AlertOption: {
+      required: ["value", "label"],
+      type: "object",
+      properties: {
+        value: {
+          title: "Value",
+          type: "string",
+          minLength: 1,
+        },
+        label: {
+          title: "Label",
+          type: "string",
+          minLength: 1,
+        },
+      },
+    },
+    AlertProjectOption: {
+      required: ["id", "name"],
+      type: "object",
+      properties: {
+        id: {
+          title: "Id",
+          type: "string",
+          format: "uuid",
+        },
+        name: {
+          title: "Name",
+          type: "string",
+          minLength: 1,
+        },
+      },
     },
     AnnotationSummaryHeader: {
       type: "object",
@@ -110605,6 +111982,7 @@ export const OPENAPI_CONTRACT = Object.freeze({
             "cloud_storage",
             "message_queue",
             "linear",
+            "slack",
           ],
         },
         display_name: {
@@ -113029,43 +114407,6 @@ export const OPENAPI_CONTRACT = Object.freeze({
         },
       },
     },
-    OutcomeCounts: {
-      required: [
-        "queued",
-        "in_progress",
-        "passed",
-        "failed",
-        "error",
-        "inconclusive",
-      ],
-      type: "object",
-      properties: {
-        queued: {
-          title: "Queued",
-          type: "integer",
-        },
-        in_progress: {
-          title: "In progress",
-          type: "integer",
-        },
-        passed: {
-          title: "Passed",
-          type: "integer",
-        },
-        failed: {
-          title: "Failed",
-          type: "integer",
-        },
-        error: {
-          title: "Error",
-          type: "integer",
-        },
-        inconclusive: {
-          title: "Inconclusive",
-          type: "integer",
-        },
-      },
-    },
     TotalMetricStats: {
       required: [
         "average",
@@ -113866,6 +115207,49 @@ export const OPENAPI_CONTRACT = Object.freeze({
         },
       },
     },
+    RunSummary: {
+      required: [
+        "total",
+        "outcomes",
+        "measured",
+        "pass_rate",
+        "duration",
+        "latency",
+        "tokens",
+        "cost_cents",
+      ],
+      type: "object",
+      properties: {
+        total: {
+          title: "Total",
+          type: "integer",
+        },
+        outcomes: {
+          $ref: "#/definitions/OutcomeCounts",
+        },
+        measured: {
+          title: "Measured",
+          type: "integer",
+        },
+        pass_rate: {
+          title: "Pass rate",
+          type: "number",
+          "x-nullable": true,
+        },
+        duration: {
+          $ref: "#/definitions/MetricStats",
+        },
+        latency: {
+          $ref: "#/definitions/MetricStats",
+        },
+        tokens: {
+          $ref: "#/definitions/TotalMetricStats",
+        },
+        cost_cents: {
+          $ref: "#/definitions/TotalMetricStats",
+        },
+      },
+    },
     FacetValue: {
       required: ["value", "count"],
       type: "object",
@@ -113930,6 +115314,43 @@ export const OPENAPI_CONTRACT = Object.freeze({
         evaluations: {
           title: "Evaluations",
           type: "object",
+        },
+      },
+    },
+    SimulateRunV3ScoringCounts: {
+      required: [
+        "not_applicable",
+        "pending",
+        "succeeded",
+        "failed",
+        "timed_out",
+      ],
+      type: "object",
+      properties: {
+        not_applicable: {
+          title: "Not applicable",
+          type: "integer",
+          minimum: 0,
+        },
+        pending: {
+          title: "Pending",
+          type: "integer",
+          minimum: 0,
+        },
+        succeeded: {
+          title: "Succeeded",
+          type: "integer",
+          minimum: 0,
+        },
+        failed: {
+          title: "Failed",
+          type: "integer",
+          minimum: 0,
+        },
+        timed_out: {
+          title: "Timed out",
+          type: "integer",
+          minimum: 0,
         },
       },
     },
@@ -114386,6 +115807,30 @@ export const OPENAPI_CONTRACT = Object.freeze({
         },
       },
     },
+    SlackChannel: {
+      required: ["id", "name", "is_private", "is_member"],
+      type: "object",
+      properties: {
+        id: {
+          title: "Id",
+          type: "string",
+          minLength: 1,
+        },
+        name: {
+          title: "Name",
+          type: "string",
+          minLength: 1,
+        },
+        is_private: {
+          title: "Is private",
+          type: "boolean",
+        },
+        is_member: {
+          title: "Is member",
+          type: "boolean",
+        },
+      },
+    },
     SpanListColumnConfig: {
       required: ["id", "name", "is_visible"],
       type: "object",
@@ -114454,6 +115899,12 @@ export const OPENAPI_CONTRACT = Object.freeze({
           title: "Eval template id",
           type: "string",
           minLength: 1,
+          "x-nullable": true,
+        },
+        target_type: {
+          title: "Target type",
+          type: "string",
+          enum: ["span", "trace"],
           "x-nullable": true,
         },
         annotators: {
@@ -115198,6 +116649,39 @@ export const OPENAPI_CONTRACT = Object.freeze({
         },
       },
     },
+    TraceDetailSpan: {
+      required: ["observation_span"],
+      type: "object",
+      properties: {
+        observation_span: {
+          title: "Observation span",
+          type: "object",
+        },
+        children: {
+          type: "array",
+          items: {
+            type: "object",
+          },
+        },
+        eval_scores: {
+          description:
+            "Raw eval rows retained for backwards-compatible array consumers.",
+          type: "array",
+          items: {
+            type: "object",
+          },
+        },
+        eval_rollup: {
+          $ref: "#/definitions/EvalRollup",
+        },
+        annotations: {
+          type: "array",
+          items: {
+            type: "object",
+          },
+        },
+      },
+    },
     TraceObserveListMetadata: {
       required: ["total_rows"],
       type: "object",
@@ -115482,6 +116966,63 @@ export const OPENAPI_CONTRACT = Object.freeze({
         "x-json-value": true,
         description: "Any valid JSON value.",
         "x-nullable": true,
+      },
+    },
+    EvalRollupEval: {
+      required: ["eval_config_id", "eval_name", "aggregate", "spans"],
+      type: "object",
+      properties: {
+        eval_config_id: {
+          title: "Eval config id",
+          type: "string",
+          minLength: 1,
+        },
+        eval_name: {
+          title: "Eval name",
+          type: "string",
+          minLength: 1,
+        },
+        output_type: {
+          title: "Output type",
+          type: "string",
+          minLength: 1,
+          "x-nullable": true,
+        },
+        template_type: {
+          title: "Template type",
+          type: "string",
+          minLength: 1,
+          "x-nullable": true,
+        },
+        target_type: {
+          title: "Target type",
+          type: "string",
+          enum: ["span", "trace"],
+          "x-nullable": true,
+        },
+        choices_map: {
+          title: "Choices map",
+          type: "object",
+          "x-nullable": true,
+          "x-json-value": true,
+          description: "Any valid JSON value.",
+        },
+        aggregate: {
+          title: "Aggregate",
+          type: "object",
+          "x-json-value": true,
+          description: "Any valid JSON value.",
+        },
+        spans: {
+          type: "array",
+          items: {
+            $ref: "#/definitions/EvalRollupSpan",
+          },
+        },
+        error: {
+          title: "Error",
+          type: "boolean",
+        },
       },
     },
     TracesAggregates: {
@@ -116155,6 +117696,116 @@ export const OPENAPI_CONTRACT = Object.freeze({
         usage: {
           title: "Usage",
           type: "number",
+        },
+      },
+    },
+    UserAlertMonitorListColumn: {
+      required: ["id", "name", "is_visible"],
+      type: "object",
+      properties: {
+        id: {
+          title: "Id",
+          type: "string",
+          minLength: 1,
+        },
+        name: {
+          title: "Name",
+          type: "string",
+          minLength: 1,
+        },
+        is_visible: {
+          title: "Is visible",
+          type: "boolean",
+        },
+      },
+    },
+    UserAlertMonitorListItem: {
+      required: [
+        "id",
+        "name",
+        "created_at",
+        "updated_at",
+        "metric_type",
+        "filters",
+        "status",
+        "no_of_alerts",
+        "last_triggered",
+        "is_mute",
+        "trends",
+      ],
+      type: "object",
+      properties: {
+        id: {
+          title: "Id",
+          type: "string",
+          format: "uuid",
+        },
+        name: {
+          title: "Name",
+          type: "string",
+          minLength: 1,
+        },
+        created_at: {
+          title: "Created at",
+          type: "string",
+          format: "date-time",
+        },
+        updated_at: {
+          title: "Updated at",
+          type: "string",
+          format: "date-time",
+        },
+        metric_type: {
+          title: "Metric type",
+          type: "string",
+          minLength: 1,
+        },
+        filters: {
+          title: "Filters",
+          type: "object",
+          "x-nullable": true,
+        },
+        status: {
+          title: "Status",
+          type: "string",
+          enum: ["triggered", "healthy"],
+        },
+        no_of_alerts: {
+          title: "No of alerts",
+          type: "integer",
+          minimum: 0,
+        },
+        last_triggered: {
+          title: "Last triggered",
+          type: "string",
+          format: "date-time",
+          "x-nullable": true,
+        },
+        is_mute: {
+          title: "Is mute",
+          type: "boolean",
+        },
+        trends: {
+          type: "array",
+          items: {
+            $ref: "#/definitions/UserAlertMonitorTrend",
+          },
+        },
+      },
+    },
+    UserAlertMonitorListMetadata: {
+      required: ["total_rows", "total_pages"],
+      type: "object",
+      properties: {
+        total_rows: {
+          title: "Total rows",
+          type: "integer",
+          minimum: 0,
+        },
+        total_pages: {
+          title: "Total pages",
+          type: "integer",
+          minimum: 0,
         },
       },
     },
@@ -118166,6 +119817,69 @@ export const OPENAPI_CONTRACT = Object.freeze({
         },
       },
     },
+    EvalRollup: {
+      required: ["scope", "evals"],
+      type: "object",
+      properties: {
+        scope: {
+          title: "Scope",
+          type: "string",
+          enum: ["trace", "span"],
+        },
+        evals: {
+          type: "array",
+          items: {
+            $ref: "#/definitions/EvalRollupEval",
+          },
+        },
+        error: {
+          title: "Error",
+          type: "boolean",
+        },
+      },
+    },
+    EvalRollupSpan: {
+      required: ["span_id"],
+      type: "object",
+      properties: {
+        span_id: {
+          title: "Span id",
+          type: "string",
+          minLength: 1,
+        },
+        span_name: {
+          title: "Span name",
+          type: "string",
+        },
+        value: {
+          title: "Value",
+          type: "object",
+          "x-nullable": true,
+          "x-json-value": true,
+          description: "Any valid JSON value.",
+        },
+        explanation: {
+          title: "Explanation",
+          type: "string",
+          minLength: 1,
+          "x-nullable": true,
+        },
+        error: {
+          title: "Error",
+          type: "boolean",
+        },
+        status: {
+          title: "Status",
+          type: "string",
+          minLength: 1,
+          "x-nullable": true,
+        },
+        eval_config_id: {
+          title: "Eval config id",
+          type: "string",
+        },
+      },
+    },
     UsageNotificationAction: {
       required: ["label", "url"],
       type: "object",
@@ -118220,6 +119934,22 @@ export const OPENAPI_CONTRACT = Object.freeze({
         price_per_unit: {
           title: "Price per unit",
           type: "number",
+        },
+      },
+    },
+    UserAlertMonitorTrend: {
+      required: ["timestamp", "count"],
+      type: "object",
+      properties: {
+        timestamp: {
+          title: "Timestamp",
+          type: "string",
+          format: "date-time",
+        },
+        count: {
+          title: "Count",
+          type: "integer",
+          minimum: 0,
         },
       },
     },

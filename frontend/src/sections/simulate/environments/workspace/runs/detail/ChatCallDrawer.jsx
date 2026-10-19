@@ -13,6 +13,7 @@ import {
 } from "src/api/simulate-environments/runDetail";
 
 import { BUILD_TONES } from "../../../buildEnvironment/buildTones";
+import { SCORING_STATUS } from "../runs.constants";
 import ChatTranscriptPane from "./ChatTranscriptPane";
 import CallTracesPanel from "./CallTracesPanel";
 import { CALL_TRACES_COPY } from "./callTraces.constants";
@@ -130,8 +131,16 @@ export default function ChatCallDrawer({
     []
   ).filter((r) => r.kind !== "sub_goal");
   const failed = evalResults.filter((r) => r.passed === false);
+  // The list row's cells carry only a status; the drawer's error and skipped
+  // states read flags, so set them from it.
   const drawerEvals = evalResults.map((result) => ({
     ...result,
+    error:
+      result.error === true ||
+      result.status === SCORING_STATUS.FAILED ||
+      result.status === SCORING_STATUS.ERROR,
+    skipped:
+      result.skipped === true || result.status === SCORING_STATUS.SKIPPED,
     eval_name: result.name,
     score: result.score == null ? null : Math.round(result.score * 100),
     score_label:

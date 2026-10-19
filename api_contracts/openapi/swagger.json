@@ -12660,7 +12660,7 @@
         "/agentcc/org-configs/bulk/": {
             "get": {
                 "operationId": "agentcc_org-configs_bulk_list",
-                "description": "Bulk endpoint for gateway startup sync.\nReturns all active org configs keyed by org ID.\nAuthenticated by admin token (not user JWT).",
+                "description": "Bulk endpoint for gateway startup sync.\nReturns all active org configs keyed by org ID, plus the ids of orgs whose\npayload could not be built, so the gateway keeps their last good config.\nAuthenticated by admin token (not user JWT).",
                 "parameters": [],
                 "responses": {
                     "200": {
@@ -17317,6 +17317,48 @@
             },
             "parameters": []
         },
+        "/integrations/connections/{connection_id}/slack/channels/": {
+            "get": {
+                "operationId": "integrations_connections_slack_channels_list",
+                "description": "",
+                "parameters": [
+                    {
+                        "name": "cursor",
+                        "in": "query",
+                        "required": false,
+                        "type": "string",
+                        "maxLength": 512
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "",
+                        "schema": {
+                            "$ref": "#/definitions/SlackChannelsResponse"
+                        }
+                    },
+                    "default": {
+                        "description": "Default error response",
+                        "schema": {
+                            "$ref": "#/definitions/ManagementAPIErrorResponse"
+                        }
+                    }
+                },
+                "tags": [
+                    "integrations"
+                ],
+                "x-runtime-request-validation": true,
+                "x-runtime-response-validation": true
+            },
+            "parameters": [
+                {
+                    "name": "connection_id",
+                    "in": "path",
+                    "required": true,
+                    "type": "string"
+                }
+            ]
+        },
         "/integrations/connections/{id}/": {
             "get": {
                 "operationId": "integrations_connections_read",
@@ -17694,6 +17736,42 @@
                     "type": "string"
                 }
             ]
+        },
+        "/integrations/slack/install/": {
+            "post": {
+                "operationId": "integrations_slack_install_create",
+                "description": "",
+                "parameters": [
+                    {
+                        "name": "data",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/SlackInstall"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "",
+                        "schema": {
+                            "$ref": "#/definitions/SlackInstallResponse"
+                        }
+                    },
+                    "default": {
+                        "description": "Default error response",
+                        "schema": {
+                            "$ref": "#/definitions/ManagementAPIErrorResponse"
+                        }
+                    }
+                },
+                "tags": [
+                    "integrations"
+                ],
+                "x-runtime-request-validation": true,
+                "x-runtime-response-validation": true
+            },
+            "parameters": []
         },
         "/integrations/sync-logs/": {
             "get": {
@@ -18405,6 +18483,18 @@
                         "description": "",
                         "schema": {
                             "$ref": "#/definitions/MCPOAuthTokenErrorResponse"
+                        }
+                    },
+                    "429": {
+                        "description": "Too many requests",
+                        "schema": {
+                            "$ref": "#/definitions/MCPOAuthTokenErrorResponse"
+                        },
+                        "headers": {
+                            "Retry-After": {
+                                "description": "Seconds before retrying the token request.",
+                                "type": "integer"
+                            }
                         }
                     },
                     "default": {
@@ -28343,10 +28433,52 @@
             "delete": {
                 "operationId": "model-hub_develops_delete_dataset_delete",
                 "description": "",
-                "parameters": [],
+                "parameters": [
+                    {
+                        "name": "data",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/DatasetDelete"
+                        }
+                    }
+                ],
                 "responses": {
-                    "204": {
-                        "description": ""
+                    "200": {
+                        "description": "",
+                        "schema": {
+                            "$ref": "#/definitions/DevelopDatasetMessageResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "",
+                        "schema": {
+                            "$ref": "#/definitions/ModelHubErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "",
+                        "schema": {
+                            "$ref": "#/definitions/ModelHubErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "",
+                        "schema": {
+                            "$ref": "#/definitions/ModelHubErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "",
+                        "schema": {
+                            "$ref": "#/definitions/ModelHubErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "",
+                        "schema": {
+                            "$ref": "#/definitions/ModelHubErrorResponse"
+                        }
                     },
                     "default": {
                         "description": "Default error response",
@@ -28357,7 +28489,9 @@
                 },
                 "tags": [
                     "model-hub"
-                ]
+                ],
+                "x-runtime-request-validation": true,
+                "x-runtime-response-validation": true
             },
             "parameters": []
         },
@@ -47116,6 +47250,42 @@
                 }
             ]
         },
+        "/saml2_auth/complete/": {
+            "get": {
+                "operationId": "saml2_auth_complete_list",
+                "description": "",
+                "parameters": [
+                    {
+                        "name": "c",
+                        "in": "query",
+                        "description": "One-time SAML response candidate key.",
+                        "required": true,
+                        "type": "string"
+                    }
+                ],
+                "responses": {
+                    "302": {
+                        "description": "Redirects to the configured frontend URL."
+                    },
+                    "400": {
+                        "description": "",
+                        "schema": {
+                            "$ref": "#/definitions/SAMLErrorResponse"
+                        }
+                    },
+                    "default": {
+                        "description": "Default error response",
+                        "schema": {
+                            "$ref": "#/definitions/ManagementAPIErrorResponse"
+                        }
+                    }
+                },
+                "tags": [
+                    "saml2_auth"
+                ]
+            },
+            "parameters": []
+        },
         "/saml2_auth/github/callback/": {
             "get": {
                 "operationId": "saml2_auth_github_callback_list",
@@ -52131,6 +52301,91 @@
                 }
             ]
         },
+        "/simulate/api/harness/conversations/{id}/overview/": {
+            "post": {
+                "operationId": "simulate_api_harness_conversations_overview",
+                "description": "",
+                "parameters": [
+                    {
+                        "name": "data",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/HarnessConversationOverviewQuery"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "",
+                        "schema": {
+                            "$ref": "#/definitions/HarnessConversationOverview"
+                        }
+                    },
+                    "default": {
+                        "description": "Default error response",
+                        "schema": {
+                            "$ref": "#/definitions/ManagementAPIErrorResponse"
+                        }
+                    }
+                },
+                "tags": [
+                    "simulate"
+                ],
+                "x-runtime-request-validation": true,
+                "x-runtime-response-validation": true
+            },
+            "parameters": [
+                {
+                    "name": "id",
+                    "in": "path",
+                    "required": true,
+                    "type": "string"
+                }
+            ]
+        },
+        "/simulate/api/harness/conversations/{id}/publish/": {
+            "post": {
+                "operationId": "simulate_api_harness_conversations_publish",
+                "description": "",
+                "parameters": [
+                    {
+                        "name": "data",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/HarnessConversationPublish"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "",
+                        "schema": {
+                            "$ref": "#/definitions/HarnessConversationPublish"
+                        }
+                    },
+                    "default": {
+                        "description": "Default error response",
+                        "schema": {
+                            "$ref": "#/definitions/ManagementAPIErrorResponse"
+                        }
+                    }
+                },
+                "tags": [
+                    "simulate"
+                ],
+                "x-runtime-request-validation": true
+            },
+            "parameters": [
+                {
+                    "name": "id",
+                    "in": "path",
+                    "required": true,
+                    "type": "string"
+                }
+            ]
+        },
         "/simulate/api/harness/conversations/{id}/rerun/": {
             "post": {
                 "operationId": "simulate_api_harness_conversations_rerun",
@@ -52196,6 +52451,132 @@
                 "tags": [
                     "simulate"
                 ]
+            },
+            "parameters": [
+                {
+                    "name": "id",
+                    "in": "path",
+                    "required": true,
+                    "type": "string"
+                }
+            ]
+        },
+        "/simulate/api/harness/conversations/{id}/runs/": {
+            "post": {
+                "operationId": "simulate_api_harness_conversations_runs",
+                "description": "",
+                "parameters": [
+                    {
+                        "name": "data",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/HarnessConversationRunsQuery"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "",
+                        "schema": {
+                            "$ref": "#/definitions/HarnessConversationRunsQuery"
+                        }
+                    },
+                    "default": {
+                        "description": "Default error response",
+                        "schema": {
+                            "$ref": "#/definitions/ManagementAPIErrorResponse"
+                        }
+                    }
+                },
+                "tags": [
+                    "simulate"
+                ],
+                "x-runtime-request-validation": true
+            },
+            "parameters": [
+                {
+                    "name": "id",
+                    "in": "path",
+                    "required": true,
+                    "type": "string"
+                }
+            ]
+        },
+        "/simulate/api/harness/conversations/{id}/runs/start/": {
+            "post": {
+                "operationId": "simulate_api_harness_conversations_runs_start_run",
+                "description": "",
+                "parameters": [
+                    {
+                        "name": "data",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/HarnessConversationRunStart"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "",
+                        "schema": {
+                            "$ref": "#/definitions/HarnessConversationRunStart"
+                        }
+                    },
+                    "default": {
+                        "description": "Default error response",
+                        "schema": {
+                            "$ref": "#/definitions/ManagementAPIErrorResponse"
+                        }
+                    }
+                },
+                "tags": [
+                    "simulate"
+                ],
+                "x-runtime-request-validation": true
+            },
+            "parameters": [
+                {
+                    "name": "id",
+                    "in": "path",
+                    "required": true,
+                    "type": "string"
+                }
+            ]
+        },
+        "/simulate/api/harness/conversations/{id}/scenarios/": {
+            "post": {
+                "operationId": "simulate_api_harness_conversations_scenarios",
+                "description": "",
+                "parameters": [
+                    {
+                        "name": "data",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/HarnessConversationScenarioQuery"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "",
+                        "schema": {
+                            "$ref": "#/definitions/HarnessConversationScenarioQuery"
+                        }
+                    },
+                    "default": {
+                        "description": "Default error response",
+                        "schema": {
+                            "$ref": "#/definitions/ManagementAPIErrorResponse"
+                        }
+                    }
+                },
+                "tags": [
+                    "simulate"
+                ],
+                "x-runtime-request-validation": true
             },
             "parameters": [
                 {
@@ -58329,6 +58710,253 @@
                 ]
             },
             "parameters": []
+        },
+        "/tracer/alerts/": {
+            "get": {
+                "operationId": "tracer_alerts_list",
+                "description": "",
+                "parameters": [
+                    {
+                        "name": "kind",
+                        "in": "query",
+                        "required": false,
+                        "type": "string",
+                        "enum": [
+                            "metric",
+                            "error_feed"
+                        ]
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "",
+                        "schema": {
+                            "$ref": "#/definitions/AlertListResponse"
+                        }
+                    },
+                    "default": {
+                        "description": "Default error response",
+                        "schema": {
+                            "$ref": "#/definitions/ManagementAPIErrorResponse"
+                        }
+                    }
+                },
+                "tags": [
+                    "tracer"
+                ],
+                "x-runtime-request-validation": true,
+                "x-runtime-response-validation": true
+            },
+            "post": {
+                "operationId": "tracer_alerts_create",
+                "description": "",
+                "parameters": [
+                    {
+                        "name": "data",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/AlertWriteRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "",
+                        "schema": {
+                            "$ref": "#/definitions/AlertItemResponse"
+                        }
+                    },
+                    "default": {
+                        "description": "Default error response",
+                        "schema": {
+                            "$ref": "#/definitions/ManagementAPIErrorResponse"
+                        }
+                    }
+                },
+                "tags": [
+                    "tracer"
+                ],
+                "x-runtime-request-validation": true,
+                "x-runtime-response-validation": true
+            },
+            "parameters": []
+        },
+        "/tracer/alerts/error_feed/{alert_id}/test/": {
+            "post": {
+                "operationId": "tracer_alerts_error_feed_test_create",
+                "description": "",
+                "parameters": [
+                    {
+                        "name": "data",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/AlertTestRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "",
+                        "schema": {
+                            "$ref": "#/definitions/AlertTestResponse"
+                        }
+                    },
+                    "default": {
+                        "description": "Default error response",
+                        "schema": {
+                            "$ref": "#/definitions/ManagementAPIErrorResponse"
+                        }
+                    }
+                },
+                "tags": [
+                    "tracer"
+                ],
+                "x-runtime-request-validation": true,
+                "x-runtime-response-validation": true
+            },
+            "parameters": [
+                {
+                    "name": "alert_id",
+                    "in": "path",
+                    "required": true,
+                    "type": "string"
+                }
+            ]
+        },
+        "/tracer/alerts/options/": {
+            "get": {
+                "operationId": "tracer_alerts_options_list",
+                "description": "",
+                "parameters": [
+                    {
+                        "name": "kind",
+                        "in": "query",
+                        "required": false,
+                        "type": "string",
+                        "enum": [
+                            "metric",
+                            "error_feed"
+                        ]
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "",
+                        "schema": {
+                            "$ref": "#/definitions/AlertOptionsResponse"
+                        }
+                    },
+                    "default": {
+                        "description": "Default error response",
+                        "schema": {
+                            "$ref": "#/definitions/ManagementAPIErrorResponse"
+                        }
+                    }
+                },
+                "tags": [
+                    "tracer"
+                ],
+                "x-runtime-request-validation": true,
+                "x-runtime-response-validation": true
+            },
+            "parameters": []
+        },
+        "/tracer/alerts/{kind}/{alert_id}/": {
+            "get": {
+                "operationId": "tracer_alerts_read",
+                "description": "",
+                "parameters": [],
+                "responses": {
+                    "200": {
+                        "description": "",
+                        "schema": {
+                            "$ref": "#/definitions/AlertItemResponse"
+                        }
+                    },
+                    "default": {
+                        "description": "Default error response",
+                        "schema": {
+                            "$ref": "#/definitions/ManagementAPIErrorResponse"
+                        }
+                    }
+                },
+                "tags": [
+                    "tracer"
+                ],
+                "x-runtime-response-validation": true
+            },
+            "patch": {
+                "operationId": "tracer_alerts_partial_update",
+                "description": "",
+                "parameters": [
+                    {
+                        "name": "data",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/AlertWriteRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "",
+                        "schema": {
+                            "$ref": "#/definitions/AlertItemResponse"
+                        }
+                    },
+                    "default": {
+                        "description": "Default error response",
+                        "schema": {
+                            "$ref": "#/definitions/ManagementAPIErrorResponse"
+                        }
+                    }
+                },
+                "tags": [
+                    "tracer"
+                ],
+                "x-runtime-request-validation": true,
+                "x-runtime-response-validation": true
+            },
+            "delete": {
+                "operationId": "tracer_alerts_delete",
+                "description": "",
+                "parameters": [],
+                "responses": {
+                    "200": {
+                        "description": "",
+                        "schema": {
+                            "$ref": "#/definitions/AlertDeletedResponse"
+                        }
+                    },
+                    "default": {
+                        "description": "Default error response",
+                        "schema": {
+                            "$ref": "#/definitions/ManagementAPIErrorResponse"
+                        }
+                    }
+                },
+                "tags": [
+                    "tracer"
+                ],
+                "x-runtime-response-validation": true
+            },
+            "parameters": [
+                {
+                    "name": "kind",
+                    "in": "path",
+                    "required": true,
+                    "type": "string"
+                },
+                {
+                    "name": "alert_id",
+                    "in": "path",
+                    "required": true,
+                    "type": "string"
+                }
+            ]
         },
         "/tracer/bulk-annotation/": {
             "post": {
@@ -71240,50 +71868,91 @@
                 "description": "",
                 "parameters": [
                     {
-                        "name": "page",
+                        "name": "page_number",
                         "in": "query",
-                        "description": "A page number within the paginated result set.",
+                        "description": "Zero-based page number.",
                         "required": false,
-                        "type": "integer"
+                        "type": "integer",
+                        "default": 0,
+                        "minimum": 0
                     },
                     {
-                        "name": "limit",
+                        "name": "page_size",
                         "in": "query",
-                        "description": "Number of results to return per page.",
                         "required": false,
-                        "type": "integer"
+                        "type": "integer",
+                        "default": 30,
+                        "maximum": 100,
+                        "minimum": 1
+                    },
+                    {
+                        "name": "search_text",
+                        "in": "query",
+                        "required": false,
+                        "type": "string"
+                    },
+                    {
+                        "name": "project_id",
+                        "in": "query",
+                        "required": false,
+                        "type": "array",
+                        "items": {
+                            "type": "string",
+                            "format": "uuid"
+                        }
+                    },
+                    {
+                        "name": "status",
+                        "in": "query",
+                        "required": false,
+                        "type": "array",
+                        "items": {
+                            "type": "string",
+                            "enum": [
+                                "triggered",
+                                "healthy"
+                            ]
+                        }
+                    },
+                    {
+                        "name": "metric_type",
+                        "in": "query",
+                        "required": false,
+                        "type": "array",
+                        "items": {
+                            "type": "string",
+                            "minLength": 1
+                        }
+                    },
+                    {
+                        "name": "sort_by",
+                        "in": "query",
+                        "required": false,
+                        "type": "string",
+                        "minLength": 1
+                    },
+                    {
+                        "name": "sort_direction",
+                        "in": "query",
+                        "required": false,
+                        "type": "string",
+                        "enum": [
+                            "asc",
+                            "desc"
+                        ]
                     }
                 ],
                 "responses": {
                     "200": {
                         "description": "",
                         "schema": {
-                            "required": [
-                                "count",
-                                "results"
-                            ],
-                            "type": "object",
-                            "properties": {
-                                "count": {
-                                    "type": "integer"
-                                },
-                                "next": {
-                                    "type": "string",
-                                    "format": "uri",
-                                    "x-nullable": true
-                                },
-                                "previous": {
-                                    "type": "string",
-                                    "format": "uri",
-                                    "x-nullable": true
-                                },
-                                "results": {
-                                    "type": "array",
-                                    "items": {
-                                        "$ref": "#/definitions/UserAlertMonitor"
-                                    }
-                                }
-                            }
+                            "$ref": "#/definitions/UserAlertMonitorListResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "",
+                        "schema": {
+                            "$ref": "#/definitions/ApiErrorResponse"
                         }
                     },
                     "default": {
@@ -71295,7 +71964,9 @@
                 },
                 "tags": [
                     "tracer"
-                ]
+                ],
+                "x-runtime-request-validation": true,
+                "x-runtime-response-validation": true
             },
             "parameters": []
         },
@@ -89068,7 +89739,8 @@
         "OrgConfigBulkResponse": {
             "required": [
                 "status",
-                "result"
+                "result",
+                "unbuilt_org_ids"
             ],
             "type": "object",
             "properties": {
@@ -89081,6 +89753,14 @@
                     "type": "object",
                     "additionalProperties": {
                         "$ref": "#/definitions/OrgConfigBulkItem"
+                    }
+                },
+                "unbuilt_org_ids": {
+                    "description": "Orgs with an active config that could not be built. The gateway keeps their last good config instead of dropping them.",
+                    "type": "array",
+                    "items": {
+                        "type": "string",
+                        "minLength": 1
                     }
                 }
             }
@@ -92867,7 +93547,8 @@
                         "mixpanel",
                         "cloud_storage",
                         "message_queue",
-                        "linear"
+                        "linear",
+                        "slack"
                     ]
                 },
                 "display_name": {
@@ -93073,7 +93754,8 @@
                         "mixpanel",
                         "cloud_storage",
                         "message_queue",
-                        "linear"
+                        "linear",
+                        "slack"
                     ]
                 },
                 "host_url": {
@@ -93193,7 +93875,8 @@
                         "mixpanel",
                         "cloud_storage",
                         "message_queue",
-                        "linear"
+                        "linear",
+                        "slack"
                     ]
                 },
                 "display_name": {
@@ -93359,7 +94042,8 @@
                         "mixpanel",
                         "cloud_storage",
                         "message_queue",
-                        "linear"
+                        "linear",
+                        "slack"
                     ]
                 },
                 "host_url": {
@@ -93479,6 +94163,72 @@
                 }
             }
         },
+        "SlackChannel": {
+            "required": [
+                "id",
+                "name",
+                "is_private",
+                "is_member"
+            ],
+            "type": "object",
+            "properties": {
+                "id": {
+                    "title": "Id",
+                    "type": "string",
+                    "minLength": 1
+                },
+                "name": {
+                    "title": "Name",
+                    "type": "string",
+                    "minLength": 1
+                },
+                "is_private": {
+                    "title": "Is private",
+                    "type": "boolean"
+                },
+                "is_member": {
+                    "title": "Is member",
+                    "type": "boolean"
+                }
+            }
+        },
+        "SlackChannelsResult": {
+            "required": [
+                "channels",
+                "next_cursor"
+            ],
+            "type": "object",
+            "properties": {
+                "channels": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/SlackChannel"
+                    }
+                },
+                "next_cursor": {
+                    "title": "Next cursor",
+                    "type": "string",
+                    "minLength": 1,
+                    "x-nullable": true
+                }
+            }
+        },
+        "SlackChannelsResponse": {
+            "required": [
+                "status",
+                "result"
+            ],
+            "type": "object",
+            "properties": {
+                "status": {
+                    "title": "Status",
+                    "type": "boolean"
+                },
+                "result": {
+                    "$ref": "#/definitions/SlackChannelsResult"
+                }
+            }
+        },
         "IntegrationConnectionUpdate": {
             "type": "object",
             "properties": {
@@ -93550,6 +94300,46 @@
                 },
                 "result": {
                     "$ref": "#/definitions/IntegrationMessageResult"
+                }
+            }
+        },
+        "SlackInstall": {
+            "type": "object",
+            "properties": {
+                "connection_id": {
+                    "title": "Connection id",
+                    "type": "string",
+                    "format": "uuid"
+                }
+            }
+        },
+        "SlackInstallResult": {
+            "required": [
+                "authorization_url"
+            ],
+            "type": "object",
+            "properties": {
+                "authorization_url": {
+                    "title": "Authorization url",
+                    "type": "string",
+                    "format": "uri",
+                    "minLength": 1
+                }
+            }
+        },
+        "SlackInstallResponse": {
+            "required": [
+                "status",
+                "result"
+            ],
+            "type": "object",
+            "properties": {
+                "status": {
+                    "title": "Status",
+                    "type": "boolean"
+                },
+                "result": {
+                    "$ref": "#/definitions/SlackInstallResult"
                 }
             }
         },
@@ -103626,6 +104416,22 @@
                 },
                 "result": {
                     "$ref": "#/definitions/DatasetCreationProgressResult"
+                }
+            }
+        },
+        "DatasetDelete": {
+            "required": [
+                "dataset_ids"
+            ],
+            "type": "object",
+            "properties": {
+                "dataset_ids": {
+                    "type": "array",
+                    "items": {
+                        "type": "string",
+                        "format": "uuid"
+                    },
+                    "maxItems": 50
                 }
             }
         },
@@ -120424,6 +121230,183 @@
                 }
             }
         },
+        "AgentVersionResponse": {
+            "type": "object",
+            "properties": {
+                "id": {
+                    "title": "Id",
+                    "type": "string",
+                    "format": "uuid",
+                    "readOnly": true
+                },
+                "version_number": {
+                    "title": "Version number",
+                    "description": "Version number of the agent",
+                    "type": "integer",
+                    "readOnly": true
+                },
+                "version_name": {
+                    "title": "Version name",
+                    "description": "Human-readable version name (e.g., 'v1.2.3')",
+                    "type": "string",
+                    "readOnly": true,
+                    "minLength": 1,
+                    "x-nullable": true
+                },
+                "version_name_display": {
+                    "title": "Version name display",
+                    "type": "string",
+                    "readOnly": true
+                },
+                "status": {
+                    "title": "Status",
+                    "description": "Current status of this version",
+                    "type": "string",
+                    "enum": [
+                        "draft",
+                        "active",
+                        "archived",
+                        "deprecated"
+                    ],
+                    "readOnly": true
+                },
+                "status_display": {
+                    "title": "Status display",
+                    "type": "string",
+                    "readOnly": true,
+                    "minLength": 1
+                },
+                "score": {
+                    "title": "Score",
+                    "description": "Performance score (0.0 to 10.0)",
+                    "type": "string",
+                    "format": "decimal",
+                    "readOnly": true,
+                    "x-nullable": true
+                },
+                "test_count": {
+                    "title": "Test count",
+                    "description": "Number of tests run for this version",
+                    "type": "integer",
+                    "readOnly": true
+                },
+                "pass_rate": {
+                    "title": "Pass rate",
+                    "description": "Test pass rate percentage",
+                    "type": "string",
+                    "format": "decimal",
+                    "readOnly": true,
+                    "x-nullable": true
+                },
+                "description": {
+                    "title": "Description",
+                    "description": "Description of changes in this version",
+                    "type": "string",
+                    "readOnly": true,
+                    "minLength": 1
+                },
+                "commit_message": {
+                    "title": "Commit message",
+                    "description": "Commit message for the agent version",
+                    "type": "string",
+                    "readOnly": true,
+                    "minLength": 1,
+                    "x-nullable": true
+                },
+                "release_notes": {
+                    "title": "Release notes",
+                    "description": "Detailed release notes for this version",
+                    "type": "string",
+                    "readOnly": true,
+                    "minLength": 1,
+                    "x-nullable": true
+                },
+                "agent_definition": {
+                    "title": "Agent definition",
+                    "description": "Parent agent definition",
+                    "type": "string",
+                    "format": "uuid",
+                    "readOnly": true
+                },
+                "organization": {
+                    "title": "Organization",
+                    "description": "Organization this version belongs to",
+                    "type": "string",
+                    "format": "uuid",
+                    "readOnly": true
+                },
+                "configuration_snapshot": {
+                    "title": "Configuration snapshot",
+                    "description": "Snapshot of agent configuration at this version",
+                    "type": "object",
+                    "readOnly": true
+                },
+                "is_active": {
+                    "title": "Is active",
+                    "type": "string",
+                    "readOnly": true
+                },
+                "is_latest": {
+                    "title": "Is latest",
+                    "type": "string",
+                    "readOnly": true
+                },
+                "agent_kind": {
+                    "title": "Agent kind",
+                    "type": "string",
+                    "readOnly": true,
+                    "minLength": 1,
+                    "x-nullable": true
+                },
+                "api_key": {
+                    "title": "Api key",
+                    "type": "string",
+                    "readOnly": true,
+                    "minLength": 1,
+                    "x-nullable": true
+                },
+                "created_at": {
+                    "title": "Created at",
+                    "type": "string",
+                    "format": "date-time",
+                    "readOnly": true
+                },
+                "updated_at": {
+                    "title": "Updated at",
+                    "type": "string",
+                    "format": "date-time",
+                    "readOnly": true
+                }
+            }
+        },
+        "AgentVersionCreateResponse": {
+            "type": "object",
+            "properties": {
+                "message": {
+                    "title": "Message",
+                    "type": "string",
+                    "readOnly": true,
+                    "minLength": 1
+                },
+                "version": {
+                    "$ref": "#/definitions/AgentVersionResponse"
+                }
+            }
+        },
+        "AgentVersionActivateResponse": {
+            "type": "object",
+            "properties": {
+                "message": {
+                    "title": "Message",
+                    "type": "string",
+                    "readOnly": true,
+                    "minLength": 1
+                },
+                "version": {
+                    "$ref": "#/definitions/AgentVersionResponse"
+                }
+            }
+        },
         "StoredProviderRef": {
             "required": [
                 "provider",
@@ -120762,183 +121745,6 @@
                 "setup_stale": {
                     "title": "Setup stale",
                     "type": "boolean"
-                }
-            }
-        },
-        "AgentVersionResponse": {
-            "type": "object",
-            "properties": {
-                "id": {
-                    "title": "Id",
-                    "type": "string",
-                    "format": "uuid",
-                    "readOnly": true
-                },
-                "version_number": {
-                    "title": "Version number",
-                    "description": "Version number of the agent",
-                    "type": "integer",
-                    "readOnly": true
-                },
-                "version_name": {
-                    "title": "Version name",
-                    "description": "Human-readable version name (e.g., 'v1.2.3')",
-                    "type": "string",
-                    "readOnly": true,
-                    "minLength": 1,
-                    "x-nullable": true
-                },
-                "version_name_display": {
-                    "title": "Version name display",
-                    "type": "string",
-                    "readOnly": true
-                },
-                "status": {
-                    "title": "Status",
-                    "description": "Current status of this version",
-                    "type": "string",
-                    "enum": [
-                        "draft",
-                        "active",
-                        "archived",
-                        "deprecated"
-                    ],
-                    "readOnly": true
-                },
-                "status_display": {
-                    "title": "Status display",
-                    "type": "string",
-                    "readOnly": true,
-                    "minLength": 1
-                },
-                "score": {
-                    "title": "Score",
-                    "description": "Performance score (0.0 to 10.0)",
-                    "type": "string",
-                    "format": "decimal",
-                    "readOnly": true,
-                    "x-nullable": true
-                },
-                "test_count": {
-                    "title": "Test count",
-                    "description": "Number of tests run for this version",
-                    "type": "integer",
-                    "readOnly": true
-                },
-                "pass_rate": {
-                    "title": "Pass rate",
-                    "description": "Test pass rate percentage",
-                    "type": "string",
-                    "format": "decimal",
-                    "readOnly": true,
-                    "x-nullable": true
-                },
-                "description": {
-                    "title": "Description",
-                    "description": "Description of changes in this version",
-                    "type": "string",
-                    "readOnly": true,
-                    "minLength": 1
-                },
-                "commit_message": {
-                    "title": "Commit message",
-                    "description": "Commit message for the agent version",
-                    "type": "string",
-                    "readOnly": true,
-                    "minLength": 1,
-                    "x-nullable": true
-                },
-                "release_notes": {
-                    "title": "Release notes",
-                    "description": "Detailed release notes for this version",
-                    "type": "string",
-                    "readOnly": true,
-                    "minLength": 1,
-                    "x-nullable": true
-                },
-                "agent_definition": {
-                    "title": "Agent definition",
-                    "description": "Parent agent definition",
-                    "type": "string",
-                    "format": "uuid",
-                    "readOnly": true
-                },
-                "organization": {
-                    "title": "Organization",
-                    "description": "Organization this version belongs to",
-                    "type": "string",
-                    "format": "uuid",
-                    "readOnly": true
-                },
-                "configuration_snapshot": {
-                    "title": "Configuration snapshot",
-                    "description": "Snapshot of agent configuration at this version",
-                    "type": "object",
-                    "readOnly": true
-                },
-                "is_active": {
-                    "title": "Is active",
-                    "type": "string",
-                    "readOnly": true
-                },
-                "is_latest": {
-                    "title": "Is latest",
-                    "type": "string",
-                    "readOnly": true
-                },
-                "agent_kind": {
-                    "title": "Agent kind",
-                    "type": "string",
-                    "readOnly": true,
-                    "minLength": 1,
-                    "x-nullable": true
-                },
-                "api_key": {
-                    "title": "Api key",
-                    "type": "string",
-                    "readOnly": true,
-                    "minLength": 1,
-                    "x-nullable": true
-                },
-                "created_at": {
-                    "title": "Created at",
-                    "type": "string",
-                    "format": "date-time",
-                    "readOnly": true
-                },
-                "updated_at": {
-                    "title": "Updated at",
-                    "type": "string",
-                    "format": "date-time",
-                    "readOnly": true
-                }
-            }
-        },
-        "AgentVersionCreateResponse": {
-            "type": "object",
-            "properties": {
-                "message": {
-                    "title": "Message",
-                    "type": "string",
-                    "readOnly": true,
-                    "minLength": 1
-                },
-                "version": {
-                    "$ref": "#/definitions/AgentVersionResponse"
-                }
-            }
-        },
-        "AgentVersionActivateResponse": {
-            "type": "object",
-            "properties": {
-                "message": {
-                    "title": "Message",
-                    "type": "string",
-                    "readOnly": true,
-                    "minLength": 1
-                },
-                "version": {
-                    "$ref": "#/definitions/AgentVersionResponse"
                 }
             }
         },
@@ -126750,6 +127556,20 @@
                     "type": "string",
                     "maxLength": 128,
                     "minLength": 1
+                },
+                "target_stage": {
+                    "title": "Target stage",
+                    "type": "string",
+                    "enum": [
+                        "understand",
+                        "environment",
+                        "scenarios"
+                    ]
+                },
+                "scenario_delta": {
+                    "title": "Scenario delta",
+                    "type": "integer",
+                    "minimum": 1
                 }
             }
         },
@@ -127889,6 +128709,20 @@
                     "type": "string",
                     "maxLength": 128,
                     "minLength": 1
+                },
+                "target_stage": {
+                    "title": "Target stage",
+                    "type": "string",
+                    "enum": [
+                        "understand",
+                        "environment",
+                        "scenarios"
+                    ]
+                },
+                "scenario_delta": {
+                    "title": "Scenario delta",
+                    "type": "integer",
+                    "minimum": 1
                 }
             }
         },
@@ -128078,6 +128912,98 @@
                 }
             }
         },
+        "HarnessConversationOverviewQuery": {
+            "type": "object",
+            "properties": {}
+        },
+        "HarnessConversationOverview": {
+            "required": [
+                "environment",
+                "scenario_count",
+                "use_cases",
+                "coverage",
+                "recent_runs",
+                "build_changes",
+                "earlier_messages"
+            ],
+            "type": "object",
+            "properties": {
+                "environment": {
+                    "title": "Environment",
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string",
+                        "x-nullable": true
+                    }
+                },
+                "scenario_count": {
+                    "title": "Scenario count",
+                    "type": "integer"
+                },
+                "use_cases": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "additionalProperties": {
+                            "type": "string",
+                            "x-nullable": true
+                        }
+                    }
+                },
+                "coverage": {
+                    "title": "Coverage",
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string",
+                        "x-nullable": true
+                    }
+                },
+                "recent_runs": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "additionalProperties": {
+                            "type": "string",
+                            "x-nullable": true
+                        }
+                    }
+                },
+                "build_changes": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "additionalProperties": {
+                            "type": "string",
+                            "x-nullable": true
+                        }
+                    }
+                },
+                "earlier_messages": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "additionalProperties": {
+                            "type": "string",
+                            "x-nullable": true
+                        }
+                    }
+                }
+            }
+        },
+        "HarnessConversationPublish": {
+            "required": [
+                "digest"
+            ],
+            "type": "object",
+            "properties": {
+                "digest": {
+                    "title": "Digest",
+                    "type": "string",
+                    "maxLength": 128,
+                    "minLength": 1
+                }
+            }
+        },
         "HarnessConversationRerun": {
             "type": "object",
             "properties": {}
@@ -128127,6 +129053,129 @@
                 "receipts": {
                     "title": "Receipts",
                     "type": "object"
+                }
+            }
+        },
+        "HarnessConversationRunsQuery": {
+            "type": "object",
+            "properties": {
+                "run_id": {
+                    "title": "Run id",
+                    "type": "string",
+                    "maxLength": 64
+                },
+                "limit": {
+                    "title": "Limit",
+                    "type": "integer",
+                    "maximum": 50,
+                    "minimum": 1
+                }
+            }
+        },
+        "HarnessConversationRunStart": {
+            "type": "object",
+            "properties": {
+                "numbers": {
+                    "type": "array",
+                    "items": {
+                        "type": "integer",
+                        "minimum": 1
+                    },
+                    "maxItems": 5000
+                },
+                "ranges": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "additionalProperties": {
+                            "type": "integer",
+                            "minimum": 1
+                        }
+                    },
+                    "maxItems": 100
+                },
+                "trials": {
+                    "title": "Trials",
+                    "type": "integer",
+                    "default": 1,
+                    "maximum": 20,
+                    "minimum": 1
+                },
+                "operation_id": {
+                    "title": "Operation id",
+                    "type": "string",
+                    "maxLength": 64
+                }
+            }
+        },
+        "HarnessConversationScenarioQuery": {
+            "type": "object",
+            "properties": {
+                "numbers": {
+                    "type": "array",
+                    "items": {
+                        "type": "integer",
+                        "minimum": 1
+                    },
+                    "maxItems": 5000
+                },
+                "ranges": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "additionalProperties": {
+                            "type": "integer",
+                            "minimum": 1
+                        }
+                    },
+                    "maxItems": 100
+                },
+                "names": {
+                    "type": "array",
+                    "items": {
+                        "type": "string",
+                        "maxLength": 255,
+                        "minLength": 1
+                    },
+                    "maxItems": 500
+                },
+                "ids": {
+                    "type": "array",
+                    "items": {
+                        "type": "string",
+                        "maxLength": 64,
+                        "minLength": 1
+                    },
+                    "maxItems": 1000
+                },
+                "search": {
+                    "title": "Search",
+                    "type": "string",
+                    "maxLength": 500
+                },
+                "filters": {
+                    "title": "Filters",
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string",
+                        "x-nullable": true
+                    }
+                },
+                "page": {
+                    "title": "Page",
+                    "type": "integer",
+                    "minimum": 1
+                },
+                "page_size": {
+                    "title": "Page size",
+                    "type": "integer",
+                    "maximum": 100,
+                    "minimum": 1
+                },
+                "full": {
+                    "title": "Full",
+                    "type": "boolean",
+                    "default": false
                 }
             }
         },
@@ -135783,8 +136832,7 @@
                 },
                 "type": {
                     "title": "Type",
-                    "type": "string",
-                    "minLength": 1
+                    "type": "string"
                 },
                 "value": {
                     "title": "Value",
@@ -135808,7 +136856,13 @@
                 "status": {
                     "title": "Status",
                     "type": "string",
-                    "minLength": 1
+                    "enum": [
+                        "pending",
+                        "succeeded",
+                        "failed",
+                        "timed_out",
+                        "skipped"
+                    ]
                 }
             }
         },
@@ -135860,7 +136914,10 @@
                 "outcome",
                 "cost_breakdown_cents",
                 "evaluations",
-                "function_calls"
+                "function_calls",
+                "scoring_status",
+                "csat_status",
+                "csat_reason"
             ],
             "type": "object",
             "properties": {
@@ -136330,6 +137387,35 @@
                     "items": {
                         "$ref": "#/definitions/SimulateRunV3FunctionCall"
                     }
+                },
+                "scoring_status": {
+                    "title": "Scoring status",
+                    "type": "string",
+                    "enum": [
+                        "not_applicable",
+                        "pending",
+                        "succeeded",
+                        "failed",
+                        "timed_out"
+                    ]
+                },
+                "csat_status": {
+                    "title": "Csat status",
+                    "type": "string",
+                    "enum": [
+                        "not_applicable",
+                        "pending",
+                        "succeeded",
+                        "failed",
+                        "timed_out",
+                        "skipped"
+                    ]
+                },
+                "csat_reason": {
+                    "title": "Csat reason",
+                    "type": "string",
+                    "minLength": 1,
+                    "x-nullable": true
                 }
             }
         },
@@ -138271,6 +139357,90 @@
                 }
             }
         },
+        "SimulateRunV3ScoringCounts": {
+            "required": [
+                "not_applicable",
+                "pending",
+                "succeeded",
+                "failed",
+                "timed_out"
+            ],
+            "type": "object",
+            "properties": {
+                "not_applicable": {
+                    "title": "Not applicable",
+                    "type": "integer",
+                    "minimum": 0
+                },
+                "pending": {
+                    "title": "Pending",
+                    "type": "integer",
+                    "minimum": 0
+                },
+                "succeeded": {
+                    "title": "Succeeded",
+                    "type": "integer",
+                    "minimum": 0
+                },
+                "failed": {
+                    "title": "Failed",
+                    "type": "integer",
+                    "minimum": 0
+                },
+                "timed_out": {
+                    "title": "Timed out",
+                    "type": "integer",
+                    "minimum": 0
+                }
+            }
+        },
+        "SimulateRunV3CallsSummary": {
+            "required": [
+                "total",
+                "outcomes",
+                "measured",
+                "pass_rate",
+                "duration",
+                "latency",
+                "tokens",
+                "cost_cents",
+                "scoring"
+            ],
+            "type": "object",
+            "properties": {
+                "total": {
+                    "title": "Total",
+                    "type": "integer"
+                },
+                "outcomes": {
+                    "$ref": "#/definitions/OutcomeCounts"
+                },
+                "measured": {
+                    "title": "Measured",
+                    "type": "integer"
+                },
+                "pass_rate": {
+                    "title": "Pass rate",
+                    "type": "number",
+                    "x-nullable": true
+                },
+                "duration": {
+                    "$ref": "#/definitions/MetricStats"
+                },
+                "latency": {
+                    "$ref": "#/definitions/MetricStats"
+                },
+                "tokens": {
+                    "$ref": "#/definitions/TotalMetricStats"
+                },
+                "cost_cents": {
+                    "$ref": "#/definitions/TotalMetricStats"
+                },
+                "scoring": {
+                    "$ref": "#/definitions/SimulateRunV3ScoringCounts"
+                }
+            }
+        },
         "RunCall": {
             "required": [
                 "id",
@@ -138303,7 +139473,10 @@
                 "csat",
                 "ended_reason",
                 "error_message",
-                "evaluations"
+                "evaluations",
+                "scoring_status",
+                "csat_status",
+                "csat_reason"
             ],
             "type": "object",
             "properties": {
@@ -138480,6 +139653,35 @@
                     "items": {
                         "$ref": "#/definitions/SimulateRunV3EvaluationResult"
                     }
+                },
+                "scoring_status": {
+                    "title": "Scoring status",
+                    "type": "string",
+                    "enum": [
+                        "not_applicable",
+                        "pending",
+                        "succeeded",
+                        "failed",
+                        "timed_out"
+                    ]
+                },
+                "csat_status": {
+                    "title": "Csat status",
+                    "type": "string",
+                    "enum": [
+                        "not_applicable",
+                        "pending",
+                        "succeeded",
+                        "failed",
+                        "timed_out",
+                        "skipped"
+                    ]
+                },
+                "csat_reason": {
+                    "title": "Csat reason",
+                    "type": "string",
+                    "minLength": 1,
+                    "x-nullable": true
                 }
             }
         },
@@ -138685,6 +139887,7 @@
                 "results",
                 "groups",
                 "facets",
+                "status_counts",
                 "evaluation_columns"
             ],
             "type": "object",
@@ -138693,7 +139896,7 @@
                     "$ref": "#/definitions/RunExecution"
                 },
                 "summary": {
-                    "$ref": "#/definitions/RunSummary"
+                    "$ref": "#/definitions/SimulateRunV3CallsSummary"
                 },
                 "count": {
                     "title": "Count",
@@ -138725,6 +139928,9 @@
                 },
                 "facets": {
                     "$ref": "#/definitions/RunFacets"
+                },
+                "status_counts": {
+                    "$ref": "#/definitions/OutcomeCounts"
                 },
                 "evaluation_columns": {
                     "type": "array",
@@ -139086,6 +140292,585 @@
                     "title": "Instance secret",
                     "type": "string",
                     "minLength": 1
+                }
+            }
+        },
+        "AlertItem": {
+            "required": [
+                "id",
+                "kind",
+                "name",
+                "enabled"
+            ],
+            "type": "object",
+            "properties": {
+                "id": {
+                    "title": "Id",
+                    "type": "string",
+                    "format": "uuid"
+                },
+                "kind": {
+                    "title": "Kind",
+                    "type": "string",
+                    "enum": [
+                        "metric",
+                        "error_feed"
+                    ]
+                },
+                "name": {
+                    "title": "Name",
+                    "type": "string",
+                    "minLength": 1
+                },
+                "enabled": {
+                    "title": "Enabled",
+                    "type": "boolean"
+                },
+                "project_id": {
+                    "title": "Project id",
+                    "type": "string",
+                    "format": "uuid",
+                    "x-nullable": true
+                },
+                "trigger_type": {
+                    "title": "Trigger type",
+                    "type": "string",
+                    "minLength": 1
+                },
+                "severity_threshold": {
+                    "title": "Severity threshold",
+                    "type": "string",
+                    "enum": [
+                        "low",
+                        "medium",
+                        "high",
+                        "critical"
+                    ]
+                },
+                "occurrence_threshold": {
+                    "title": "Occurrence threshold",
+                    "type": "integer"
+                },
+                "filters": {
+                    "title": "Filters",
+                    "type": "object"
+                },
+                "slack_connection_id": {
+                    "title": "Slack connection id",
+                    "type": "string",
+                    "format": "uuid"
+                },
+                "slack_channel_id": {
+                    "title": "Slack channel id",
+                    "type": "string",
+                    "minLength": 1
+                },
+                "slack_channel_name": {
+                    "title": "Slack channel name",
+                    "type": "string",
+                    "minLength": 1
+                },
+                "cooldown_seconds": {
+                    "title": "Cooldown seconds",
+                    "type": "integer"
+                },
+                "last_triggered_at": {
+                    "title": "Last triggered at",
+                    "type": "string",
+                    "format": "date-time",
+                    "x-nullable": true
+                },
+                "health": {
+                    "title": "Health",
+                    "type": "string",
+                    "minLength": 1
+                },
+                "failure_reason": {
+                    "title": "Failure reason",
+                    "type": "string",
+                    "minLength": 1,
+                    "x-nullable": true
+                },
+                "created_at": {
+                    "title": "Created at",
+                    "type": "string",
+                    "format": "date-time"
+                },
+                "updated_at": {
+                    "title": "Updated at",
+                    "type": "string",
+                    "format": "date-time"
+                },
+                "project": {
+                    "title": "Project",
+                    "type": "string",
+                    "format": "uuid"
+                },
+                "organization": {
+                    "title": "Organization",
+                    "type": "string",
+                    "format": "uuid"
+                },
+                "workspace": {
+                    "title": "Workspace",
+                    "type": "string",
+                    "format": "uuid",
+                    "x-nullable": true
+                },
+                "created_by": {
+                    "title": "Created by",
+                    "type": "string",
+                    "format": "uuid",
+                    "x-nullable": true
+                },
+                "metric_type": {
+                    "title": "Metric type",
+                    "type": "string",
+                    "minLength": 1
+                },
+                "metric": {
+                    "title": "Metric",
+                    "type": "string",
+                    "x-nullable": true
+                },
+                "metric_name": {
+                    "title": "Metric name",
+                    "type": "string",
+                    "minLength": 1
+                },
+                "threshold_type": {
+                    "title": "Threshold type",
+                    "type": "string",
+                    "minLength": 1
+                },
+                "threshold_operator": {
+                    "title": "Threshold operator",
+                    "type": "string",
+                    "minLength": 1
+                },
+                "threshold_metric_value": {
+                    "title": "Threshold metric value",
+                    "type": "string",
+                    "x-nullable": true
+                },
+                "critical_threshold_value": {
+                    "title": "Critical threshold value",
+                    "type": "number",
+                    "x-nullable": true
+                },
+                "warning_threshold_value": {
+                    "title": "Warning threshold value",
+                    "type": "number",
+                    "x-nullable": true
+                },
+                "alert_frequency": {
+                    "title": "Alert frequency",
+                    "type": "integer"
+                },
+                "auto_threshold_time_window": {
+                    "title": "Auto threshold time window",
+                    "type": "integer"
+                },
+                "last_checked_at": {
+                    "title": "Last checked at",
+                    "type": "string",
+                    "format": "date-time",
+                    "x-nullable": true
+                },
+                "slack_webhook_url": {
+                    "title": "Slack webhook url",
+                    "type": "string",
+                    "format": "uri",
+                    "x-nullable": true
+                },
+                "slack_notes": {
+                    "title": "Slack notes",
+                    "type": "string",
+                    "x-nullable": true
+                },
+                "is_mute": {
+                    "title": "Is mute",
+                    "type": "boolean"
+                },
+                "deleted": {
+                    "title": "Deleted",
+                    "type": "boolean"
+                },
+                "deleted_at": {
+                    "title": "Deleted at",
+                    "type": "string",
+                    "format": "date-time",
+                    "x-nullable": true
+                },
+                "logs": {
+                    "type": "array",
+                    "items": {
+                        "type": "object"
+                    },
+                    "x-nullable": true
+                },
+                "notification_emails": {
+                    "type": "array",
+                    "items": {
+                        "type": "string",
+                        "format": "email",
+                        "minLength": 1
+                    }
+                }
+            }
+        },
+        "AlertListResult": {
+            "required": [
+                "alerts"
+            ],
+            "type": "object",
+            "properties": {
+                "alerts": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/AlertItem"
+                    }
+                }
+            }
+        },
+        "AlertListResponse": {
+            "required": [
+                "status",
+                "result"
+            ],
+            "type": "object",
+            "properties": {
+                "status": {
+                    "title": "Status",
+                    "type": "boolean"
+                },
+                "result": {
+                    "$ref": "#/definitions/AlertListResult"
+                }
+            }
+        },
+        "AlertWriteRequest": {
+            "type": "object",
+            "properties": {
+                "kind": {
+                    "title": "Kind",
+                    "type": "string",
+                    "enum": [
+                        "metric",
+                        "error_feed"
+                    ]
+                },
+                "name": {
+                    "title": "Name",
+                    "type": "string",
+                    "minLength": 1
+                },
+                "enabled": {
+                    "title": "Enabled",
+                    "type": "boolean"
+                },
+                "project_id": {
+                    "title": "Project id",
+                    "type": "string",
+                    "format": "uuid",
+                    "x-nullable": true
+                },
+                "trigger_type": {
+                    "title": "Trigger type",
+                    "type": "string",
+                    "minLength": 1
+                },
+                "severity_threshold": {
+                    "title": "Severity threshold",
+                    "type": "string",
+                    "enum": [
+                        "low",
+                        "medium",
+                        "high",
+                        "critical"
+                    ]
+                },
+                "occurrence_threshold": {
+                    "title": "Occurrence threshold",
+                    "type": "integer",
+                    "maximum": 1000000,
+                    "minimum": 1
+                },
+                "filters": {
+                    "title": "Filters",
+                    "type": "object"
+                },
+                "slack_connection_id": {
+                    "title": "Slack connection id",
+                    "type": "string",
+                    "format": "uuid"
+                },
+                "slack_channel_id": {
+                    "title": "Slack channel id",
+                    "type": "string",
+                    "minLength": 1
+                },
+                "cooldown_seconds": {
+                    "title": "Cooldown seconds",
+                    "type": "integer",
+                    "minimum": 0
+                },
+                "project": {
+                    "title": "Project",
+                    "type": "string",
+                    "format": "uuid",
+                    "x-nullable": true
+                },
+                "metric_type": {
+                    "title": "Metric type",
+                    "type": "string",
+                    "minLength": 1
+                },
+                "metric": {
+                    "title": "Metric",
+                    "type": "string",
+                    "x-nullable": true
+                },
+                "threshold_type": {
+                    "title": "Threshold type",
+                    "type": "string",
+                    "minLength": 1
+                },
+                "threshold_operator": {
+                    "title": "Threshold operator",
+                    "type": "string",
+                    "minLength": 1
+                },
+                "threshold_metric_value": {
+                    "title": "Threshold metric value",
+                    "type": "string",
+                    "x-nullable": true
+                },
+                "critical_threshold_value": {
+                    "title": "Critical threshold value",
+                    "type": "number"
+                },
+                "warning_threshold_value": {
+                    "title": "Warning threshold value",
+                    "type": "number"
+                },
+                "alert_frequency": {
+                    "title": "Alert frequency",
+                    "type": "integer"
+                },
+                "auto_threshold_time_window": {
+                    "title": "Auto threshold time window",
+                    "type": "integer"
+                },
+                "slack_webhook_url": {
+                    "title": "Slack webhook url",
+                    "type": "string",
+                    "format": "uri",
+                    "x-nullable": true
+                },
+                "slack_notes": {
+                    "title": "Slack notes",
+                    "type": "string",
+                    "x-nullable": true
+                },
+                "is_mute": {
+                    "title": "Is mute",
+                    "type": "boolean"
+                },
+                "notification_emails": {
+                    "type": "array",
+                    "items": {
+                        "type": "string",
+                        "format": "email",
+                        "minLength": 1
+                    }
+                }
+            }
+        },
+        "AlertItemResponse": {
+            "required": [
+                "status",
+                "result"
+            ],
+            "type": "object",
+            "properties": {
+                "status": {
+                    "title": "Status",
+                    "type": "boolean"
+                },
+                "result": {
+                    "$ref": "#/definitions/AlertItem"
+                }
+            }
+        },
+        "AlertTestRequest": {
+            "type": "object",
+            "properties": {}
+        },
+        "AlertTestResult": {
+            "required": [
+                "sent",
+                "slack_ts"
+            ],
+            "type": "object",
+            "properties": {
+                "sent": {
+                    "title": "Sent",
+                    "type": "boolean"
+                },
+                "slack_ts": {
+                    "title": "Slack ts",
+                    "type": "string",
+                    "minLength": 1
+                }
+            }
+        },
+        "AlertTestResponse": {
+            "required": [
+                "status",
+                "result"
+            ],
+            "type": "object",
+            "properties": {
+                "status": {
+                    "title": "Status",
+                    "type": "boolean"
+                },
+                "result": {
+                    "$ref": "#/definitions/AlertTestResult"
+                }
+            }
+        },
+        "AlertOption": {
+            "required": [
+                "value",
+                "label"
+            ],
+            "type": "object",
+            "properties": {
+                "value": {
+                    "title": "Value",
+                    "type": "string",
+                    "minLength": 1
+                },
+                "label": {
+                    "title": "Label",
+                    "type": "string",
+                    "minLength": 1
+                }
+            }
+        },
+        "AlertProjectOption": {
+            "required": [
+                "id",
+                "name"
+            ],
+            "type": "object",
+            "properties": {
+                "id": {
+                    "title": "Id",
+                    "type": "string",
+                    "format": "uuid"
+                },
+                "name": {
+                    "title": "Name",
+                    "type": "string",
+                    "minLength": 1
+                }
+            }
+        },
+        "AlertOptionsResult": {
+            "required": [
+                "triggers",
+                "severities",
+                "statuses",
+                "sources",
+                "projects"
+            ],
+            "type": "object",
+            "properties": {
+                "triggers": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/AlertOption"
+                    }
+                },
+                "severities": {
+                    "type": "array",
+                    "items": {
+                        "type": "string",
+                        "minLength": 1
+                    }
+                },
+                "statuses": {
+                    "type": "array",
+                    "items": {
+                        "type": "string",
+                        "minLength": 1
+                    }
+                },
+                "sources": {
+                    "type": "array",
+                    "items": {
+                        "type": "string",
+                        "minLength": 1
+                    }
+                },
+                "projects": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/AlertProjectOption"
+                    }
+                }
+            }
+        },
+        "AlertOptionsResponse": {
+            "required": [
+                "status",
+                "result"
+            ],
+            "type": "object",
+            "properties": {
+                "status": {
+                    "title": "Status",
+                    "type": "boolean"
+                },
+                "result": {
+                    "$ref": "#/definitions/AlertOptionsResult"
+                }
+            }
+        },
+        "AlertDeletedResult": {
+            "required": [
+                "id",
+                "deleted"
+            ],
+            "type": "object",
+            "properties": {
+                "id": {
+                    "title": "Id",
+                    "type": "string",
+                    "format": "uuid"
+                },
+                "deleted": {
+                    "title": "Deleted",
+                    "type": "boolean"
+                }
+            }
+        },
+        "AlertDeletedResponse": {
+            "required": [
+                "status",
+                "result"
+            ],
+            "type": "object",
+            "properties": {
+                "status": {
+                    "title": "Status",
+                    "type": "boolean"
+                },
+                "result": {
+                    "$ref": "#/definitions/AlertDeletedResult"
                 }
             }
         },
@@ -148188,6 +149973,15 @@
                     "minLength": 1,
                     "x-nullable": true
                 },
+                "target_type": {
+                    "title": "Target type",
+                    "type": "string",
+                    "enum": [
+                        "span",
+                        "trace"
+                    ],
+                    "x-nullable": true
+                },
                 "annotators": {
                     "title": "Annotators",
                     "type": "object",
@@ -152003,6 +153797,15 @@
                     "minLength": 1,
                     "x-nullable": true
                 },
+                "target_type": {
+                    "title": "Target type",
+                    "type": "string",
+                    "enum": [
+                        "span",
+                        "trace"
+                    ],
+                    "x-nullable": true
+                },
                 "annotators": {
                     "title": "Annotators",
                     "type": "object",
@@ -153066,6 +154869,7 @@
                     "$ref": "#/definitions/TraceObserveListMetadata"
                 },
                 "table": {
+                    "description": "Observe eval bool and choice cells are counts of completed attempts; a detail eval_rollup separately selects the latest completed row per span.",
                     "type": "array",
                     "items": {
                         "type": "object",
@@ -153373,6 +155177,115 @@
                 }
             }
         },
+        "EvalRollupSpan": {
+            "required": [
+                "span_id"
+            ],
+            "type": "object",
+            "properties": {
+                "span_id": {
+                    "title": "Span id",
+                    "type": "string",
+                    "minLength": 1
+                },
+                "span_name": {
+                    "title": "Span name",
+                    "type": "string"
+                },
+                "value": {
+                    "title": "Value",
+                    "type": "object",
+                    "x-nullable": true,
+                    "x-json-value": true,
+                    "description": "Any valid JSON value."
+                },
+                "explanation": {
+                    "title": "Explanation",
+                    "type": "string",
+                    "minLength": 1,
+                    "x-nullable": true
+                },
+                "error": {
+                    "title": "Error",
+                    "type": "boolean"
+                },
+                "status": {
+                    "title": "Status",
+                    "type": "string",
+                    "minLength": 1,
+                    "x-nullable": true
+                },
+                "eval_config_id": {
+                    "title": "Eval config id",
+                    "type": "string"
+                }
+            }
+        },
+        "EvalRollupEval": {
+            "required": [
+                "eval_config_id",
+                "eval_name",
+                "aggregate",
+                "spans"
+            ],
+            "type": "object",
+            "properties": {
+                "eval_config_id": {
+                    "title": "Eval config id",
+                    "type": "string",
+                    "minLength": 1
+                },
+                "eval_name": {
+                    "title": "Eval name",
+                    "type": "string",
+                    "minLength": 1
+                },
+                "output_type": {
+                    "title": "Output type",
+                    "type": "string",
+                    "minLength": 1,
+                    "x-nullable": true
+                },
+                "template_type": {
+                    "title": "Template type",
+                    "type": "string",
+                    "minLength": 1,
+                    "x-nullable": true
+                },
+                "target_type": {
+                    "title": "Target type",
+                    "type": "string",
+                    "enum": [
+                        "span",
+                        "trace"
+                    ],
+                    "x-nullable": true
+                },
+                "choices_map": {
+                    "title": "Choices map",
+                    "type": "object",
+                    "x-nullable": true,
+                    "x-json-value": true,
+                    "description": "Any valid JSON value."
+                },
+                "aggregate": {
+                    "title": "Aggregate",
+                    "type": "object",
+                    "x-json-value": true,
+                    "description": "Any valid JSON value."
+                },
+                "spans": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/EvalRollupSpan"
+                    }
+                },
+                "error": {
+                    "title": "Error",
+                    "type": "boolean"
+                }
+            }
+        },
         "TraceVoiceCallDetailResult": {
             "required": [
                 "id",
@@ -153616,6 +155529,34 @@
                     "type": "object",
                     "additionalProperties": true
                 },
+                "eval_rollup": {
+                    "required": [
+                        "scope",
+                        "evals"
+                    ],
+                    "type": "object",
+                    "properties": {
+                        "scope": {
+                            "title": "Scope",
+                            "type": "string",
+                            "enum": [
+                                "trace",
+                                "span"
+                            ]
+                        },
+                        "evals": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/EvalRollupEval"
+                            }
+                        },
+                        "error": {
+                            "title": "Error",
+                            "type": "boolean"
+                        }
+                    },
+                    "x-nullable": true
+                },
                 "call_execution_id": {
                     "title": "Call execution id",
                     "type": "string",
@@ -153719,6 +155660,67 @@
                 }
             }
         },
+        "EvalRollup": {
+            "required": [
+                "scope",
+                "evals"
+            ],
+            "type": "object",
+            "properties": {
+                "scope": {
+                    "title": "Scope",
+                    "type": "string",
+                    "enum": [
+                        "trace",
+                        "span"
+                    ]
+                },
+                "evals": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/EvalRollupEval"
+                    }
+                },
+                "error": {
+                    "title": "Error",
+                    "type": "boolean"
+                }
+            }
+        },
+        "TraceDetailSpan": {
+            "required": [
+                "observation_span"
+            ],
+            "type": "object",
+            "properties": {
+                "observation_span": {
+                    "title": "Observation span",
+                    "type": "object"
+                },
+                "children": {
+                    "type": "array",
+                    "items": {
+                        "type": "object"
+                    }
+                },
+                "eval_scores": {
+                    "description": "Raw eval rows retained for backwards-compatible array consumers.",
+                    "type": "array",
+                    "items": {
+                        "type": "object"
+                    }
+                },
+                "eval_rollup": {
+                    "$ref": "#/definitions/EvalRollup"
+                },
+                "annotations": {
+                    "type": "array",
+                    "items": {
+                        "type": "object"
+                    }
+                }
+            }
+        },
         "TraceDetailResult": {
             "required": [
                 "trace",
@@ -153735,7 +155737,7 @@
                 "observation_spans": {
                     "type": "array",
                     "items": {
-                        "type": "object"
+                        "$ref": "#/definitions/TraceDetailSpan"
                     }
                 },
                 "summary": {
@@ -154297,6 +156299,186 @@
                 },
                 "result": {
                     "$ref": "#/definitions/UserAlertMonitorDuplicateResult"
+                }
+            }
+        },
+        "UserAlertMonitorListColumn": {
+            "required": [
+                "id",
+                "name",
+                "is_visible"
+            ],
+            "type": "object",
+            "properties": {
+                "id": {
+                    "title": "Id",
+                    "type": "string",
+                    "minLength": 1
+                },
+                "name": {
+                    "title": "Name",
+                    "type": "string",
+                    "minLength": 1
+                },
+                "is_visible": {
+                    "title": "Is visible",
+                    "type": "boolean"
+                }
+            }
+        },
+        "UserAlertMonitorTrend": {
+            "required": [
+                "timestamp",
+                "count"
+            ],
+            "type": "object",
+            "properties": {
+                "timestamp": {
+                    "title": "Timestamp",
+                    "type": "string",
+                    "format": "date-time"
+                },
+                "count": {
+                    "title": "Count",
+                    "type": "integer",
+                    "minimum": 0
+                }
+            }
+        },
+        "UserAlertMonitorListItem": {
+            "required": [
+                "id",
+                "name",
+                "created_at",
+                "updated_at",
+                "metric_type",
+                "filters",
+                "status",
+                "no_of_alerts",
+                "last_triggered",
+                "is_mute",
+                "trends"
+            ],
+            "type": "object",
+            "properties": {
+                "id": {
+                    "title": "Id",
+                    "type": "string",
+                    "format": "uuid"
+                },
+                "name": {
+                    "title": "Name",
+                    "type": "string",
+                    "minLength": 1
+                },
+                "created_at": {
+                    "title": "Created at",
+                    "type": "string",
+                    "format": "date-time"
+                },
+                "updated_at": {
+                    "title": "Updated at",
+                    "type": "string",
+                    "format": "date-time"
+                },
+                "metric_type": {
+                    "title": "Metric type",
+                    "type": "string",
+                    "minLength": 1
+                },
+                "filters": {
+                    "title": "Filters",
+                    "type": "object",
+                    "x-nullable": true
+                },
+                "status": {
+                    "title": "Status",
+                    "type": "string",
+                    "enum": [
+                        "triggered",
+                        "healthy"
+                    ]
+                },
+                "no_of_alerts": {
+                    "title": "No of alerts",
+                    "type": "integer",
+                    "minimum": 0
+                },
+                "last_triggered": {
+                    "title": "Last triggered",
+                    "type": "string",
+                    "format": "date-time",
+                    "x-nullable": true
+                },
+                "is_mute": {
+                    "title": "Is mute",
+                    "type": "boolean"
+                },
+                "trends": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/UserAlertMonitorTrend"
+                    }
+                }
+            }
+        },
+        "UserAlertMonitorListMetadata": {
+            "required": [
+                "total_rows",
+                "total_pages"
+            ],
+            "type": "object",
+            "properties": {
+                "total_rows": {
+                    "title": "Total rows",
+                    "type": "integer",
+                    "minimum": 0
+                },
+                "total_pages": {
+                    "title": "Total pages",
+                    "type": "integer",
+                    "minimum": 0
+                }
+            }
+        },
+        "UserAlertMonitorListResult": {
+            "required": [
+                "column_config",
+                "table",
+                "metadata"
+            ],
+            "type": "object",
+            "properties": {
+                "column_config": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/UserAlertMonitorListColumn"
+                    }
+                },
+                "table": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/UserAlertMonitorListItem"
+                    }
+                },
+                "metadata": {
+                    "$ref": "#/definitions/UserAlertMonitorListMetadata"
+                }
+            }
+        },
+        "UserAlertMonitorListResponse": {
+            "required": [
+                "status",
+                "result"
+            ],
+            "type": "object",
+            "properties": {
+                "status": {
+                    "title": "Status",
+                    "type": "boolean"
+                },
+                "result": {
+                    "$ref": "#/definitions/UserAlertMonitorListResult"
                 }
             }
         },

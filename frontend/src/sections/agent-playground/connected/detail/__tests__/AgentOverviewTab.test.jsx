@@ -94,10 +94,10 @@ describe("AgentOverviewTab", () => {
     expect(screen.getByText(/^started /)).toBeInTheDocument();
   });
 
-  it("treats an evaluating run as still running, with no final rate", () => {
+  it("shows an evaluating run as grading, with no final rate", () => {
     runsState.current = loaded([{ ...ENVIRONMENT_RUN, status: "evaluating" }]);
     renderTab();
-    expect(screen.getByText("Running")).toBeInTheDocument();
+    expect(screen.getByText("Grading")).toBeInTheDocument();
     expect(
       screen.getByTestId("pass-rate-68dedb99-42b6-46e7-8e94-b511041fa2cb"),
     ).toHaveTextContent("—");
@@ -106,7 +106,7 @@ describe("AgentOverviewTab", () => {
   it.each([
     ["pending", "Queued"],
     ["running", "Running"],
-    ["evaluating", "Running"],
+    ["evaluating", "Grading"],
     ["cancelling", "Cancelling"],
     ["completed", "Completed"],
     ["failed", "Failed"],
