@@ -1,5 +1,6 @@
 import PropTypes from "prop-types";
 import React from "react";
+import { format } from "date-fns";
 import { Box, Skeleton, Stack, Typography } from "@mui/material";
 import { useAgentVersion, useStoredAgent } from "src/api/agents/agentDetail";
 import { sourceLabel } from "../connectedAgentLabels";
@@ -184,6 +185,9 @@ export default function AgentDefinitionTab() {
         {storedAgentRows(details).map((row) => (
           <DefinitionRow key={row.label} row={row} />
         ))}
+        <Note>
+          {`Stored by SDK ${details.sdkVersion} on ${format(new Date(details.storedAt), "dd-MM-yyyy")}`}
+        </Note>
         {details.setupStale && (
           <Note tone="warning">
             This setup may be out of date. The agent changed after it was

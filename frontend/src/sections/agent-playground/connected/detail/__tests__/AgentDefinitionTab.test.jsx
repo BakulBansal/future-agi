@@ -122,7 +122,7 @@ describe("AgentDefinitionTab", () => {
     expect(await screen.findByText("Not saved")).toBeInTheDocument();
   });
 
-  it("shows a code agent's stored Agent as rows only", async () => {
+  it("shows a code agent's stored Agent, and who stored it when", async () => {
     serve(
       CODE_AGENT_DETAIL,
       { [CODE_VERSION_DETAIL.id]: CODE_VERSION_DETAIL },
@@ -130,7 +130,9 @@ describe("AgentDefinitionTab", () => {
     );
     renderAt(CODE_AGENT_DETAIL);
     expect(await screen.findByText("Source")).toBeInTheDocument();
-    expect(screen.queryByText(/Stored by SDK/)).toBeNull();
+    expect(
+      screen.getByText("Stored by SDK 0.2.3 on 14-10-2026"),
+    ).toBeInTheDocument();
     expect(screen.queryByText("uber_voice_agent")).toBeNull();
     expect(screen.queryByText(/may be out of date/i)).toBeNull();
   });

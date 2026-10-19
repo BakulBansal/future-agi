@@ -257,6 +257,8 @@ describe("hooks", () => {
     );
     expect(s.setupStale).toBe(false);
     expect(s.agent.name).toBe("uber_voice_agent");
+    expect(s.sdkVersion).toBe("0.2.3");
+    expect(s.storedAt).toBe("2026-10-14T11:50:22.212003Z");
   });
 
   it("useStoredAgent reads a 404 as nothing stored for the version", async () => {

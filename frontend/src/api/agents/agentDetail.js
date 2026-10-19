@@ -64,6 +64,8 @@ export const mapAgentDetail = (raw) => ({
 
 const toStoredAgent = (d) => ({
   agent: d.agent,
+  sdkVersion: d.sdk_version,
+  storedAt: d.stored_at,
   setupStale: !!d.setup_stale,
 });
 
