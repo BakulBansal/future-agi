@@ -22,6 +22,7 @@ from simulate.services.agent_setup import store_agent
 from simulate.tests.test_agent_setup_service import source_agent
 from tracer.models.project import Project
 from tracer.services.clickhouse.client import CHError
+from tracer.services.simulation_project import ensure_simulation_project
 
 URL = "/simulate/v3/test-executions/{}/traces/"
 NOTHING = {"project_id": None, "traces": []}
@@ -157,14 +158,9 @@ def _project(organization, workspace, user, name):
 
 
 @pytest.fixture
-def hidden_project(db, organization, workspace, user, agent, monkeypatch):
-    project = _project(organization, workspace, user, f"fi-simulation-{agent.id}")
-    monkeypatch.setattr(
-        run_traces_v3,
-        "simulation_project_id",
-        lambda of: str(project.id) if of.id == agent.id else None,
-    )
-    return project
+def hidden_project(db, agent):
+    # Made the way the platform makes it, so the run's project lookup is the real one.
+    return ensure_simulation_project(agent)
 
 
 @pytest.fixture
@@ -540,12 +536,10 @@ def test_the_executions_own_agent_decides_the_project(
     auth_client,
     organization,
     workspace,
-    user,
     agent,
     simulator_agent,
     scenario,
     clickhouse,
-    monkeypatch,
 ):
     own = AgentDefinition.objects.create(
         agent_name="own code agent",
@@ -556,16 +550,8 @@ def test_the_executions_own_agent_decides_the_project(
     )
     run = _own_agent_execution(organization, workspace, agent, simulator_agent, own)
     _store(run.agent_version, "source")
-    own_project = _project(organization, workspace, user, "own hidden")
-    run_agent_project = _project(organization, workspace, user, "run test hidden")
-    monkeypatch.setattr(
-        run_traces_v3,
-        "simulation_project_id",
-        lambda of: {
-            own.id: str(own_project.id),
-            agent.id: str(run_agent_project.id),
-        }.get(of.id),
-    )
+    own_project = ensure_simulation_project(own)
+    run_agent_project = ensure_simulation_project(agent)
     own_job = _job(
         organization, workspace, test_execution=run, terminal_at=timezone.now()
     )
@@ -591,9 +577,57 @@ def test_the_executions_own_agent_decides_the_project(
 
 
 def test_an_agent_with_no_hidden_project_lists_nothing(
-    auth_client, execution, job, call, clickhouse, source_setup, monkeypatch
+    auth_client, execution, job, call, clickhouse, source_setup
 ):
-    monkeypatch.setattr(run_traces_v3, "simulation_project_id", lambda agent: None)
+    assert not Project.with_simulation.filter(
+        simulation_agent=execution.agent_definition
+    ).exists()
+
+    assert _get(auth_client, execution, call).json() == NOTHING
+    assert clickhouse.calls == []
+
+
+def test_another_agents_hidden_project_is_not_this_runs(
+    auth_client,
+    organization,
+    workspace,
+    execution,
+    job,
+    call,
+    clickhouse,
+    source_setup,
+):
+    other = AgentDefinition.objects.create(
+        agent_name="other code agent",
+        agent_type=AgentDefinition.AgentTypeChoices.TEXT,
+        inbound=True,
+        organization=organization,
+        workspace=workspace,
+    )
+    other_project = ensure_simulation_project(other)
+    clickhouse.rows = [
+        (
+            str(other_project.id),
+            str(job.id),
+            _row("trace-other", timezone.now(), call_id=str(call.id)),
+        )
+    ]
+
+    assert _get(auth_client, execution, call).json() == NOTHING
+    assert clickhouse.calls == []
+
+
+def test_a_deleted_hidden_project_lists_nothing(
+    auth_client, execution, job, call, hidden_project, clickhouse, source_setup
+):
+    clickhouse.rows = [
+        (
+            str(hidden_project.id),
+            str(job.id),
+            _row("trace-a", timezone.now(), call_id=str(call.id)),
+        )
+    ]
+    Project.with_simulation.filter(pk=hidden_project.pk).update(deleted=True)
 
     assert _get(auth_client, execution, call).json() == NOTHING
     assert clickhouse.calls == []

@@ -16,16 +16,11 @@ from typing import Any
 
 from django.utils import timezone
 
-from simulate.models import (
-    AgentDefinition,
-    CallExecution,
-    HostedHarnessJob,
-    TestExecution,
-)
+from simulate.models import CallExecution, HostedHarnessJob, TestExecution
 from simulate.services.agent_setup import AgentNotFound, agent_summary
-from tracer.models.project import Project
 from tracer.services.clickhouse.client import get_clickhouse_client
 from tracer.services.clickhouse.v2.query_builders import columns as cols
+from tracer.services.simulation_project import agent_of_run, simulation_project_of
 
 RUN_MARK_KEY = "fi.simulation.job_id"
 CALL_MARK_KEY = "fi.simulator.call_execution_id"
@@ -56,20 +51,13 @@ class RunTraces:
     traces: list[RunTrace]
 
 
-def simulation_project_id(agent: AgentDefinition) -> str | None:
-    project = Project.with_simulation.filter(
-        simulation_agent=agent, deleted=False
-    ).first()
-    return str(project.id) if project else None
-
-
 def run_traces_source(execution: TestExecution) -> RunTracesSource | None:
     job = HostedHarnessJob.no_workspace_objects.filter(
         test_execution=execution, deleted=False
     ).first()
     if job is None:
         return None
-    agent = execution.agent_definition or execution.run_test.agent_definition
+    agent = agent_of_run(execution)
     if agent is None:
         return None
     version = execution.agent_version or execution.run_test.agent_version
@@ -81,10 +69,11 @@ def run_traces_source(execution: TestExecution) -> RunTracesSource | None:
         return None
     if summary.kind != TRACED_AGENT_KIND:
         return None
-    project_id = simulation_project_id(agent)
-    if project_id is None:
+    project = simulation_project_of(agent.id)
+    # The helper also returns a deleted project; its spans are not served.
+    if project is None or project.deleted:
         return None
-    return RunTracesSource(job=job, project_id=project_id)
+    return RunTracesSource(job=job, project_id=str(project.id))
 
 
 class CallNotInRun(ValueError):

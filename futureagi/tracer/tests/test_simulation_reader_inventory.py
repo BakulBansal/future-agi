@@ -1813,7 +1813,6 @@ TOKEN_FILES = {
     "tracer/models/project.py": "declares the column and the manager",
     "tracer/migrations/0115_project_simulation_agent.py": "adds the column",
     "tracer/services/simulation_project.py": "creates the project, opens it for a run",
-    "simulate/services/run_traces_v3.py": "the list of a run's traces",
 }
 
 _DETAIL = "tracer.services.clickhouse.v2.trace_detail_reads"
@@ -1874,13 +1873,11 @@ ENTRY_POINTS = {
     "read_span_detail": (None, frozenset({_SPAN_READS})),
     "read_physical_span_detail": (None, frozenset({_SPAN_READS})),
     # The functions that turn a run into the hidden project's id. A module that
-    # lists a run's traces adds itself here in the change that first calls them
-    # (``simulation_project_of`` has no caller yet).
+    # lists a run's traces adds itself here in the change that first calls them.
     "simulation_scope_for_run": (None, _RUN_SCOPE_CALLERS),
     "run_scope_project_ids": (None, _RUN_SCOPE_CALLERS),
     "list_run_traces": (None, _RUN_TRACES_CALLERS),
-    "simulation_project_id": (None, _RUN_TRACES_CALLERS),
-    "simulation_project_of": (None, frozenset()),
+    "simulation_project_of": (None, frozenset({"simulate/services/run_traces_v3.py"})),
     # The launcher makes or reads the hidden project of the agent one run is bound
     # to, in that run's organisation, so it can send the project's name and find the
     # agent's key by the project's workspace. It reads no span.
@@ -2210,9 +2207,15 @@ def test_every_spans_reading_function_is_filed():
 
 
 @pytest.mark.unit
-@pytest.mark.parametrize("name", ["list_run_traces", "simulation_project_id"])
-def test_the_run_traces_read_is_pinned_to_the_files_that_serve_it(name):
-    assert ENTRY_POINTS.get(name) == (None, _RUN_TRACES_CALLERS)
+@pytest.mark.parametrize(
+    ("name", "files"),
+    [
+        ("list_run_traces", _RUN_TRACES_CALLERS),
+        ("simulation_project_of", frozenset({"simulate/services/run_traces_v3.py"})),
+    ],
+)
+def test_the_run_traces_read_is_pinned_to_the_files_that_serve_it(name, files):
+    assert ENTRY_POINTS.get(name) == (None, files)
     # A pin on a name nothing uses any more would guard nothing.
     assert files_naming(name)
 
