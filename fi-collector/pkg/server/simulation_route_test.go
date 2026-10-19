@@ -63,8 +63,6 @@ func (f *routeFake) RouteSimulation(_ context.Context, _ string, traces ptrace.T
 	return auth.RouteOutcome{Hidden: routeHiddenID}, nil
 }
 
-func (f *routeFake) RoutingSnapshot() auth.RoutingSnapshot { return auth.RoutingSnapshot{} }
-
 func (f *routeFake) callCount() int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -116,16 +114,25 @@ type routeServer struct {
 
 func newRouteServer(t *testing.T, router *routeFake, opts ...Option) *routeServer {
 	t.Helper()
+	s := newServerOn(t, nil, append([]Option{WithSimulationRouter(router)}, opts...)...)
+	s.fake = router
+	return s
+}
+
+// newServerOn is a server on a ClickHouse stub, built through New with
+// authenticator and opts as a caller would.
+func newServerOn(t *testing.T, authenticator *auth.Authenticator, opts ...Option) *routeServer {
+	t.Helper()
 	ch := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusOK) }))
 	t.Cleanup(ch.Close)
 	writer := newSpanTestWriter(t, ch.URL, t.TempDir()+"/dl.jsonl")
 	t.Cleanup(func() { _ = writer.Close() })
 	usage := &routeUsage{}
 	logs := &bytes.Buffer{}
-	all := append([]Option{WithLogger(slog.New(slog.NewJSONHandler(logs, nil))), WithSimulationRouter(router)}, opts...)
+	all := append([]Option{WithLogger(slog.New(slog.NewJSONHandler(logs, nil)))}, opts...)
 	return &routeServer{
-		Server: New(Config{}, writer, nil, usage, NoopMetering{}, all...),
-		events: usage, fake: router, logs: logs,
+		Server: New(Config{}, writer, authenticator, usage, NoopMetering{}, all...),
+		events: usage, logs: logs,
 	}
 }
 
@@ -345,6 +352,102 @@ func TestHiddenRowsGoToNeitherCatalogNorNotifier(t *testing.T) {
 	}
 	if _, property, _ := s.pending(); property == 0 {
 		t.Fatal("a request of another key was not handed to the catalog")
+	}
+}
+
+func TestAuthenticatorIsTheDefaultRouterOfSandboxKeys(t *testing.T) {
+	// No router option: the authenticator routes. A zero authenticator has not
+	// checked its columns, so it refuses a sandbox-key request as retryable;
+	// a server with no router would drop the spans instead.
+	s := newServerOn(t, &auth.Authenticator{})
+	if s.router == nil {
+		t.Fatal("a server built with an authenticator has no router")
+	}
+
+	if _, err := s.export(sandboxKey(), routeRequest("customer-prod")); status.Code(err) != codes.Unavailable {
+		t.Fatalf("gRPC: err = %v, want Unavailable from the authenticator", err)
+	}
+	rec := s.post(t, sandboxKey(), routeRequest("customer-prod"), "application/x-protobuf")
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("HTTP status = %d, want 503 from the authenticator", rec.Code)
+	}
+	if strings.Contains(s.logs.String(), dropNoRouter) {
+		t.Fatalf("the request was dropped for want of a router: %s", s.logs.String())
+	}
+
+	// An option still replaces the default.
+	fake := &routeFake{}
+	replaced := newServerOn(t, &auth.Authenticator{}, WithSimulationRouter(fake))
+	if _, err := replaced.export(sandboxKey(), routeRequest("customer-prod")); err != nil {
+		t.Fatal(err)
+	}
+	if fake.callCount() != 1 {
+		t.Fatalf("the replacement router was called %d times", fake.callCount())
+	}
+}
+
+func TestHiddenProjectNamedByAnotherKeyReachesNeitherCatalogNorNotifier(t *testing.T) {
+	// A key that is not a sandbox key may name a hidden project: the rows are
+	// stored, but the project is not the key's to feed to the catalog or the
+	// notifier. The rest of the same request still is.
+	catalog := &propertyCatalogWriterStub{}
+	notifier := &routeNotifier{}
+	s := newRouteServer(t, &routeFake{}, WithPropertyCatalogWriter(catalog), WithTraceNotifier(notifier))
+
+	for name, send := range map[string]func(req ptraceotlp.ExportRequest) error{
+		"gRPC": func(req ptraceotlp.ExportRequest) error { _, err := s.export(systemKey(), req); return err },
+		"HTTP": func(req ptraceotlp.ExportRequest) error {
+			if rec := s.post(t, systemKey(), req, "application/x-protobuf"); rec.Code != http.StatusOK {
+				return errors.New(rec.Body.String())
+			}
+			return nil
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			s.pendMu.Lock()
+			s.pend, s.pendProperty, s.pendRoots = nil, nil, nil
+			s.pendMu.Unlock()
+
+			if err := send(routeRequest(routeHiddenName)); err != nil {
+				t.Fatal(err)
+			}
+			rows, property, roots := s.pending()
+			if rows != 2 || property != 0 || roots != 0 {
+				t.Fatalf("hidden request: %d rows, %d property rows, %d roots; want 2 stored and none handed on", rows, property, roots)
+			}
+
+			if err := send(routeRequest(routeHiddenName, "customer-prod")); err != nil {
+				t.Fatal(err)
+			}
+			s.pendMu.Lock()
+			defer s.pendMu.Unlock()
+			if len(s.pend) != 6 {
+				t.Fatalf("%d rows stored, want all 6", len(s.pend))
+			}
+			if len(s.pendProperty) != 2 {
+				t.Fatalf("%d property rows, want the 2 of the visible project", len(s.pendProperty))
+			}
+			for _, span := range s.pendProperty {
+				if span.Row["project_id"] != routeProdID {
+					t.Errorf("property row of project %v", span.Row["project_id"])
+				}
+			}
+			for _, root := range s.pendRoots {
+				if root.ProjectID == routeHiddenID {
+					t.Errorf("root of the hidden project: %+v", root)
+				}
+			}
+		})
+	}
+
+	s.drainNow(context.Background())
+	for _, span := range catalog.rows {
+		if span.Row["project_id"] == routeHiddenID {
+			t.Fatalf("the catalog was handed a row of the hidden project")
+		}
+	}
+	if strings.Contains(s.logs.String(), "observed_catalog") {
+		t.Fatalf("logs = %s", s.logs.String())
 	}
 }
 

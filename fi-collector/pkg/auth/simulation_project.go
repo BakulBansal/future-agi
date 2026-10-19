@@ -186,3 +186,14 @@ func isReservedProjectName(name string) bool {
 	parsed, err := uuid.Parse(rest)
 	return err == nil && parsed.String() == rest
 }
+
+// withoutReservedNames returns names less every reserved one.
+func withoutReservedNames(names []string) []string {
+	kept := make([]string, 0, len(names))
+	for _, name := range names {
+		if !isReservedProjectName(name) {
+			kept = append(kept, name)
+		}
+	}
+	return kept
+}

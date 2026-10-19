@@ -177,8 +177,7 @@ func main() {
 	// Admin HTTP server — internal only, health check endpoint.
 	go runAdmin(":9464", writer, authenticator, log)
 
-	go authenticator.WatchRevocations(ctx)
-	go authenticator.WatchRoutingColumns(ctx)
+	startAuthWatchers(ctx, authenticator)
 
 	logStarting(log, cfg)
 	runErr := srv.Run(ctx)
@@ -367,6 +366,21 @@ func applyEnvOverrides(log *slog.Logger, c *rootConfig) error {
 		return fmt.Errorf("observed catalog requires confirmed canonical inserts; async_insert without wait is unsupported")
 	}
 	return nil
+}
+
+// authWatchers is the part of the authenticator that runs in the background.
+type authWatchers interface {
+	WatchRevocations(context.Context)
+	WatchRoutingColumns(context.Context)
+}
+
+// startAuthWatchers runs the loops that keep the authenticator current until
+// ctx is cancelled: cache eviction on revocation, and the check for the
+// columns sandbox-key routing needs. Without the second, no sandbox key is
+// ever routed.
+func startAuthWatchers(ctx context.Context, a authWatchers) {
+	go a.WatchRevocations(ctx)
+	go a.WatchRoutingColumns(ctx)
 }
 
 // routingReporter is the part of the authenticator /healthz reads.

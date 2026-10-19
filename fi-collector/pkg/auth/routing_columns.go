@@ -36,13 +36,10 @@ const (
 type routingColumns struct {
 	v   atomic.Int32
 	log *slog.Logger
-	// onPresent runs on every move to present, so keys validated without the
-	// agent column are read again.
-	onPresent func()
 }
 
-func newRoutingColumns(log *slog.Logger, onPresent func()) *routingColumns {
-	return &routingColumns{log: log, onPresent: onPresent}
+func newRoutingColumns(log *slog.Logger) *routingColumns {
+	return &routingColumns{log: log}
 }
 
 func (c *routingColumns) state() columnState {
@@ -71,9 +68,6 @@ func (c *routingColumns) set(next columnState) {
 			"event", "simulation_routing_disabled", "reason", dropColumnMissing)
 	case columnsPresent:
 		log.Info("simulation routing columns present")
-		if c.onPresent != nil {
-			c.onPresent()
-		}
 	}
 }
 

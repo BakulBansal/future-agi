@@ -57,7 +57,6 @@ func dropReasonIndex(reason string) int {
 // by this interface.
 type SimulationRouter interface {
 	RouteSimulation(ctx context.Context, cacheKey string, traces ptrace.Traces, result *ResolveResult) (RouteOutcome, error)
-	RoutingSnapshot() RoutingSnapshot
 }
 
 var _ SimulationRouter = (*Authenticator)(nil)
@@ -199,7 +198,7 @@ func (a *Authenticator) RouteSimulation(
 		case errors.Is(err, ErrSimulationAgentDeleted):
 			return refuse(dropAgentDeleted, slog.LevelWarn)
 		case errors.Is(err, ErrSimulationNoWorkspace):
-			return refuse(dropTenantMismatch, slog.LevelError)
+			return refuse(dropTenantMismatch, slog.LevelWarn)
 		case errors.Is(err, ErrSimulationNameConflict):
 			return refuse(dropNameConflict, slog.LevelError)
 		case err != nil:
@@ -289,23 +288,6 @@ func (a *Authenticator) logger() *slog.Logger {
 		return a.log
 	}
 	return slog.Default()
-}
-
-// evictIngestKeys drops every cached sandbox-key result so that each is read
-// again with the statement that includes the agent.
-func (c *cache) evictIngestKeys() int {
-	if c == nil {
-		return 0
-	}
-	evicted := 0
-	c.m.Range(func(key, val any) bool {
-		if e, ok := val.(*cacheEntry); ok && e.result != nil && e.result.KeyType == keyTypeIngest {
-			c.m.Delete(key)
-			evicted++
-		}
-		return true
-	})
-	return evicted
 }
 
 // routeFinding is the refusal of one key's agent, kept for the life of the

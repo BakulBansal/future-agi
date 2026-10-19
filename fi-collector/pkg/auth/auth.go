@@ -81,7 +81,7 @@ func New(ctx context.Context, cfg Config, rdb *redis.Client, log *slog.Logger) (
 		rdb:      rdb,
 		log:      log,
 	}
-	a.columns = newRoutingColumns(log, func() { a.cache.evictIngestKeys() })
+	a.columns = newRoutingColumns(log)
 	pg.columns = a.columns
 	return a, nil
 }
@@ -203,6 +203,15 @@ func (a *Authenticator) ResolveProjectsForKey(ctx context.Context, cacheKey stri
 	}
 	if resolver == nil {
 		return errors.New("resolve projects requires a PostgreSQL project resolver")
+	}
+
+	// A sandbox key's hidden name is put in its map by routing alone; looking
+	// it up here could bind it to a visible project of the same name.
+	if result.KeyType == keyTypeIngest {
+		missing = withoutReservedNames(missing)
+		if len(missing) == 0 {
+			return nil
+		}
 	}
 
 	// Batch resolve from PG read pool

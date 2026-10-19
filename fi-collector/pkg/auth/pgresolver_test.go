@@ -9,6 +9,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -87,8 +88,9 @@ CREATE TABLE tracer_project (
 	simulation_agent_id uuid NULL REFERENCES simulate_agent_definition (id) ON DELETE CASCADE
 );
 CREATE UNIQUE INDEX unique_project_per_org_type ON tracer_project (name, trace_type, organization_id, workspace_id) WHERE NOT deleted;
--- Added after the name index, as the migration that added the column did, so
--- an insert checks the indexes in the order the platform's database does.
+-- Added after the name index, as the migration that added the column did. The
+-- race test relies on that order; a database restored from a dump may order
+-- the two indexes differently.
 ALTER TABLE tracer_project ADD CONSTRAINT tracer_project_simulation_agent_id_key UNIQUE (simulation_agent_id);
 `
 
@@ -134,7 +136,7 @@ func routingDatabase(t *testing.T) *pgxpool.Pool {
 }
 
 func routingResolver(pool *pgxpool.Pool, state columnState) *PGResolver {
-	columns := newRoutingColumns(slog.Default(), nil)
+	columns := newRoutingColumns(slog.Default())
 	columns.set(state)
 	return &PGResolver{read: pool, write: pool, columns: columns}
 }
@@ -309,6 +311,50 @@ func TestRoutingColumnCheckSeesBothColumns(t *testing.T) {
 	cancel()
 	if _, err := r.RoutingColumnsPresent(canceled); err == nil {
 		t.Fatal("a failed check returned no error")
+	}
+}
+
+// A resolver and an authenticator built through New must read and write one
+// column state: a check run through the authenticator changes the statement the
+// resolver uses, and a column that the resolver finds gone is seen by the
+// authenticator's health report.
+func TestRoutingColumnStateIsSharedThroughNew(t *testing.T) {
+	pool := routingDatabase(t)
+	f := routingFixture{t, pool}
+	ctx := context.Background()
+	org := uuid.NewString()
+	ws := f.workspace(org, true, true, false)
+	agent := f.agent(org, &ws, false)
+	api, secret := f.key("ingest", org, &ws, &agent)
+
+	dsn := pool.Config().ConnString()
+	a, err := New(ctx, Config{PGWrite: dsn, PGRead: dsn}, nil, slog.Default())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.Close()
+
+	// Nothing has been checked: the key is read with the old statement.
+	res, err := a.pg.ValidateKey(ctx, api, secret)
+	if err != nil || res == nil || !res.columnsMissing {
+		t.Fatalf("before any check: %+v, %v", res, err)
+	}
+
+	a.CheckRoutingColumns(ctx)
+	if !a.RoutingSnapshot().ColumnsPresent {
+		t.Fatal("the authenticator did not see both columns")
+	}
+	res, err = a.pg.ValidateKey(ctx, api, secret)
+	if err != nil || res == nil || res.columnsMissing || res.SimulationAgent.ID != agent {
+		t.Fatalf("the resolver did not use the state the authenticator set: %+v, %v", res, err)
+	}
+
+	f.exec(`ALTER TABLE accounts_orgapikey DROP COLUMN simulation_agent_id`)
+	if res, err = a.pg.ValidateKey(ctx, api, secret); err != nil || res == nil || !res.columnsMissing {
+		t.Fatalf("after the column went: %+v, %v", res, err)
+	}
+	if a.RoutingSnapshot().ColumnsPresent {
+		t.Fatal("the authenticator was not told that the resolver found the column gone")
 	}
 }
 
@@ -744,6 +790,59 @@ func TestEnsureSimulationProject(t *testing.T) {
 		}
 	})
 
+	t.Run("an existing project is answered with its own organization", func(t *testing.T) {
+		// A row that names the agent but belongs to another organization is
+		// reported as it is stored, so the caller can refuse it.
+		o := uuid.NewString()
+		ws := f.workspace(o, false, true, false)
+		agent := f.agent(o, &ws, false)
+		foreign := uuid.NewString()
+		known := uuid.NewString()
+		f.exec(`INSERT INTO tracer_project (id, name, organization_id, workspace_id, trace_type, model_type, source, tags, deleted, created_at, updated_at, simulation_agent_id)
+			VALUES ($1, $2, $3, $4, 'observe', 'GenerativeLLM', 'simulator', '[]', false, now(), now(), $5)`,
+			known, hiddenNamePrefix+agent, foreign, ws, agent)
+		got, err := r.EnsureSimulationProject(ctx, o, agent)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.ID != known || got.Created || got.OrganizationID != foreign || got.WorkspaceID != ws {
+			t.Fatalf("project = %+v, want %s in organization %s", got, known, foreign)
+		}
+	})
+
+	t.Run("the retry of a name conflict runs under the caller's context", func(t *testing.T) {
+		agent := f.agent(org, &ownWS, false)
+		f.exec(`INSERT INTO tracer_project (id, name, organization_id, workspace_id, model_type, trace_type, source, tags, deleted, created_at, updated_at)
+			VALUES ($1, $2, $3, $4, 'GenerativeLLM', 'observe', 'prototype', '[]', false, now(), now())`,
+			uuid.NewString(), hiddenNamePrefix+agent, org, ownWS)
+
+		// The caller's context ends as the first statement fails on the name.
+		// A retry that kept to it cannot run; a retry on a context of its own
+		// would run and report the conflict.
+		callCtx, cancel := context.WithCancel(ctx)
+		defer cancel()
+		tracer := &cancelOnError{cancel: cancel}
+		cfg := pool.Config()
+		cfg.ConnConfig.Tracer = tracer
+		traced, err := pgxpool.NewWithConfig(ctx, cfg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer traced.Close()
+		tr := &PGResolver{read: traced, write: traced, columns: r.columns}
+
+		_, err = tr.EnsureSimulationProject(callCtx, org, agent)
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("err = %v, want the retry to stop with the caller's context", err)
+		}
+		if errors.Is(err, ErrSimulationNameConflict) {
+			t.Fatal("the retry ran after the caller's context ended")
+		}
+		if n := tracer.statements.Load(); n != 1 {
+			t.Fatalf("%d statements reached the server, want 1", n)
+		}
+	})
+
 	t.Run("a database error is not a refusal of the agent", func(t *testing.T) {
 		agent := f.agent(org, &ownWS, false)
 		canceled, cancel := context.WithCancel(ctx)
@@ -753,4 +852,24 @@ func TestEnsureSimulationProject(t *testing.T) {
 			t.Fatalf("err = %v", err)
 		}
 	})
+}
+
+// cancelOnError ends a context when a statement fails, and counts the
+// project statements that were sent.
+type cancelOnError struct {
+	cancel     context.CancelFunc
+	statements atomic.Int32
+}
+
+func (c *cancelOnError) TraceQueryStart(ctx context.Context, _ *pgx.Conn, data pgx.TraceQueryStartData) context.Context {
+	if strings.Contains(data.SQL, "INSERT INTO tracer_project") {
+		c.statements.Add(1)
+	}
+	return ctx
+}
+
+func (c *cancelOnError) TraceQueryEnd(_ context.Context, _ *pgx.Conn, data pgx.TraceQueryEndData) {
+	if data.Err != nil {
+		c.cancel()
+	}
 }

@@ -101,18 +101,29 @@ func (r *ResolveResult) MissingProjectsInWorkspace(workspaceID string, names []s
 	return r.MissingProjects(names), true
 }
 
-// ProjectIDsInWorkspace snapshots the project IDs that were resolved through
-// this authentication result. The server uses it as an in-memory sidecar
-// proof before handing canonical rows to the optional property writer.
+// ProjectIDsInWorkspace snapshots the ids of the visible projects that were
+// resolved through this authentication result. The server uses it as an
+// in-memory sidecar proof before handing canonical rows to the optional
+// property writer. A project under a reserved hidden name is left out.
 func (r *ResolveResult) ProjectIDsInWorkspace(workspaceID string) (map[string]struct{}, bool) {
+	return r.projectIDsInWorkspace(workspaceID, false)
+}
+
+// HiddenProjectIDsInWorkspace snapshots the ids of the projects resolved under
+// a reserved hidden name, which never feed the catalog or the notifier.
+func (r *ResolveResult) HiddenProjectIDsInWorkspace(workspaceID string) (map[string]struct{}, bool) {
+	return r.projectIDsInWorkspace(workspaceID, true)
+}
+
+func (r *ResolveResult) projectIDsInWorkspace(workspaceID string, hidden bool) (map[string]struct{}, bool) {
 	if r == nil || workspaceID == "" || workspaceID != r.WorkspaceID {
 		return nil, false
 	}
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	result := make(map[string]struct{}, len(r.Projects))
-	for _, id := range r.Projects {
-		if id != "" {
+	for name, id := range r.Projects {
+		if id != "" && isReservedProjectName(name) == hidden {
 			result[id] = struct{}{}
 		}
 	}

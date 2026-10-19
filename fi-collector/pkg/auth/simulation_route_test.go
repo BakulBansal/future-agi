@@ -76,7 +76,7 @@ func newRouter(t *testing.T, sim *routeSim) (*Authenticator, *bytes.Buffer) {
 	if sim != nil {
 		a.sim = sim
 	}
-	a.columns = newRoutingColumns(log, func() { a.cache.evictIngestKeys() })
+	a.columns = newRoutingColumns(log)
 	a.columns.set(columnsPresent)
 	logs.Reset()
 	return a, &logs
@@ -351,8 +351,8 @@ func TestAgentOfAnotherWorkspaceOrOrganizationIsDropped(t *testing.T) {
 		if err != nil || out.Dropped[dropTenantMismatch] != 2 {
 			t.Fatalf("outcome = %+v, err = %v", out, err)
 		}
-		if !strings.Contains(logs.String(), `"level":"ERROR"`) {
-			t.Fatalf("not logged at error: %s", logs.String())
+		if !strings.Contains(logs.String(), `"level":"WARN"`) || strings.Contains(logs.String(), `"level":"ERROR"`) {
+			t.Fatalf("not logged at warning: %s", logs.String())
 		}
 	})
 }
@@ -705,6 +705,64 @@ func TestReservedNameIsNeverCreated(t *testing.T) {
 	}
 }
 
+// namesRecorder records the names a batch lookup was asked for.
+type namesRecorder struct {
+	countingProjectResolver
+	asked [][]string
+}
+
+func (r *namesRecorder) ResolveProjects(ctx context.Context, org, ws string, names []string) (map[string]string, error) {
+	r.asked = append(r.asked, append([]string(nil), names...))
+	return r.countingProjectResolver.ResolveProjects(ctx, org, ws, names)
+}
+
+func TestSandboxKeyNeverLooksUpAReservedNameInTheReplica(t *testing.T) {
+	// A visible project of the hidden name exists. Only routing may put the
+	// name in a sandbox key's map; a lookup would bind it to that project.
+	found := map[string]string{routeHiddenKey: routeProdID, "customer-prod": routeProdID}
+
+	t.Run("sandbox key", func(t *testing.T) {
+		resolver := &namesRecorder{countingProjectResolver: countingProjectResolver{found: found}}
+		a := &Authenticator{cache: newCache(time.Minute, time.Hour), projects: resolver, log: slog.Default()}
+		result := sandboxResult()
+		a.cache.putPositive("ck", result)
+		if err := a.ResolveProjectsForKey(context.Background(), "ck", result, []string{routeHiddenKey, "customer-prod"}); err != nil {
+			t.Fatal(err)
+		}
+		if len(resolver.asked) != 1 || strings.Join(resolver.asked[0], ",") != "customer-prod" {
+			t.Fatalf("lookups = %v, want only the ordinary name", resolver.asked)
+		}
+		if _, ok := result.GetProject(routeHiddenKey); ok {
+			t.Fatal("the reserved name was bound by a lookup")
+		}
+
+		only := sandboxResult()
+		a.cache.putPositive("ck2", only)
+		if err := a.ResolveProjectsForKey(context.Background(), "ck2", only, []string{routeHiddenKey}); err != nil {
+			t.Fatal(err)
+		}
+		if len(resolver.asked) != 1 {
+			t.Fatalf("a lookup of nothing was sent: %v", resolver.asked)
+		}
+	})
+
+	t.Run("another key is unchanged", func(t *testing.T) {
+		resolver := &namesRecorder{countingProjectResolver: countingProjectResolver{found: found}}
+		a := &Authenticator{cache: newCache(time.Minute, time.Hour), projects: resolver, log: slog.Default()}
+		result := &ResolveResult{OrgID: routeOrg, WorkspaceID: routeWorkspace, KeyType: "system", Projects: map[string]string{}}
+		a.cache.putPositive("ck", result)
+		if err := a.ResolveProjectsForKey(context.Background(), "ck", result, []string{routeHiddenKey, "customer-prod"}); err != nil {
+			t.Fatal(err)
+		}
+		if len(resolver.asked) != 1 || len(resolver.asked[0]) != 2 {
+			t.Fatalf("lookups = %v, want both names", resolver.asked)
+		}
+		if id, ok := result.GetProject(routeHiddenKey); !ok || id != routeProdID {
+			t.Fatalf("reserved name = %q, %v", id, ok)
+		}
+	})
+}
+
 func TestIsReservedProjectName(t *testing.T) {
 	// routeAgent has no hex letters, so upper-casing it would change nothing.
 	lettered := "abcdef01-2345-4678-89ab-cdef01234567"
@@ -783,7 +841,7 @@ func TestMissingColumnDropsSandboxKeyRequestsOnly(t *testing.T) {
 
 	t.Run("not checked yet", func(t *testing.T) {
 		fresh, _ := newRouter(t, &routeSim{project: hiddenProject()})
-		fresh.columns = newRoutingColumns(slog.Default(), nil)
+		fresh.columns = newRoutingColumns(slog.Default())
 		traces := routeTraces("x")
 		_, err := fresh.RouteSimulation(context.Background(), "ck", traces, sandboxResult())
 		if err == nil {
@@ -798,22 +856,6 @@ func TestMissingColumnDropsSandboxKeyRequestsOnly(t *testing.T) {
 			t.Fatalf("another key's request was refused: %v", err)
 		}
 	})
-
-	t.Run("columns appear", func(t *testing.T) {
-		a.columns.set(columnsMissing)
-		a.cache.putPositive("sandbox", sandboxResult())
-		a.cache.putPositive("system", &ResolveResult{KeyType: "system", Projects: map[string]string{}})
-		a.columns.set(columnsPresent)
-		if _, status := a.cache.get("sandbox"); status != "miss" {
-			t.Error("a sandbox key read under the old statement stayed cached")
-		}
-		if _, status := a.cache.get("system"); status != "fresh" {
-			t.Error("another key's cache entry was evicted")
-		}
-		if !a.RoutingSnapshot().ColumnsPresent {
-			t.Error("snapshot says the columns are missing")
-		}
-	})
 }
 
 type fakeChecker struct {
@@ -825,7 +867,7 @@ func (c *fakeChecker) RoutingColumnsPresent(context.Context) (bool, error) { ret
 
 func TestColumnCheckKeepsTheLastStateOnError(t *testing.T) {
 	a, _ := newRouter(t, nil)
-	a.columns = newRoutingColumns(slog.Default(), nil)
+	a.columns = newRoutingColumns(slog.Default())
 	checker := &fakeChecker{present: true}
 	a.checker = checker
 
@@ -846,7 +888,7 @@ func TestColumnCheckKeepsTheLastStateOnError(t *testing.T) {
 
 	// A first check that fails leaves the state unknown.
 	b, _ := newRouter(t, nil)
-	b.columns = newRoutingColumns(slog.Default(), nil)
+	b.columns = newRoutingColumns(slog.Default())
 	b.checker = &fakeChecker{err: errors.New("connection refused")}
 	b.CheckRoutingColumns(context.Background())
 	if b.columns.state() != columnsUnknown {
@@ -880,7 +922,7 @@ func TestWatchRetriesQuicklyWhileTheColumnStateIsUnknown(t *testing.T) {
 	previous := columnRetryInterval
 	columnRetryInterval = 10 * time.Millisecond
 	a, _ := newRouter(t, nil)
-	a.columns = newRoutingColumns(slog.Default(), nil)
+	a.columns = newRoutingColumns(slog.Default())
 	checker := &scriptedChecker{}
 	a.checker = checker
 

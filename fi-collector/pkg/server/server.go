@@ -372,7 +372,7 @@ func (h *otlpHandler) Export(ctx context.Context, req ptraceotlp.ExportRequest) 
 	// the existing org/project behavior but deliberately does not add a
 	// workspace attribute to the canonical span payload.
 	var propertyOrganizationID, propertyWorkspaceID string
-	var propertyProjectIDs map[string]struct{}
+	var propertyProjectIDs, hiddenProjectIDs map[string]struct{}
 	var routed auth.RouteOutcome
 	if result := auth.FromContext(ctx); result != nil {
 		propertyOrganizationID, propertyWorkspaceID = result.OrgID, result.WorkspaceID
@@ -395,6 +395,7 @@ func (h *otlpHandler) Export(ctx context.Context, req ptraceotlp.ExportRequest) 
 		}
 		var scoped bool
 		propertyProjectIDs, scoped = result.ProjectIDsInWorkspace(propertyWorkspaceID)
+		hiddenProjectIDs, _ = result.HiddenProjectIDsInWorkspace(propertyWorkspaceID)
 		if !scoped {
 			return ptraceotlp.NewExportResponse(), status.Error(codes.InvalidArgument, "auth project/workspace scope mismatch")
 		}
@@ -404,7 +405,7 @@ func (h *otlpHandler) Export(ctx context.Context, req ptraceotlp.ExportRequest) 
 	if err != nil {
 		return ptraceotlp.NewExportResponse(), err
 	}
-	h.s.enqueueRouted(rows, ids, routed, propertyOrganizationID, propertyWorkspaceID, propertyProjectIDs)
+	h.s.enqueueRouted(rows, ids, routed, propertyOrganizationID, propertyWorkspaceID, propertyProjectIDs, hiddenProjectIDs)
 
 	payloadBytes, _ := req.MarshalProto()
 	h.s.emitUsage(ctx, req.Traces(), int64(len(payloadBytes)))
@@ -484,7 +485,7 @@ func (s *Server) handleHTTPTraces(w http.ResponseWriter, r *http.Request) {
 
 	// Keep the authenticated workspace out-of-band; see the gRPC path above.
 	var propertyOrganizationID, propertyWorkspaceID string
-	var propertyProjectIDs map[string]struct{}
+	var propertyProjectIDs, hiddenProjectIDs map[string]struct{}
 	var routed auth.RouteOutcome
 	if result := auth.FromContext(r.Context()); result != nil {
 		propertyOrganizationID, propertyWorkspaceID = result.OrgID, result.WorkspaceID
@@ -511,6 +512,7 @@ func (s *Server) handleHTTPTraces(w http.ResponseWriter, r *http.Request) {
 		}
 		var scoped bool
 		propertyProjectIDs, scoped = result.ProjectIDsInWorkspace(propertyWorkspaceID)
+		hiddenProjectIDs, _ = result.HiddenProjectIDsInWorkspace(propertyWorkspaceID)
 		if !scoped {
 			http.Error(w, "auth project/workspace scope mismatch", http.StatusBadRequest)
 			return
@@ -523,7 +525,7 @@ func (s *Server) handleHTTPTraces(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "convert: "+err.Error(), http.StatusBadRequest)
 		return
 	}
-	s.enqueueRouted(rows, ids, routed, propertyOrganizationID, propertyWorkspaceID, propertyProjectIDs)
+	s.enqueueRouted(rows, ids, routed, propertyOrganizationID, propertyWorkspaceID, propertyProjectIDs, hiddenProjectIDs)
 
 	s.emitUsage(r.Context(), req.Traces(), int64(len(body)))
 
@@ -603,11 +605,11 @@ func partialSuccessResponse(routed auth.RouteOutcome) ptraceotlp.ExportResponse 
 	return resp
 }
 
-// enqueueRouted parks the rows of a request. A routed request belongs wholly
-// to a hidden project, which neither the observed catalog nor the stored-root
-// notifier may see, so it is parked without a tenant scope: both then skip its
-// rows, and the catalog does not record a scope failure for every drain that
-// carries them.
+// enqueueRouted parks the rows of a request. Rows of a hidden project, whether
+// routing put the whole request there or another key's request names one,
+// neither the observed catalog nor the stored-root notifier may see, so they
+// are parked without a tenant scope: both then skip them, and the catalog does
+// not record a scope failure for every drain that carries them.
 func (s *Server) enqueueRouted(
 	rows []map[string]any,
 	ids *curatedwriter.Batch,
@@ -615,10 +617,33 @@ func (s *Server) enqueueRouted(
 	organizationID string,
 	workspaceID string,
 	workspaceProjectIDs map[string]struct{},
+	hiddenProjectIDs map[string]struct{},
 ) {
 	if routed.Hidden != "" {
 		s.enqueue(rows, ids)
 		return
+	}
+	if len(hiddenProjectIDs) > 0 {
+		var visible, hidden []map[string]any
+		for _, row := range rows {
+			if projectID, _ := row["project_id"].(string); projectID != "" {
+				if _, isHidden := hiddenProjectIDs[projectID]; isHidden {
+					hidden = append(hidden, row)
+					continue
+				}
+			}
+			visible = append(visible, row)
+		}
+		if len(hidden) > 0 {
+			// The payload's identities go with the visible rows, or with the
+			// hidden ones when nothing else is left.
+			if len(visible) == 0 {
+				s.enqueue(hidden, ids)
+				return
+			}
+			s.enqueue(hidden, nil)
+			rows = visible
+		}
 	}
 	s.enqueueScoped(rows, ids, organizationID, workspaceID, workspaceProjectIDs)
 }
