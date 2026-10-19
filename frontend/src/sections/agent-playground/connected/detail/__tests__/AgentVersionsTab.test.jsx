@@ -323,15 +323,13 @@ describe("AgentVersionsTab", () => {
     ).toBeNull();
   });
 
-  it("previews Compare under a Coming soon note", async () => {
+  it("shows Compare as a plain Coming soon card", async () => {
     renderTab();
     const region = await screen.findByRole("region", { name: "Compare" });
     expect(
       within(region).getByText(/Compare any two versions/),
     ).toBeInTheDocument();
     expect(within(region).getByLabelText("Coming soon")).toBeInTheDocument();
-    expect(within(region).getByTestId("coming-soon-preview")).toHaveTextContent(
-      "prompts/system.md",
-    );
+    expect(within(region).queryByText(/prompts\/system\.md/)).toBeNull();
   });
 });

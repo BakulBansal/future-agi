@@ -193,7 +193,7 @@ describe("AgentDefinitionTab", () => {
     ).toBe(true);
   });
 
-  it("previews File structure under a Coming soon note", async () => {
+  it("shows File structure as a plain Coming soon card", async () => {
     serve(HOSTED_AGENT_DETAIL, { "v2-id": HOSTED_VERSION_DETAIL });
     renderAt(HOSTED_AGENT_DETAIL);
     const region = await screen.findByRole("region", {
@@ -203,9 +203,9 @@ describe("AgentDefinitionTab", () => {
       within(region).getByText(/Browse the files we read from your agent/),
     ).toBeInTheDocument();
     expect(within(region).getByLabelText("Coming soon")).toBeInTheDocument();
-    expect(within(region).getByTestId("coming-soon-preview")).toHaveTextContent(
-      "agent.yaml",
-    );
+    // No sample files dressed up with the real version.
+    expect(within(region).queryByText("agent.yaml")).toBeNull();
+    expect(within(region).queryByText(/files · v/)).toBeNull();
   });
 
   it("shows label and value rows while the version loads", async () => {

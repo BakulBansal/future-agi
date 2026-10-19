@@ -5,8 +5,7 @@ import { Box, Button, Skeleton, Stack, Typography } from "@mui/material";
 import { useScrollEnd } from "src/hooks/use-scroll-end";
 import { alpha } from "@mui/material/styles";
 import EmptyState from "src/sections/simulate/environments/components/EmptyState";
-import ComingSoonPreview from "./ComingSoonPreview";
-import CompareVersionsPreview from "./previews/CompareVersionsPreview";
+import ComingSoonCard from "./ComingSoonCard";
 import { Card, LineSkeleton } from "./bits";
 import { MONO } from "./format";
 import useAgentRoute from "./useAgentRoute";
@@ -77,7 +76,7 @@ const skeletons = (n) =>
 
 /**
  * Versions: a read-only timeline from the paginated versions list (the one
- * the Agent Definition page uses), newest first, and a preview of Compare.
+ * the Agent Definition page uses), newest first, and Compare (coming soon).
  */
 export default function AgentVersionsTab() {
   const { agentId, agent, versionId, selectVersion } = useAgentRoute();
@@ -280,12 +279,10 @@ export default function AgentVersionsTab() {
           {isFetchingNextPage && skeletons(2)}
         </Box>
       </Card>
-      <ComingSoonPreview
+      <ComingSoonCard
         title="Compare"
         description="Compare any two versions to see exactly what changed."
-      >
-        <CompareVersionsPreview />
-      </ComingSoonPreview>
+      />
     </Box>
   );
 }

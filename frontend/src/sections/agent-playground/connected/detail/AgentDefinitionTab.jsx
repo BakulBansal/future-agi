@@ -6,11 +6,10 @@ import { sourceLabel } from "../connectedAgentLabels";
 import { Card, LineSkeleton } from "./bits";
 import { MONO } from "./format";
 import { hostedRows, storedAgentRows } from "./definitionRows";
-import ComingSoonPreview from "./ComingSoonPreview";
+import ComingSoonCard from "./ComingSoonCard";
 import ObservabilityToggle, {
   ObservabilityToggleSkeleton,
 } from "./ObservabilityToggle";
-import FileStructurePreview from "./previews/FileStructurePreview";
 import useAgentRoute from "./useAgentRoute";
 
 function DefinitionRow({ row }) {
@@ -248,12 +247,10 @@ export default function AgentDefinitionTab() {
       ) : (
         <ObservabilityToggleSkeleton />
       )}
-      <ComingSoonPreview
+      <ComingSoonCard
         title="File structure"
         description="Browse the files we read from your agent, version by version."
-      >
-        <FileStructurePreview versionLabel={version?.label} />
-      </ComingSoonPreview>
+      />
     </Stack>
   );
 }
