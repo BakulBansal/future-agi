@@ -34,6 +34,7 @@ class GetAgentVersionTool(BaseTool):
 
         from simulate.models.agent_definition import AgentDefinition
         from simulate.models.agent_version import AgentVersion
+        from tracer.services.observability_switch import snapshot_as_shown
 
         try:
             agent = AgentDefinition.objects.get(id=params.agent_id)
@@ -91,7 +92,7 @@ class GetAgentVersionTool(BaseTool):
         # Configuration snapshot
         if version.configuration_snapshot:
             content += "\n\n### Configuration Snapshot\n\n"
-            snapshot = version.configuration_snapshot
+            snapshot = snapshot_as_shown(version.configuration_snapshot, agent)
             snapshot_pairs = []
             for key, value in list(snapshot.items())[:15]:
                 snapshot_pairs.append((key, truncate(str(value), 100)))

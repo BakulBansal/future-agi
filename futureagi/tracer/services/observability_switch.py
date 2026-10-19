@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING
 
 import structlog
 from django.db import connection, transaction
+from django.utils import timezone
 
 from accounts.models.workspace import Workspace
 from simulate.models import AgentDefinition
@@ -28,6 +29,7 @@ from tracer.models.observability_provider import (
     ProviderChoices,
 )
 from tracer.models.project import Project
+from tracer.services.simulation_project import agent_id_in_simulation_project_name
 from tracer.utils.observability_provider import create_observability_provider
 
 if TYPE_CHECKING:
@@ -101,14 +103,40 @@ def _read_provider_list():
     raise ProviderListNotPublished()
 
 
+def _is_dead(row: ObservabilityProvider) -> bool:
+    return row.deleted or row.project.deleted
+
+
+def observability_is_on(agent_definition: AgentDefinition) -> bool:
+    # The link may still point at a deleted row or project, which counts as off.
+    row = agent_definition.observability_provider
+    return row is not None and row.enabled and not _is_dead(row)
+
+
+def snapshot_as_shown(snapshot, agent_definition: AgentDefinition):
+    """A stored version snapshot as every read of it shows it.
+
+    A snapshot written while the project was live still says on. A form that
+    starts from it sends the on back, which would make a new project after the
+    user deleted the old one. So a stored on reads off while the link is off or
+    dead. A stored off is never turned on. The stored value is not rewritten.
+    """
+    if not isinstance(snapshot, dict) or not snapshot.get("observability_enabled"):
+        return snapshot
+    if observability_is_on(agent_definition):
+        return snapshot
+    return {**snapshot, "observability_enabled": False}
+
+
 def agent_is_source(agent_definition: AgentDefinition) -> bool:
     return _agent_summary(agent_definition.id).kind == "source"
 
 
-def _row_provider(agent_definition: AgentDefinition) -> str:
+def _row_provider(
+    agent_definition: AgentDefinition, summary: agent_setup.AgentSummary
+) -> str:
     # An unlisted code agent's own provider word may fail the row's validation.
     column = agent_definition.provider
-    summary = _agent_summary(agent_definition.id)
     if summary.kind != "source":
         return column
     try:
@@ -119,7 +147,12 @@ def _row_provider(agent_definition: AgentDefinition) -> str:
 
 
 def check_observability_prerequisites(agent_definition: AgentDefinition) -> None:
-    summary = _agent_summary(agent_definition.id)
+    _check_prerequisites(agent_definition, _agent_summary(agent_definition.id))
+
+
+def _check_prerequisites(
+    agent_definition: AgentDefinition, summary: agent_setup.AgentSummary
+) -> None:
     agent_id = str(agent_definition.id)
     try:
         listed = summary.provider in _read_provider_list().providers
@@ -167,24 +200,30 @@ def _refuse(agent_id: str, provider: str, missing: tuple[MissingPrerequisite, ..
     raise ObservabilityRefused(missing)
 
 
-def _resolved_workspace_id(organization: Organization, workspace) -> str:
+def _project_error(agent_id: str, reason: str) -> ObservabilityProjectError:
+    # The reason is one of our own words; the agent id is the only other field.
+    logger.error(
+        "observability_switch_project_error",
+        agent_definition_id=agent_id,
+        reason=reason,
+    )
+    return ObservabilityProjectError("observability project could not be created")
+
+
+def _resolved_workspace_id(organization: Organization, workspace, agent_id: str) -> str:
     # The project lands in the organization's default workspace when none is
     # given, so the name is checked there too.
     if workspace:
         try:
             return str(uuid.UUID(str(getattr(workspace, "id", workspace))))
         except ValueError as error:
-            raise ObservabilityProjectError(
-                "observability project could not be created"
-            ) from error
+            raise _project_error(agent_id, "bad_workspace_id") from error
     try:
         default = Workspace.objects.get(
             organization=organization, is_default=True, is_active=True
         )
     except Workspace.DoesNotExist as error:
-        raise ObservabilityProjectError(
-            "observability project could not be created"
-        ) from error
+        raise _project_error(agent_id, "no_default_workspace") from error
     return str(default.id)
 
 
@@ -242,7 +281,8 @@ def _project_name_for_new_row(
 
     Must run inside the transaction that creates the row, which keeps the lock.
     """
-    workspace_id = _resolved_workspace_id(organization, workspace)
+    agent_id = str(agent_definition.id)
+    workspace_id = _resolved_workspace_id(organization, workspace, agent_id)
     _lock_workspace_projects(organization, workspace_id)
     name = agent_definition.agent_name
     candidates = (
@@ -250,9 +290,13 @@ def _project_name_for_new_row(
         *(_tagged_name(name, tag) for tag in _agent_tags(agent_definition)),
     )
     for candidate in candidates:
+        if agent_id_in_simulation_project_name(candidate) is not None:
+            # A name reserved for a hidden project is refused at the create, and
+            # the name check cannot see hidden projects, so it is never offered.
+            continue
         if not _project_name_taken(organization, workspace_id, candidate):
             return candidate
-    raise ObservabilityProjectError("observability project could not be created")
+    raise _project_error(agent_id, "names_exhausted")
 
 
 def set_agent_observability(
@@ -264,13 +308,33 @@ def set_agent_observability(
     workspace: Workspace | str | None,
 ) -> ObservabilityProvider | None:
     row = agent_definition.observability_provider
-    if row is not None:
-        if row.project.deleted:
-            agent_definition.observability_provider = None
-            agent_definition.save(
-                update_fields=["observability_provider", "updated_at"]
+    if row is not None and _is_dead(row):
+        # A deleted row or project is never reused. Cleared only while the link
+        # is still the dead one, so a new link another request made meanwhile
+        # is kept and switched instead.
+        cleared = AgentDefinition.no_workspace_objects.filter(
+            pk=agent_definition.pk, observability_provider_id=row.pk
+        ).update(observability_provider=None, updated_at=timezone.now())
+        if not cleared:
+            # The primary: a lagging replica would still show the dead link.
+            agent_definition.refresh_from_db(
+                using="default", fields=["observability_provider"]
             )
-            return None
+            if agent_definition.observability_provider_id != row.pk:
+                return set_agent_observability(
+                    agent_definition=agent_definition,
+                    enabled=enabled,
+                    user_id=user_id,
+                    organization=organization,
+                    workspace=workspace,
+                )
+        agent_definition.observability_provider = None
+        # The user deleted the project, so the link is off. Turning it on again
+        # makes a new project and row, as a deleted row alone does. A save with
+        # false makes nothing. The turn-on path below locks the agent row and
+        # re-reads the link, so two quick turn-ons still make one project.
+        row = None
+    if row is not None:
         if enabled and not row.enabled:
             check_observability_prerequisites(agent_definition)
         # Only these columns, so any other column written meanwhile is kept.
@@ -279,7 +343,9 @@ def set_agent_observability(
         return row
     if not enabled:
         return None
-    check_observability_prerequisites(agent_definition)
+    # Read once: the check and the row's provider word both need it.
+    summary = _agent_summary(agent_definition.id)
+    _check_prerequisites(agent_definition, summary)
     with transaction.atomic():
         # A second turn-on of this agent that reaches here finds the first one's row.
         locked = AgentDefinition.no_workspace_objects.select_for_update(
@@ -302,9 +368,16 @@ def set_agent_observability(
             project_name=_project_name_for_new_row(
                 agent_definition, organization, workspace
             ),
-            provider=_row_provider(agent_definition),
+            provider=_row_provider(agent_definition, summary),
         )
         if not isinstance(row, ObservabilityProvider):
+            # The helper returns its errors instead of raising. Their text can
+            # carry the free-text provider word or name, so only names and codes.
+            logger.error(
+                "observability_switch_project_error",
+                agent_definition_id=str(agent_definition.id),
+                **_error_summary(row),
+            )
             raise ObservabilityProjectError(
                 "observability project could not be created"
             )
@@ -312,6 +385,24 @@ def set_agent_observability(
         # Only the link, so the caller's stale copy of other fields is not written.
         agent_definition.save(update_fields=["observability_provider", "updated_at"])
     return row
+
+
+def _error_summary(errors) -> dict:
+    if not isinstance(errors, dict):
+        return {"error_type": type(errors).__name__}
+    details = errors.get("details") if "error" in errors else errors
+    if not isinstance(details, dict):
+        return {"error_type": type(details).__name__}
+    return {
+        "fields": sorted(str(field) for field in details),
+        "codes": sorted(
+            {
+                str(getattr(item, "code", "unknown"))
+                for items in details.values()
+                for item in (items if isinstance(items, list) else [items])
+            }
+        ),
+    }
 
 
 def refusal_body(error: ObservabilityRefused) -> dict:

@@ -53,6 +53,7 @@ from tfc.utils.pagination import ExtendedPageNumberPagination
 from tracer.services.observability_switch import (
     ObservabilityRefused,
     agent_is_source,
+    observability_is_on,
     refusal_body,
     set_agent_observability,
 )
@@ -325,17 +326,16 @@ class CreateAgentVersionView(APIView):
 
                 if observability_enabled is None:
                     # An absent field leaves a code agent's switch as it is.
-                    row = agent.observability_provider
-                    observability_enabled = bool(
-                        row is not None and row.enabled and agent_is_source(agent)
-                    )
+                    observability_enabled = observability_is_on(
+                        agent
+                    ) and agent_is_source(agent)
                 set_agent_observability(
                     agent_definition=agent,
                     enabled=observability_enabled,
                     user_id=str(request.user.id),
                     organization=getattr(request, "organization", None)
                     or request.user.organization,
-                    workspace=getattr(request.user, "workspace", None),
+                    workspace=agent.workspace,
                 )
 
                 # Re-snapshot now that ProviderCredentials exist (LiveKit fields)
