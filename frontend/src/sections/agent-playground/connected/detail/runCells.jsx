@@ -9,7 +9,7 @@ const NEUTRAL_BAR = "rgba(161,161,170,.75)";
 // completed, failed, cancelled.
 const IN_PROGRESS = ["pending", "running", "evaluating", "cancelling"];
 
-const isRunning = (run) => IN_PROGRESS.includes(run.status);
+export const isRunning = (run) => IN_PROGRESS.includes(run.status);
 
 export const runPath = (run) =>
   run.kind === "environment" && run.environment

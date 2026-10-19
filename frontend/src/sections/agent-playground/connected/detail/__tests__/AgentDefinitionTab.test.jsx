@@ -18,6 +18,9 @@ import {
 } from "src/api/agents/_fixtures/agentDetail";
 import AgentDefinitionTab from "../AgentDefinitionTab";
 
+const auth = { role: "Owner" };
+vi.mock("src/auth/hooks", () => ({ useAuthContext: () => auth }));
+
 vi.mock("src/utils/axios", () => ({
   default: { get: vi.fn(), put: vi.fn() },
   endpoints: {
@@ -69,6 +72,7 @@ const renderAt = (agent, search = "") =>
   );
 
 beforeEach(() => {
+  auth.role = "Owner";
   axios.get.mockReset();
   axios.put.mockReset();
 });
@@ -226,6 +230,18 @@ describe("AgentDefinitionTab", () => {
         { observability_enabled: true },
       ),
     );
+  });
+
+  it("won't let a viewer change observability", async () => {
+    auth.role = "workspace_viewer";
+    serve(HOSTED_AGENT_DETAIL, { "v2-id": HOSTED_VERSION_DETAIL });
+    renderAt(HOSTED_AGENT_DETAIL);
+    const toggle = await screen.findByRole("checkbox", {
+      name: "Observability",
+    });
+    expect(toggle).toBeDisabled();
+    fireEvent.click(screen.getByText("Observability"));
+    expect(axios.put).not.toHaveBeenCalled();
   });
 
   it("puts the toggle back and shows why when it's refused", async () => {

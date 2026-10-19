@@ -7,6 +7,7 @@ import { paths } from "src/routes/paths";
 import StatusPill from "src/sections/simulate/environments/components/StatusPill";
 import { Card, LineSkeleton, Row } from "./bits";
 import { MONO, ago, rateTone } from "./format";
+import { isRunning } from "./runCells";
 import useAgentRoute from "./useAgentRoute";
 
 const COLUMNS = ["Environment", "Status", "Testing", "Last result"];
@@ -25,18 +26,17 @@ function LastResult({ env }) {
     run.agentVersion ? `agent v${run.agentVersion.number}` : null,
     run.completedAt ? ago(run.completedAt) : `started ${ago(run.startedAt)}`,
   ].filter(Boolean);
+  // Like Overview: a run still going has no final rate yet.
+  const rate = isRunning(run) ? null : run.passRate;
   return (
     <>
-      {run.passRate != null && (
-        <Box
-          component="span"
-          sx={{ fontWeight: 700, color: rateTone(run.passRate) }}
-        >
-          {`${run.passRate}%`}
+      {rate != null && (
+        <Box component="span" sx={{ fontWeight: 700, color: rateTone(rate) }}>
+          {`${rate}%`}
         </Box>
       )}
       <Box component="span" sx={{ color: "text.subtitle" }}>
-        {`${run.passRate != null ? " · " : ""}${rest.join(" · ")}`}
+        {`${rate != null ? " · " : ""}${rest.join(" · ")}`}
       </Box>
     </>
   );

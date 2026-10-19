@@ -11,6 +11,9 @@ import {
 import { alpha } from "@mui/material/styles";
 import Iconify from "src/components/iconify";
 import { useSetObservability } from "src/api/agents/agentDetail";
+import { useAuthContext } from "src/auth/hooks";
+import CustomTooltip from "src/components/tooltip";
+import { PERMISSIONS, RolePermission } from "src/utils/rolePermissionMapping";
 import { LineSkeleton } from "./bits";
 
 /**
@@ -21,6 +24,10 @@ export default function ObservabilityToggle({ agent }) {
   const [override, setOverride] = useState(null);
   const [error, setError] = useState(null);
   const mutation = useSetObservability(agent.id);
+  // Same gate as the old agent pages: viewers can't edit a simulation agent.
+  const { role } = useAuthContext();
+  const canEdit = !!RolePermission.SIMULATION_AGENT[PERMISSIONS.UPDATE][role];
+  const locked = !canEdit || mutation.isPending;
 
   const checked = override ?? !!agent.observabilityEnabled;
   const change = (next) => {
@@ -67,16 +74,26 @@ export default function ObservabilityToggle({ agent }) {
           sx={{
             flexShrink: 0,
             userSelect: "none",
-            cursor: mutation.isPending ? "default" : "pointer",
+            cursor: locked ? "default" : "pointer",
           }}
         >
-          <Switch
+          <CustomTooltip
+            show={!canEdit}
+            title="You don't have permission to change this"
+            placement="top"
+            arrow
             size="small"
-            checked={checked}
-            disabled={mutation.isPending}
-            onChange={(e) => change(e.target.checked)}
-            inputProps={{ "aria-label": "Observability" }}
-          />
+          >
+            <span>
+              <Switch
+                size="small"
+                checked={checked}
+                disabled={locked}
+                onChange={(e) => change(e.target.checked)}
+                inputProps={{ "aria-label": "Observability" }}
+              />
+            </span>
+          </CustomTooltip>
           <Typography sx={{ typography: "s2", fontWeight: 600, ml: 0.5 }}>
             Observability
           </Typography>

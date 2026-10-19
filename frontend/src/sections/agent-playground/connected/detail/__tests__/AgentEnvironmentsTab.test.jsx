@@ -103,6 +103,32 @@ describe("AgentEnvironmentsTab", () => {
     );
   });
 
+  it("shows no pass rate while the last run is still going", () => {
+    envState.current = {
+      isLoading: false,
+      isError: false,
+      data: [
+        {
+          id: "e5391b8a",
+          name: "ride-voice-agent",
+          status: "running",
+          lastRun: toRun({
+            ...ENVIRONMENT_RUN,
+            status: "running",
+            outcome_passed: 0,
+            outcome_failed: 1,
+            completed_at: null,
+            started_at: twoHoursAgo,
+          }),
+        },
+      ],
+    };
+    renderTab();
+    const cell = screen.getByTestId("last-result-e5391b8a");
+    expect(cell).not.toHaveTextContent("%");
+    expect(cell).toHaveTextContent("started 2h ago");
+  });
+
   it("says when an environment has no runs", () => {
     renderTab();
     expect(screen.getByTestId("last-result-e9999999")).toHaveTextContent(
