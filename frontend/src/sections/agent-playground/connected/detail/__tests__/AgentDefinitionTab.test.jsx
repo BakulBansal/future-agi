@@ -15,6 +15,7 @@ import {
   HOSTED_AGENT_DETAIL,
   HOSTED_VERSION_DETAIL,
   OBSERVABILITY_REFUSED,
+  STORED_AGENT,
 } from "src/api/agents/_fixtures/agentDetail";
 import AgentDefinitionTab from "../AgentDefinitionTab";
 
@@ -29,12 +30,29 @@ vi.mock("src/utils/axios", () => ({
       versionDetail: (id, v) =>
         `/simulate/agent-definitions/${id}/versions/${v}/`,
       edit: (id) => `/simulate/agent-definitions/${id}/edit/`,
+      storedAgent: (id, v) =>
+        `/simulate/agent-definitions/${id}/versions/${v}/agent/`,
     },
   },
 }));
 
-const serve = (detail, versions) =>
+const NOT_STORED = {
+  statusCode: 404,
+  code: "not_found",
+  message: "Agent not stored for this version",
+};
+
+// The agent, each version's detail, and the stored Agent of the versions in
+// `stored` (any other version answers 404, as the backend does).
+const serve = (detail, versions, stored = {}) =>
   axios.get.mockImplementation((url) => {
+    const agentOf = url.match(/\/versions\/([^/]+)\/agent\/$/);
+    if (agentOf) {
+      const body = stored[agentOf[1]];
+      return body
+        ? Promise.resolve({ data: body })
+        : Promise.reject(NOT_STORED);
+    }
     const v = Object.entries(versions).find(([id]) =>
       url.endsWith(`/versions/${id}/`),
     );
@@ -105,7 +123,11 @@ describe("AgentDefinitionTab", () => {
   });
 
   it("shows a code agent's stored Agent as rows only", async () => {
-    serve(CODE_AGENT_DETAIL, { [CODE_VERSION_DETAIL.id]: CODE_VERSION_DETAIL });
+    serve(
+      CODE_AGENT_DETAIL,
+      { [CODE_VERSION_DETAIL.id]: CODE_VERSION_DETAIL },
+      { [CODE_VERSION_DETAIL.id]: STORED_AGENT },
+    );
     renderAt(CODE_AGENT_DETAIL);
     expect(await screen.findByText("Source")).toBeInTheDocument();
     expect(screen.queryByText(/Stored by SDK/)).toBeNull();
@@ -114,15 +136,11 @@ describe("AgentDefinitionTab", () => {
   });
 
   it("warns when the stored setup is stale", async () => {
-    serve(CODE_AGENT_DETAIL, {
-      [CODE_VERSION_DETAIL.id]: {
-        ...CODE_VERSION_DETAIL,
-        agent_details: {
-          ...CODE_VERSION_DETAIL.agent_details,
-          setup_stale: true,
-        },
-      },
-    });
+    serve(
+      CODE_AGENT_DETAIL,
+      { [CODE_VERSION_DETAIL.id]: CODE_VERSION_DETAIL },
+      { [CODE_VERSION_DETAIL.id]: { ...STORED_AGENT, setup_stale: true } },
+    );
     renderAt(CODE_AGENT_DETAIL);
     expect(
       await screen.findByText(
@@ -133,12 +151,46 @@ describe("AgentDefinitionTab", () => {
 
   it("says when a code agent's version has nothing stored", async () => {
     serve(CODE_AGENT_DETAIL, {
-      [CODE_VERSION_DETAIL.id]: { ...CODE_VERSION_DETAIL, agent_details: null },
+      [CODE_VERSION_DETAIL.id]: CODE_VERSION_DETAIL,
     });
     renderAt(CODE_AGENT_DETAIL);
     expect(
       await screen.findByText("No definition stored for this version"),
     ).toBeInTheDocument();
+  });
+
+  it("reads the stored Agent from the Agent endpoint, not the version", async () => {
+    serve(
+      CODE_AGENT_DETAIL,
+      { [CODE_VERSION_DETAIL.id]: CODE_VERSION_DETAIL },
+      { [CODE_VERSION_DETAIL.id]: STORED_AGENT },
+    );
+    renderAt(CODE_AGENT_DETAIL);
+    await screen.findByText("Source");
+    expect(axios.get).toHaveBeenCalledWith(
+      `/simulate/agent-definitions/${CODE_AGENT_DETAIL.id}/versions/${CODE_VERSION_DETAIL.id}/agent/`,
+    );
+  });
+
+  it("doesn't ask for a stored Agent when the agent never stored one", async () => {
+    serve(HOSTED_AGENT_DETAIL, { "v2-id": HOSTED_VERSION_DETAIL });
+    renderAt(HOSTED_AGENT_DETAIL);
+    await screen.findByText("sk-a...9f2c");
+    expect(axios.get.mock.calls.some(([u]) => u.endsWith("/agent/"))).toBe(
+      false,
+    );
+  });
+
+  it("shows a hosted agent's configuration when it has nothing stored", async () => {
+    const hosted = { ...HOSTED_AGENT_DETAIL, agent_kind: "hosted" };
+    serve(hosted, {
+      "v2-id": { ...HOSTED_VERSION_DETAIL, agent_kind: "hosted" },
+    });
+    renderAt(hosted);
+    expect(await screen.findByText("sk-a...9f2c")).toBeInTheDocument();
+    expect(
+      axios.get.mock.calls.some(([u]) => u.endsWith("/v2-id/agent/")),
+    ).toBe(true);
   });
 
   it("previews File structure under a Coming soon note", async () => {

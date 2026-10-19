@@ -1,7 +1,7 @@
 import PropTypes from "prop-types";
 import React from "react";
 import { Box, Skeleton, Stack, Typography } from "@mui/material";
-import { useAgentVersion } from "src/api/agents/agentDetail";
+import { useAgentVersion, useStoredAgent } from "src/api/agents/agentDetail";
 import { sourceLabel } from "../connectedAgentLabels";
 import { Card, LineSkeleton } from "./bits";
 import { MONO } from "./format";
@@ -154,9 +154,14 @@ export default function AgentDefinitionTab() {
     isError,
   } = useAgentVersion(agentId, versionId);
 
-  const loading = !agent || isLoading;
-  const isCode = (version?.agentKind ?? agent?.agentKind) === "source";
-  const details = version?.agentDetails;
+  const kind = version?.agentKind ?? agent?.agentKind ?? null;
+  // Only an agent with a kind ever stored an Agent; asking for the others
+  // would always 404.
+  const stored = useStoredAgent(agentId, versionId, { enabled: !!kind });
+
+  const loading = !agent || isLoading || stored.isLoading;
+  const isCode = kind === "source";
+  const details = stored.data;
   const readFrom = agent
     ? sourceLabel(agent.source ?? version?.config?.provider)
     : "—";
@@ -170,6 +175,10 @@ export default function AgentDefinitionTab() {
     body = <Note>No definition stored for this version</Note>;
   } else if (isError && !version) {
     body = <Note>Couldn&apos;t load this version</Note>;
+  } else if (stored.isError) {
+    body = (
+      <Note>{stored.error?.message || "Couldn't load the stored Agent"}</Note>
+    );
   } else if (details) {
     body = (
       <>

@@ -1542,6 +1542,11 @@ export const endpoints = {
       apiPath("/simulate/agent-definitions/{agent_id}/runs/", {
         agent_id: id,
       }),
+    storedAgent: (id, version) =>
+      apiPath(
+        "/simulate/agent-definitions/{agent_id}/versions/{version_id}/agent/",
+        { agent_id: id, version_id: version },
+      ),
     delete: apiPath("/simulate/agent-definitions/"),
     getTestAnalytics: (agent, version) =>
       apiPath(

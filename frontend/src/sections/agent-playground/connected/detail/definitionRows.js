@@ -59,7 +59,7 @@ export const hostedRows = ({ config = {}, apiKey }) => {
   return rows;
 };
 
-/** What the SDK stored for a code agent version (agent_details.agent). */
+/** What the SDK stored for a code agent version (the stored Agent). */
 export const storedAgentRows = ({ agent }) => {
   const { model, voice, provider_ref: ref } = agent;
   const rows = [

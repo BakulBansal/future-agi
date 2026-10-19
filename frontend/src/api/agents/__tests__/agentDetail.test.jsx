@@ -14,6 +14,7 @@ import {
   useAgentRuns,
   useAgentVersion,
   useSetObservability,
+  useStoredAgent,
 } from "../agentDetail";
 import {
   AGENT_ENVIRONMENTS,
@@ -23,6 +24,7 @@ import {
   HOSTED_AGENT_DETAIL,
   HOSTED_VERSION_DETAIL,
   SIMULATE_RUN,
+  STORED_AGENT,
 } from "../_fixtures/agentDetail";
 
 vi.mock("src/utils/axios", () => ({
@@ -34,6 +36,8 @@ vi.mock("src/utils/axios", () => ({
         `/simulate/agent-definitions/${id}/versions/${v}/`,
       edit: (id) => `/simulate/agent-definitions/${id}/edit/`,
       runs: (id) => `/simulate/agent-definitions/${id}/runs/`,
+      storedAgent: (id, v) =>
+        `/simulate/agent-definitions/${id}/versions/${v}/agent/`,
     },
   },
 }));
@@ -162,12 +166,11 @@ describe("mapAgentDetail", () => {
 });
 
 describe("mapVersionDetail", () => {
-  it("maps a code agent's stored Agent", () => {
+  it("maps a code agent's version without the stored Agent", () => {
     const v = mapVersionDetail(CODE_VERSION_DETAIL);
     expect(v.label).toBe("v1");
     expect(v.agentKind).toBe("source");
-    expect(v.agentDetails.setupStale).toBe(false);
-    expect(v.agentDetails.agent.name).toBe("uber_voice_agent");
+    expect(v).not.toHaveProperty("agentDetails");
   });
 
   it("carries what a timeline row shows", () => {
@@ -182,7 +185,6 @@ describe("mapVersionDetail", () => {
 
   it("keeps a hosted version's snapshot and masked key", () => {
     const v = mapVersionDetail(HOSTED_VERSION_DETAIL);
-    expect(v.agentDetails).toBeNull();
     expect(v.apiKey).toBe("sk-a...9f2c");
     expect(v.config.provider).toBe("vapi");
   });
@@ -245,6 +247,47 @@ describe("hooks", () => {
         lastRun: null,
       },
     ]);
+  });
+
+  it("useStoredAgent reads the version's stored Agent", async () => {
+    axios.get.mockResolvedValue({ data: STORED_AGENT });
+    const s = await run(() => useStoredAgent("a1", "v1", { enabled: true }));
+    expect(axios.get).toHaveBeenCalledWith(
+      "/simulate/agent-definitions/a1/versions/v1/agent/",
+    );
+    expect(s.setupStale).toBe(false);
+    expect(s.agent.name).toBe("uber_voice_agent");
+  });
+
+  it("useStoredAgent reads a 404 as nothing stored for the version", async () => {
+    axios.get.mockRejectedValue({
+      statusCode: 404,
+      code: "not_found",
+      message: "Agent not stored for this version",
+    });
+    expect(await run(() => useStoredAgent("a1", "v1", { enabled: true }))).toBe(
+      null,
+    );
+  });
+
+  it("useStoredAgent reports any other failure", async () => {
+    axios.get.mockRejectedValue({ statusCode: 500, message: "boom" });
+    const { Wrapper } = makeWrapper();
+    const { result } = renderHook(
+      () => useStoredAgent("a1", "v1", { enabled: true }),
+      { wrapper: Wrapper },
+    );
+    await waitFor(() => expect(result.current.isError).toBe(true));
+    expect(result.current.error.message).toBe("boom");
+  });
+
+  it("useStoredAgent doesn't call when disabled", async () => {
+    const { Wrapper } = makeWrapper();
+    renderHook(() => useStoredAgent("a1", "v1", { enabled: false }), {
+      wrapper: Wrapper,
+    });
+    await new Promise((r) => setTimeout(r, 20));
+    expect(axios.get).not.toHaveBeenCalled();
   });
 
   it("useSetObservability sends only the switch and refetches the agent", async () => {

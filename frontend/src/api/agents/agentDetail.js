@@ -62,13 +62,10 @@ export const mapAgentDetail = (raw) => ({
   observabilityEnabled: raw.observability_enabled,
 });
 
-const toAgentDetails = (d) =>
-  d
-    ? {
-        agent: d.agent,
-        setupStale: !!d.setup_stale,
-      }
-    : null;
+const toStoredAgent = (d) => ({
+  agent: d.agent,
+  setupStale: !!d.setup_stale,
+});
 
 export const mapVersionDetail = (raw) => ({
   id: raw.id,
@@ -79,7 +76,6 @@ export const mapVersionDetail = (raw) => ({
   commitMessage: raw.commit_message || null,
   createdAt: raw.created_at ?? null,
   agentKind: raw.agent_kind ?? null,
-  agentDetails: toAgentDetails(raw.agent_details),
   apiKey: raw.api_key ?? null,
   config: raw.configuration_snapshot ?? {},
 });
@@ -125,6 +121,31 @@ export function useAgentVersion(agentId, versionId) {
       ),
     select: mapVersionDetail,
     enabled: !!agentId && !!versionId,
+  });
+}
+
+// The Agent a version stored (GET .../versions/{v}/agent/). The endpoint
+// answers 404 when the version stored none, which reads as null here; any
+// other failure is an error.
+export function useStoredAgent(agentId, versionId, { enabled = true } = {}) {
+  return useQuery({
+    queryKey: ["agents", "stored-agent", agentId, versionId],
+    queryFn: async () => {
+      try {
+        return unwrap(
+          (
+            await axios.get(
+              endpoints.agentDefinitions.storedAgent(agentId, versionId),
+            )
+          ).data,
+        );
+      } catch (e) {
+        if (e?.statusCode === 404) return null;
+        throw e;
+      }
+    },
+    select: (d) => (d ? toStoredAgent(d) : null),
+    enabled: !!agentId && !!versionId && enabled,
   });
 }
 

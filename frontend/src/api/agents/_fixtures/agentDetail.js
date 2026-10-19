@@ -122,7 +122,8 @@ export const SIMULATE_RUN = {
   completed_at: null,
 };
 
-export const STORED_AGENT_DETAILS = {
+// GET .../versions/{v}/agent/ for a code agent version that stored one.
+export const STORED_AGENT = {
   agent: {
     schema_version: "1.0",
     type: "voice",
@@ -199,7 +200,6 @@ export const CODE_VERSION_DETAIL = {
   is_active: true,
   is_latest: true,
   agent_kind: "source",
-  agent_details: STORED_AGENT_DETAILS,
   api_key: null,
   created_at: "2026-10-14T11:50:22.198107Z",
 };
@@ -226,7 +226,6 @@ export const HOSTED_VERSION_DETAIL = {
   is_active: true,
   is_latest: true,
   agent_kind: null,
-  agent_details: null,
   api_key: "sk-a...9f2c",
   created_at: "2026-10-15T09:00:00Z",
 };

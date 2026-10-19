@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   HOSTED_VERSION_DETAIL,
-  STORED_AGENT_DETAILS,
+  STORED_AGENT,
 } from "src/api/agents/_fixtures/agentDetail";
 import { mapVersionDetail } from "src/api/agents/agentDetail";
 import { hostedRows, storedAgentRows } from "../definitionRows";
@@ -63,7 +63,7 @@ describe("hostedRows", () => {
 
 describe("storedAgentRows", () => {
   const details = {
-    agent: STORED_AGENT_DETAILS.agent,
+    agent: STORED_AGENT.agent,
     sdkVersion: "0.2.3",
     storedAt: "2026-10-14T11:50:22.212003Z",
     setupStale: false,
