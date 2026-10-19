@@ -51,7 +51,6 @@ const ICONS = {
   alerts: icon("ic_alert"),
   falconAI: icon("ic_falcon_ai"),
   simulate: icon("ic_experiment"),
-  agentDefinition: icon("ic_project"),
   scenarios: icon("ic_sessions"),
   simulatorAgent: icon("ic_optimize"),
   test: icon("ic_evaluate"),
@@ -216,16 +215,6 @@ export function useNavData() {
             title: "Environment",
             path: paths.dashboard.simulate.environments.root,
             icon: <Iconify icon="solar:server-square-cloud-linear" />,
-          },
-          {
-            title: "Agent Definition",
-            path: paths.dashboard.simulate.agentDefinition,
-            icon: ICONS.agentDefinition,
-            eventTrigger: () => {
-              trackEvent(Events.navigationAlertDefinitionClicked, {
-                [PropertyName.click]: true,
-              });
-            },
           },
           {
             title: "Scenarios",

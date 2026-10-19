@@ -2,6 +2,7 @@
 import React from "react";
 import { Suspense } from "react";
 import { Navigate, Outlet, useLocation, useParams } from "react-router-dom";
+import { CONNECTED_AGENTS_PATH } from "src/sections/agent-playground/agentsTabs";
 
 import { AuthGuard } from "src/auth/guard";
 import DashboardLayout from "src/layouts/dashboard";
@@ -296,9 +297,6 @@ const CreateScenario = lazyWithRetry(
 const ScenarioDatasetView = lazyWithRetry(
   () => import("src/sections/scenarios/scenario-detail/ScenarioDatasetView"),
 );
-const AgentDefinitions = lazyWithRetry(
-  () => import("src/pages/dashboard/agent-definitions/AgentDefinitions"),
-);
 const AgentDetails = lazyWithRetry(
   () => import("src/pages/dashboard/agent-definitions/AgentDetails"),
 );
@@ -325,13 +323,15 @@ const SimulateEnvironmentsHome = lazyWithRetry(
   () => import("src/pages/dashboard/simulate/environments/EnvironmentsHome"),
 );
 const SimulatePrebuiltEnvironments = lazyWithRetry(
-  () => import("src/pages/dashboard/simulate/environments/PrebuiltEnvironments"),
+  () =>
+    import("src/pages/dashboard/simulate/environments/PrebuiltEnvironments"),
 );
 const SimulateUseTemplate = lazyWithRetry(
   () => import("src/pages/dashboard/simulate/environments/UseTemplate"),
 );
 const SimulateEnvironmentWorkspace = lazyWithRetry(
-  () => import("src/pages/dashboard/simulate/environments/EnvironmentWorkspace"),
+  () =>
+    import("src/pages/dashboard/simulate/environments/EnvironmentWorkspace"),
 );
 const WorkspaceExecutionDetail = lazyWithRetry(
   () =>
@@ -480,9 +480,7 @@ const PlaygroundAgentsTab = lazyWithRetry(
 );
 const AgentDetailLayout = lazyWithRetry(
   () =>
-    import(
-      "src/sections/agent-playground/connected/detail/AgentDetailLayout"
-    ),
+    import("src/sections/agent-playground/connected/detail/AgentDetailLayout"),
 );
 const AgentDetailIndexRedirect = lazyWithRetry(
   () =>
@@ -520,7 +518,6 @@ const Overview = lazyWithRetry(
 const Executions = lazyWithRetry(
   () => import("src/sections/agent-playground/Executions/Executions"),
 );
-
 
 const DashboardRoutes = () => {
   const location = useLocation();
@@ -1415,7 +1412,9 @@ export const dashboardRoutes = (
           // job and route straight to the workspace, which hosts the build. An
           // old /build link lands back on the Build entry tab.
           path: "environments/build",
-          element: <Navigate to="/dashboard/simulate/environments?tab=build" replace />,
+          element: (
+            <Navigate to="/dashboard/simulate/environments?tab=build" replace />
+          ),
         },
         {
           path: "environments/:envId",
@@ -1461,9 +1460,11 @@ export const dashboardRoutes = (
           path: "harness/:jobId",
           element: <HarnessDetail />,
         },
+        // Agent Definition is retiring: its old list link opens Connected
+        // agents. The agent and version pages under it still work.
         {
           path: "agent-definitions",
-          element: <AgentDefinitions />,
+          element: <Navigate to={CONNECTED_AGENTS_PATH} replace />,
         },
         {
           path: "agent-definitions/create-new-agent-definition",
