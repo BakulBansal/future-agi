@@ -412,6 +412,9 @@ const FalconAIPage = lazyWithRetry(
 const ErrorFeed = lazyWithRetry(
   () => import("src/pages/dashboard/error-feed/ErrorFeed"),
 );
+const ErrorFeedAlerts = lazyWithRetry(
+  () => import("src/pages/dashboard/error-feed/ErrorFeedAlerts"),
+);
 const ErrorFeedDetail = lazyWithRetry(
   () => import("src/pages/dashboard/error-feed/ErrorFeedDetail"),
 );
@@ -1319,6 +1322,14 @@ export const dashboardRoutes = (
           element: (
             <CapabilityGate feature={CAPABILITY.ERROR_FEED}>
               <ErrorFeed />
+            </CapabilityGate>
+          ),
+        },
+        {
+          path: "alerts",
+          element: (
+            <CapabilityGate feature={CAPABILITY.ERROR_FEED}>
+              <ErrorFeedAlerts />
             </CapabilityGate>
           ),
         },
