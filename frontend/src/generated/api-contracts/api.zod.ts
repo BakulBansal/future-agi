@@ -31550,6 +31550,18 @@ export const SimulateAgentDefinitionsListResponseItem = zod.object({
     .optional()
     .describe("Details of the model"),
   model: zod.string().min(1).optional().describe("Model of the agent"),
+  agent_kind: zod.string().min(1).optional(),
+  source: zod.string().min(1).optional(),
+  version_count: zod.number().optional(),
+  environment_count: zod.number().optional(),
+  environments: zod
+    .array(
+      zod.object({
+        id: zod.string().uuid(),
+        name: zod.string().min(1),
+      }),
+    )
+    .optional(),
 });
 export const SimulateAgentDefinitionsListResponse = zod.array(
   SimulateAgentDefinitionsListResponseItem,
@@ -31778,6 +31790,13 @@ export const SimulateAgentDefinitionsReadResponse = zod.object({
   livekit_agent_name: zod.string().optional(),
   livekit_config_json: zod.string().optional(),
   livekit_max_concurrency: zod.string().optional(),
+  versions: zod.array(zod.string()).optional(),
+  active_version: zod.record(zod.string(), zod.string()).optional(),
+  version_count: zod.number().optional(),
+  agent_kind: zod.string().min(1).optional(),
+  source: zod.string().min(1).optional(),
+  environment_count: zod.number().optional(),
+  observability_enabled: zod.boolean().optional(),
 });
 
 /**
@@ -31805,6 +31824,7 @@ export const simulateAgentDefinitionsEditUpdateBodyLivekitUrlMax = 500;
 export const simulateAgentDefinitionsEditUpdateBodyLivekitMaxConcurrencyMax = 25;
 
 export const SimulateAgentDefinitionsEditUpdateBody = zod.object({
+  observability_enabled: zod.boolean().optional(),
   agent_name: zod
     .string()
     .min(1)
@@ -31993,6 +32013,49 @@ export const SimulateAgentDefinitionsEditUpdateResponse = zod.object({
     .optional(),
 });
 
+export const SimulateAgentDefinitionsRunsListParams = zod.object({
+  agent_id: zod.string(),
+});
+
+export const simulateAgentDefinitionsRunsListQueryLimitDefault = 5;
+export const simulateAgentDefinitionsRunsListQueryLimitMax = 20;
+
+export const SimulateAgentDefinitionsRunsListQueryParams = zod.object({
+  limit: zod
+    .number()
+    .min(1)
+    .max(simulateAgentDefinitionsRunsListQueryLimitMax)
+    .default(simulateAgentDefinitionsRunsListQueryLimitDefault),
+});
+
+export const SimulateAgentDefinitionsRunsListResponse = zod.object({
+  results: zod
+    .array(
+      zod.object({
+        kind: zod.enum(["environment", "simulate"]),
+        test_execution_id: zod.string().uuid(),
+        run_test_id: zod.string().uuid(),
+        run_test_name: zod.string(),
+        run_number: zod.number(),
+        status: zod.string().min(1),
+        environment: zod.object({
+          id: zod.string().uuid(),
+          name: zod.string().min(1),
+        }),
+        agent_version: zod.object({
+          id: zod.string().uuid(),
+          version_number: zod.number(),
+        }),
+        outcome_passed: zod.number(),
+        outcome_failed: zod.number(),
+        outcome_skipped: zod.number(),
+        started_at: zod.string().datetime({ offset: true }),
+        completed_at: zod.string().datetime({ offset: true }),
+      }),
+    )
+    .optional(),
+});
+
 /**
  * Get all versions of a specific agent definition.
  */
@@ -32178,6 +32241,7 @@ export const SimulateAgentDefinitionsVersionsReadResponse = zod.object({
   is_active: zod.string().optional(),
   is_latest: zod.string().optional(),
   agent_kind: zod.string().min(1).optional(),
+  api_key: zod.string().min(1).optional(),
   created_at: zod.string().datetime({ offset: true }).optional(),
   updated_at: zod.string().datetime({ offset: true }).optional(),
 });
@@ -32260,6 +32324,7 @@ export const SimulateAgentDefinitionsVersionsActivateCreateResponse =
         is_active: zod.string().optional(),
         is_latest: zod.string().optional(),
         agent_kind: zod.string().min(1).optional(),
+        api_key: zod.string().min(1).optional(),
         created_at: zod.string().datetime({ offset: true }).optional(),
         updated_at: zod.string().datetime({ offset: true }).optional(),
       })
@@ -32763,6 +32828,7 @@ export const SimulateAgentDefinitionsVersionsRestoreCreateResponse = zod.object(
         is_active: zod.string().optional(),
         is_latest: zod.string().optional(),
         agent_kind: zod.string().min(1).optional(),
+        api_key: zod.string().min(1).optional(),
         created_at: zod.string().datetime({ offset: true }).optional(),
         updated_at: zod.string().datetime({ offset: true }).optional(),
       })
@@ -35280,6 +35346,7 @@ export const SimulateApiHarnessEnvironmentsListQueryParams = zod.object({
     .min(1)
     .max(simulateApiHarnessEnvironmentsListQueryLimitMax)
     .optional(),
+  agent_definition_id: zod.string().uuid().optional(),
 });
 
 export const SimulateApiHarnessEnvironmentsListResponse = zod.object({
@@ -35304,6 +35371,27 @@ export const SimulateApiHarnessEnvironmentsListResponse = zod.object({
       runs_count: zod.number(),
       last_updated: zod.string().datetime({ offset: true }),
       created_at: zod.string().datetime({ offset: true }),
+      last_run: zod.object({
+        kind: zod.enum(["environment", "simulate"]),
+        test_execution_id: zod.string().uuid(),
+        run_test_id: zod.string().uuid(),
+        run_test_name: zod.string(),
+        run_number: zod.number(),
+        status: zod.string().min(1),
+        environment: zod.object({
+          id: zod.string().uuid(),
+          name: zod.string().min(1),
+        }),
+        agent_version: zod.object({
+          id: zod.string().uuid(),
+          version_number: zod.number(),
+        }),
+        outcome_passed: zod.number(),
+        outcome_failed: zod.number(),
+        outcome_skipped: zod.number(),
+        started_at: zod.string().datetime({ offset: true }),
+        completed_at: zod.string().datetime({ offset: true }),
+      }),
     }),
   ),
 });
