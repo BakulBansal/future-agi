@@ -241,6 +241,8 @@ const DisplayPanel = ({
   onSetDefaultView,
   // Voice / Simulator
   isSimulator,
+  excludeSimulationCalls,
+  onToggleSimulationCalls,
 }) => {
   const isTraces = mode === "traces";
   const isUsers = mode === "users";
@@ -395,6 +397,14 @@ const DisplayPanel = ({
           <Divider sx={{ my: 0.5 }} />
 
           <SectionHeader>METRICS</SectionHeader>
+          {isSimulator && (
+            <PanelCheck
+              icon="mdi:phone-outline"
+              label="Show simulated calls"
+              checked={!excludeSimulationCalls}
+              onChange={onToggleSimulationCalls}
+            />
+          )}
           {showEvalToggle && (
             <PanelCheck
               icon="mdi:check-circle-outline"
@@ -564,6 +574,8 @@ DisplayPanel.propTypes = {
   onResetView: PropTypes.func,
   onSetDefaultView: PropTypes.func,
   isSimulator: PropTypes.bool,
+  excludeSimulationCalls: PropTypes.bool,
+  onToggleSimulationCalls: PropTypes.func,
 };
 
 export default React.memo(DisplayPanel);

@@ -308,15 +308,33 @@ describe("PrimaryGraph", () => {
     expect(body.observe_type).toBe("voice");
   });
 
-  it("never sends remove_simulation_calls for the Voice population", async () => {
+  it("excludes simulation calls from the Voice chart when the list does", async () => {
     renderWithQueryClient(
-      <PrimaryGraph observeIdOverride="project-override" observeType="voice" />,
+      <PrimaryGraph
+        observeIdOverride="project-override"
+        observeType="voice"
+        removeSimulationCalls
+      />,
     );
 
     await waitFor(() => expect(axios.post).toHaveBeenCalled());
     const [, body] = axios.post.mock.calls.at(-1);
     expect(body.observe_type).toBe("voice");
-    expect(body).not.toHaveProperty("remove_simulation_calls");
+    expect(body.remove_simulation_calls).toBe(true);
+  });
+
+  it("sends the simulation-call toggle only with the voice population", async () => {
+    renderWithQueryClient(
+      <PrimaryGraph
+        observeIdOverride="project-override"
+        removeSimulationCalls
+      />,
+    );
+
+    await waitFor(() => expect(axios.post).toHaveBeenCalled());
+    expect(axios.post.mock.calls.at(-1)[1]).not.toHaveProperty(
+      "remove_simulation_calls",
+    );
   });
 
   it("sends no population scope for an ordinary trace graph", async () => {
