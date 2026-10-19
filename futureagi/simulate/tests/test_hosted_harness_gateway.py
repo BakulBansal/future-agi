@@ -3535,6 +3535,8 @@ def _unbound_job():
         run_test_id=None,
         test_execution_id=None,
         payload=payload,
+        # A job with no environment of its own stands in for one.
+        environment=None,
     )
 
 
