@@ -1182,6 +1182,7 @@ import type {
   SpendSummaryResponseApi,
   StartEvalsProcessRequestApi,
   StopUserEvalRequestApi,
+  StoredAgentResponseApi,
   StreamStatusResponseApi,
   StripeWebhookRequestApi,
   StripeWebhookResponseApi,
@@ -56479,6 +56480,63 @@ export const simulateAgentDefinitionsVersionsActivateCreate = async (
   );
 };
 
+export type simulateAgentDefinitionsVersionsAgentListResponse200 = {
+  data: StoredAgentResponseApi;
+  status: 200;
+};
+
+export type simulateAgentDefinitionsVersionsAgentListResponse404 = {
+  data: ApiErrorWithDetailsResponseApi;
+  status: 404;
+};
+
+export type simulateAgentDefinitionsVersionsAgentListResponse500 = {
+  data: ApiErrorWithDetailsResponseApi;
+  status: 500;
+};
+
+export type simulateAgentDefinitionsVersionsAgentListResponseDefault = {
+  data: ManagementAPIErrorResponseApi;
+  status: Exclude<HTTPStatusCodes, 200 | 404 | 500>;
+};
+
+export type simulateAgentDefinitionsVersionsAgentListResponseSuccess =
+  simulateAgentDefinitionsVersionsAgentListResponse200 & {
+    headers: Headers;
+  };
+export type simulateAgentDefinitionsVersionsAgentListResponseError = (
+  | simulateAgentDefinitionsVersionsAgentListResponse404
+  | simulateAgentDefinitionsVersionsAgentListResponse500
+  | simulateAgentDefinitionsVersionsAgentListResponseDefault
+) & {
+  headers: Headers;
+};
+
+export type simulateAgentDefinitionsVersionsAgentListResponse =
+  | simulateAgentDefinitionsVersionsAgentListResponseSuccess
+  | simulateAgentDefinitionsVersionsAgentListResponseError;
+
+export const getSimulateAgentDefinitionsVersionsAgentListUrl = (
+  agentId: string,
+  versionId: string,
+) => {
+  return `/simulate/agent-definitions/${agentId}/versions/${versionId}/agent/`;
+};
+
+export const simulateAgentDefinitionsVersionsAgentList = async (
+  agentId: string,
+  versionId: string,
+  options?: RequestInit,
+): Promise<simulateAgentDefinitionsVersionsAgentListResponse> => {
+  return apiMutator<simulateAgentDefinitionsVersionsAgentListResponse>(
+    getSimulateAgentDefinitionsVersionsAgentListUrl(agentId, versionId),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
 export type simulateAgentDefinitionsVersionsCallExecutionsListResponse200 = {
   data: CallExecutionApi[];
   status: 200;
@@ -80608,6 +80666,9 @@ export const getTracerTraceVoiceCallDetailUrl = (
  * Query params:
 - trace_id or legacy traceId (required) — UUID of the voice call trace.
 - project_id (optional) — the project the call was opened from.
+- test_execution_id or call_execution_id (optional) — a run the caller
+  can read; the hidden simulation project of that run's agent is read
+  in place of the caller's projects.
  * @summary Return the heavy / detail-only fields for a single voice call.
  */
 export const tracerTraceVoiceCallDetail = async (
@@ -80690,6 +80751,9 @@ export const getTracerTraceReadUrl = (
 /**
  * Query params:
 - project_id (optional) — the project the trace was opened from.
+- test_execution_id or call_execution_id (optional) — a run the caller
+  can read; the hidden simulation project of that run's agent is read
+  in place of the caller's projects.
  * @summary Retrieve a trace by its ID.
  */
 export const tracerTraceRead = async (
