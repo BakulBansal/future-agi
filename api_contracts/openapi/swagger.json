@@ -58165,8 +58165,9 @@
                     {
                         "name": "call_execution_id",
                         "in": "query",
-                        "required": false,
-                        "type": "string"
+                        "required": true,
+                        "type": "string",
+                        "format": "uuid"
                     }
                 ],
                 "responses": {

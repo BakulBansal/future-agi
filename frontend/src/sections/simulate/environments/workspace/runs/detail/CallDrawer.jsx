@@ -4,6 +4,7 @@ import { Drawer } from "@mui/material";
 import ChatCallDrawer from "./ChatCallDrawer";
 import VoiceCallDrawer from "./VoiceCallDrawer";
 import { isVoiceCall } from "./callRouting";
+import useCallTraceOpen from "./useCallTraceOpen";
 
 /**
  * The per-call drawer. Opens on a trace row-click and routes to the matching
@@ -24,6 +25,7 @@ export default function CallDrawer({
 }) {
   const open = !!task;
   const voice = isVoiceCall(task, agentType);
+  const { traceOpen, onTracePanelMountedChange } = useCallTraceOpen();
 
   return (
     <Drawer
@@ -42,7 +44,12 @@ export default function CallDrawer({
       }}
       // The page behind stays readable — a call drawer acts on the run you were
       // just reading, matching the env SideDrawer / product TestDetailSideDrawer.
-      ModalProps={{ BackdropProps: { style: { backgroundColor: "transparent" } } }}
+      // The modal takes Escape and stops it, so an open trace never hears it and
+      // the call closes under it; with a trace open the key is left to the trace.
+      ModalProps={{
+        disableEscapeKeyDown: traceOpen,
+        BackdropProps: { style: { backgroundColor: "transparent" } },
+      }}
     >
       {task &&
         (voice ? (
@@ -54,6 +61,8 @@ export default function CallDrawer({
             onNext={onNext}
             hasPrev={hasPrev}
             hasNext={hasNext}
+            traceOpen={traceOpen}
+            onTracePanelMountedChange={onTracePanelMountedChange}
           />
         ) : (
           <ChatCallDrawer
@@ -64,6 +73,8 @@ export default function CallDrawer({
             onNext={onNext}
             hasPrev={hasPrev}
             hasNext={hasNext}
+            traceOpen={traceOpen}
+            onTracePanelMountedChange={onTracePanelMountedChange}
           />
         ))}
     </Drawer>

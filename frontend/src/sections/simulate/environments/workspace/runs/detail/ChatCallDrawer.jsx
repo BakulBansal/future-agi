@@ -13,7 +13,6 @@ import {
 } from "src/api/simulate-environments/runDetail";
 
 import { BUILD_TONES } from "../../../buildEnvironment/buildTones";
-import { useLLMTracingStoreShallow } from "src/sections/projects/LLMTracing/states";
 import ChatTranscriptPane from "./ChatTranscriptPane";
 import CallTracesPanel from "./CallTracesPanel";
 import { CALL_TRACES_COPY } from "./callTraces.constants";
@@ -93,11 +92,10 @@ export default function ChatCallDrawer({
   onNext,
   hasPrev = false,
   hasNext = false,
+  traceOpen = false,
+  onTracePanelMountedChange,
 }) {
   const [shareOpen, setShareOpen] = useState(false);
-  const traceOpen = useLLMTracingStoreShallow((state) =>
-    Boolean(state.traceDetailDrawerOpen),
-  );
   useEffect(() => {
     if (shareOpen || traceOpen) return undefined;
     const onKeyDown = (e) => {
@@ -118,8 +116,7 @@ export default function ChatCallDrawer({
   const [artifact, setArtifact] = useState("transcript");
   const { callDetail, isLoading } = useCallDetail(task.id);
   const callTraces = useCallTraces(executionId, task.id);
-  const hasTraces = !!callTraces.projectId || callTraces.isError;
-  const showTraces = hasTraces && artifact === "traces";
+  const showTraces = artifact === "traces";
 
   // The header and chips paint from the already-loaded row immediately, then
   // hydrate from the call detail once it resolves.
@@ -194,9 +191,7 @@ export default function ChatCallDrawer({
             sx={{ px: 1, borderBottom: "1px solid", borderColor: "divider", minHeight: 40 }}
           >
             <Tab value="transcript" label="Transcript" sx={{ minHeight: 40 }} />
-            {hasTraces && (
-              <Tab value="traces" label={CALL_TRACES_COPY.tab} sx={{ minHeight: 40 }} />
-            )}
+            <Tab value="traces" label={CALL_TRACES_COPY.tab} sx={{ minHeight: 40 }} />
           </CustomTabs>
 
           <Box {...ownsArrowKeys} sx={{ flex: 1, minHeight: 0, overflow: "auto", outline: "none" }}>
@@ -205,7 +200,9 @@ export default function ChatCallDrawer({
                 <CallTracesPanel
                   traces={callTraces.traces}
                   projectId={callTraces.projectId}
+                  testExecutionId={executionId}
                   isError={callTraces.isError}
+                  onMountedChange={onTracePanelMountedChange}
                 />
               </Box>
             ) : isLoading && turns.length === 0 ? (
@@ -354,4 +351,6 @@ ChatCallDrawer.propTypes = {
   onNext: PropTypes.func,
   hasPrev: PropTypes.bool,
   hasNext: PropTypes.bool,
+  traceOpen: PropTypes.bool,
+  onTracePanelMountedChange: PropTypes.func,
 };

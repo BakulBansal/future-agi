@@ -14,7 +14,9 @@ const MONO = "ui-monospace, Menlo, monospace";
 export default function CallTracesPanel({
   traces,
   projectId,
+  testExecutionId,
   isError = false,
+  onMountedChange,
 }) {
   const { setTraceDetailDrawerOpen, setVisibleTraces, resetStates } =
     useLLMTracingStoreShallow((state) => ({
@@ -29,7 +31,15 @@ export default function CallTracesPanel({
     );
   }, [traces, projectId, setVisibleTraces]);
 
-  useEffect(() => () => resetStates(), [resetStates]);
+  useEffect(() => {
+    onMountedChange?.(true);
+    return () => {
+      onMountedChange?.(false);
+      // resetStates leaves the URL key behind; the setter removes it.
+      setTraceDetailDrawerOpen(null);
+      resetStates();
+    };
+  }, [onMountedChange, setTraceDetailDrawerOpen, resetStates]);
 
   if (isError && traces.length === 0) {
     return (
@@ -46,7 +56,6 @@ export default function CallTracesPanel({
         <EmptyState
           icon="solar:graph-new-linear"
           title={CALL_TRACES_COPY.empty}
-          body={CALL_TRACES_COPY.emptyBody}
         />
       ) : (
         <Stack
@@ -59,7 +68,11 @@ export default function CallTracesPanel({
               key={trace.traceId}
               trace={trace}
               onOpen={() =>
-                setTraceDetailDrawerOpen({ traceId: trace.traceId, projectId })
+                setTraceDetailDrawerOpen({
+                  traceId: trace.traceId,
+                  projectId,
+                  testExecutionId,
+                })
               }
             />
           ))}
@@ -80,7 +93,9 @@ CallTracesPanel.propTypes = {
     }),
   ).isRequired,
   projectId: PropTypes.string,
+  testExecutionId: PropTypes.string,
   isError: PropTypes.bool,
+  onMountedChange: PropTypes.func,
 };
 
 function TraceRow({ trace, onOpen }) {

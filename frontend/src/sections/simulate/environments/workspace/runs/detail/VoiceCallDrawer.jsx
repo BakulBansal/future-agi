@@ -15,7 +15,6 @@ import {
   useCallTraces,
 } from "src/api/simulate-environments/runDetail";
 import VoiceDetailDrawerV2 from "src/components/VoiceDetailDrawerV2";
-import { useLLMTracingStoreShallow } from "src/sections/projects/LLMTracing/states";
 import CallTracesPanel from "./CallTracesPanel";
 import { CALL_TRACES_COPY } from "./callTraces.constants";
 
@@ -68,10 +67,9 @@ export default function VoiceCallDrawer({
   onNext,
   hasPrev = false,
   hasNext = false,
+  traceOpen = false,
+  onTracePanelMountedChange,
 }) {
-  const traceOpen = useLLMTracingStoreShallow((state) =>
-    Boolean(state.traceDetailDrawerOpen),
-  );
   const { data, isPending, isError } = useCallExecutionV3Detail(
     task.id,
     !!task.id,
@@ -92,24 +90,29 @@ export default function VoiceCallDrawer({
 
   const callTraces = useCallTraces(executionId, task.id);
   const leftPanelTabs = useMemo(
-    () =>
-      callTraces.projectId || callTraces.isError
-        ? [
-            {
-              label: CALL_TRACES_COPY.tab,
-              value: "traces",
-              icon: "mdi:chart-gantt",
-              content: (
-                <CallTracesPanel
-                  traces={callTraces.traces}
-                  projectId={callTraces.projectId}
-                  isError={callTraces.isError}
-                />
-              ),
-            },
-          ]
-        : undefined,
-    [callTraces.projectId, callTraces.isError, callTraces.traces],
+    () => [
+      {
+        label: CALL_TRACES_COPY.tab,
+        value: "traces",
+        icon: "mdi:chart-gantt",
+        content: (
+          <CallTracesPanel
+            traces={callTraces.traces}
+            projectId={callTraces.projectId}
+            testExecutionId={executionId}
+            isError={callTraces.isError}
+            onMountedChange={onTracePanelMountedChange}
+          />
+        ),
+      },
+    ],
+    [
+      callTraces.projectId,
+      callTraces.isError,
+      callTraces.traces,
+      executionId,
+      onTracePanelMountedChange,
+    ],
   );
 
   if (isError) {
@@ -169,4 +172,6 @@ VoiceCallDrawer.propTypes = {
   onNext: PropTypes.func,
   hasPrev: PropTypes.bool,
   hasNext: PropTypes.bool,
+  traceOpen: PropTypes.bool,
+  onTracePanelMountedChange: PropTypes.func,
 };

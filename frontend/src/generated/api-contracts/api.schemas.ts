@@ -35024,7 +35024,7 @@ export const SimulateV3TestExecutionCallsGroupBy = {
 } as const;
 
 export type SimulateV3TestExecutionTracesParams = {
-  call_execution_id?: string;
+  call_execution_id: string;
 };
 
 export type TracerChartsFetchGraphParams = {

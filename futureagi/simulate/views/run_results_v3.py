@@ -45,11 +45,12 @@ from simulate.services.run_results_v3_queries import (
     run_call_rows_queryset,
     run_calls_queryset,
 )
-from simulate.services.run_traces_v3 import list_run_traces
+from simulate.services.run_traces_v3 import CallNotInRun, list_run_traces
 from simulate.services.test_executor import build_eval_configs_map
 from simulate.views.scoping import run_test_workspace_filter
 from tfc.utils.api_contracts import validated_request
 from tfc.utils.api_serializers import ApiDetailErrorResponseSerializer
+from tfc.utils.general_methods import GeneralMethods
 from tracer.services.clickhouse.client import CHError
 
 logger = structlog.get_logger(__name__)
@@ -335,7 +336,7 @@ class RunTraceSerializer(serializers.Serializer):
 
 
 class RunTracesV3QuerySerializer(serializers.Serializer):
-    call_execution_id = serializers.CharField(required=False, allow_blank=True)
+    call_execution_id = serializers.UUIDField()
 
 
 class RunTracesV3ResponseSerializer(serializers.Serializer):
@@ -567,7 +568,11 @@ class RunTracesV3View(APIView):
         try:
             result = list_run_traces(
                 execution,
-                call_execution_id=request.validated_query_data.get("call_execution_id"),
+                call_execution_id=request.validated_query_data["call_execution_id"],
+            )
+        except CallNotInRun:
+            return GeneralMethods(request=request).bad_request(
+                "call_execution_id is not a call of this run."
             )
         except (CHError, TimeoutError) as exc:
             logger.warning(

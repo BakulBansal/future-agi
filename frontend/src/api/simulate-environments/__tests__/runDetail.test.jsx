@@ -985,6 +985,45 @@ describe("useCallTraces", () => {
     expect(result.current.traces).toEqual([]);
   });
 
+  it("reads again for the next call of the run rather than showing the last call's traces", async () => {
+    axios.get.mockImplementation((_url, { params }) =>
+      Promise.resolve({
+        data: {
+          project_id: "hidden-project",
+          traces: [
+            {
+              trace_id: `trace-of-${params.call_execution_id}`,
+              name: "turn",
+            },
+          ],
+        },
+      }),
+    );
+
+    const { result, rerender } = renderHook(
+      ({ callId }) => useCallTraces("exec-1", callId),
+      { wrapper: makeWrapper(), initialProps: { callId: "call-a" } },
+    );
+    await waitFor(() =>
+      expect(result.current.traces.map((t) => t.traceId)).toEqual([
+        "trace-of-call-a",
+      ]),
+    );
+
+    rerender({ callId: "call-b" });
+
+    await waitFor(() =>
+      expect(result.current.traces.map((t) => t.traceId)).toEqual([
+        "trace-of-call-b",
+      ]),
+    );
+    expect(axios.get).toHaveBeenCalledTimes(2);
+    expect(axios.get).toHaveBeenLastCalledWith(
+      endpoints.runResultsV3.traces("exec-1"),
+      { params: { call_execution_id: "call-b" } },
+    );
+  });
+
   it("stays idle without a run or a call", () => {
     renderHook(() => useCallTraces(null, "call-1"), { wrapper: makeWrapper() });
     renderHook(() => useCallTraces("exec-1", null), { wrapper: makeWrapper() });

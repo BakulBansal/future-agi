@@ -430,6 +430,10 @@ def test_only_the_expected_operations_name_the_run_parameters():
         ("/tracer/trace/{id}/", "get"): both,
         ("/tracer/trace/voice_call_detail/", "get"): both,
         ("/tracer/observation-span/{id}/", "get"): both,
+        # The list of a run's traces, which needs the call it is read for.
+        ("/simulate/v3/test-executions/{test_execution_id}/traces/", "get"): frozenset(
+            {"call_execution_id"}
+        ),
         # Unrelated listings that already carried one filter of their own.
         ("/sdk/api/v1/simulation/metrics/", "get"): frozenset({"call_execution_id"}),
         ("/sdk/api/v1/simulation/runs/", "get"): frozenset({"call_execution_id"}),

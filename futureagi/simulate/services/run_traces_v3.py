@@ -3,7 +3,7 @@
 A run of a ``source`` agent marks every span its process exports with the job id
 as a resource attribute, and every span of a scenario with that call's id. The
 collector stores them in the agent's hidden simulation project. This read lists
-the run's traces by the job mark, scoped to that project and to the job's own
+one call's traces by the job mark, scoped to that project and to the job's own
 time window, newest first.
 """
 
@@ -87,40 +87,32 @@ def run_traces_source(execution: TestExecution) -> RunTracesSource | None:
     return RunTracesSource(job=job, project_id=project_id)
 
 
-def call_of_run(execution: TestExecution, raw_id: str) -> str | None:
-    try:
-        call_execution_id = str(uuid.UUID(raw_id))
-    except ValueError:
-        return None
-    if not CallExecution.objects.filter(
-        id=call_execution_id, test_execution=execution
-    ).exists():
-        return None
-    return call_execution_id
+class CallNotInRun(ValueError):
+    """The call asked for is not a call of this run."""
 
 
 def list_run_traces(
-    execution: TestExecution, *, call_execution_id: str | None = None
+    execution: TestExecution, *, call_execution_id: uuid.UUID
 ) -> RunTraces:
+    # A trace no call owns is never shown, so a read always names one call of this run.
+    if not CallExecution.objects.filter(
+        id=call_execution_id, test_execution=execution
+    ).exists():
+        raise CallNotInRun(str(call_execution_id))
     source = run_traces_source(execution)
     if source is None:
         return RunTraces(project_id=None, traces=[])
-    if call_execution_id is not None:
-        call_execution_id = call_of_run(execution, call_execution_id)
-        if call_execution_id is None:
-            return RunTraces(project_id=source.project_id, traces=[])
     return RunTraces(
         project_id=source.project_id,
-        traces=read_run_traces(source, call_execution_id=call_execution_id),
+        traces=read_run_traces(source, call_execution_id=str(call_execution_id)),
     )
 
 
-def run_traces_sql(*, by_call: bool = False) -> str:
+def run_traces_sql() -> str:
     job_mark = cols.json_path(cols.RESOURCE_ATTRS, RUN_MARK_KEY, "String")
     call_mark = f"{cols.ATTRS_STRING}['{CALL_MARK_KEY}']"
     has_call_mark = f"mapContains({cols.ATTRS_STRING}, '{CALL_MARK_KEY}')"
     is_root = "parent_span_id = ''"
-    having = "HAVING call_execution_id = %(call_execution_id)s " if by_call else ""
     return (
         "SELECT trace_id, "
         f"countIf({is_root}) > 0 AS has_root, "
@@ -135,33 +127,31 @@ def run_traces_sql(*, by_call: bool = False) -> str:
         "AND start_time <= %(window_end)s "
         f"AND {job_mark} = %(job_id)s "
         "GROUP BY trace_id "
-        f"{having}"
+        "HAVING call_execution_id = %(call_execution_id)s "
         "ORDER BY has_root ASC, root_start_time DESC, trace_id "
         "LIMIT %(limit)s"
     )
 
 
 def run_traces_params(
-    source: RunTracesSource, call_execution_id: str | None = None
+    source: RunTracesSource, call_execution_id: str
 ) -> dict[str, Any]:
     job = source.job
-    params = {
+    return {
         "project_id": source.project_id,
         "job_id": str(job.id),
         "window_start": job.created_at,
         "window_end": job.terminal_at or timezone.now(),
+        "call_execution_id": call_execution_id,
         "limit": MAX_TRACES,
     }
-    if call_execution_id is not None:
-        params["call_execution_id"] = call_execution_id
-    return params
 
 
 def read_run_traces(
-    source: RunTracesSource, *, call_execution_id: str | None = None
+    source: RunTracesSource, *, call_execution_id: str
 ) -> list[RunTrace]:
     rows, _columns, _elapsed_ms = get_clickhouse_client().execute_read(
-        run_traces_sql(by_call=call_execution_id is not None),
+        run_traces_sql(),
         run_traces_params(source, call_execution_id),
         timeout_ms=READ_TIMEOUT_MS,
     )

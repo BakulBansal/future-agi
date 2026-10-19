@@ -67383,7 +67383,7 @@ export type simulateV3TestExecutionTracesResponse =
 
 export const getSimulateV3TestExecutionTracesUrl = (
   testExecutionId: string,
-  params?: SimulateV3TestExecutionTracesParams,
+  params: SimulateV3TestExecutionTracesParams,
 ) => {
   const normalizedParams = new URLSearchParams();
 
@@ -67406,7 +67406,7 @@ export const getSimulateV3TestExecutionTracesUrl = (
 
 export const simulateV3TestExecutionTraces = async (
   testExecutionId: string,
-  params?: SimulateV3TestExecutionTracesParams,
+  params: SimulateV3TestExecutionTracesParams,
   options?: RequestInit,
 ): Promise<simulateV3TestExecutionTracesResponse> => {
   return apiMutator<simulateV3TestExecutionTracesResponse>(

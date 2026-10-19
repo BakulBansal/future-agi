@@ -48241,7 +48241,7 @@ export const SimulateV3TestExecutionTracesParams = zod.object({
 });
 
 export const SimulateV3TestExecutionTracesQueryParams = zod.object({
-  call_execution_id: zod.string().optional(),
+  call_execution_id: zod.string().uuid(),
 });
 
 export const SimulateV3TestExecutionTracesResponse = zod.object({

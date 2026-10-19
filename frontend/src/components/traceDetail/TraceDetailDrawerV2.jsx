@@ -128,6 +128,7 @@ const TraceDetailDrawerV2 = ({
   open,
   onClose,
   projectId,
+  testExecutionId,
   onPrev,
   onNext,
   hasPrev = true,
@@ -513,6 +514,7 @@ const TraceDetailDrawerV2 = ({
   const queryClient = useQueryClient();
   const { data, isLoading } = useGetTraceDetail(open ? traceId : null, {
     projectId,
+    testExecutionId,
   });
 
   const handleRefresh = useCallback(() => {
@@ -1560,6 +1562,7 @@ TraceDetailDrawerV2.propTypes = {
   open: PropTypes.bool.isRequired,
   onClose: PropTypes.func.isRequired,
   projectId: PropTypes.string,
+  testExecutionId: PropTypes.string,
   onPrev: PropTypes.func,
   onNext: PropTypes.func,
   hasPrev: PropTypes.bool,

@@ -863,6 +863,15 @@ _FILED_BY_MODULE: dict[str, dict[str, Filing]] = {
             table="the simulate call execution table",
         ),
     },
+    "simulate.services.run_traces_v3": {
+        "run_traces_sql": filed(
+            HIDDEN_ON_PURPOSE,
+            why=(
+                "one call's traces in the hidden project of a run's agent, for a "
+                "caller who can read the run (see the callers map)"
+            ),
+        ),
+    },
     "tfc.deployment_telemetry.ch_counts": {
         "count_spans": _TELEMETRY_COUNTS,
         "count_traces": _TELEMETRY_COUNTS,
@@ -1804,8 +1813,6 @@ TOKEN_FILES = {
     "tracer/models/project.py": "declares the column and the manager",
     "tracer/migrations/0115_project_simulation_agent.py": "adds the column",
     "tracer/services/simulation_project.py": "creates the project, opens it for a run",
-    # Listed ahead of the change that adds it: the list of a run's traces. The
-    # file is absent on this branch.
     "simulate/services/run_traces_v3.py": "the list of a run's traces",
 }
 
@@ -1836,6 +1843,10 @@ HIDDEN_READERS = {
         None,
         frozenset({"tracer/services/clickhouse/v2/physical_span_detail_reads.py"}),
     ),
+    "simulate.services.run_traces_v3:run_traces_sql": (
+        None,
+        frozenset({"simulate/services/run_traces_v3.py"}),
+    ),
 }
 _RUN_SCOPE_CALLERS = frozenset(
     {
@@ -1843,6 +1854,9 @@ _RUN_SCOPE_CALLERS = frozenset(
         "tracer/views/observation_span.py",
         "tracer/views/trace.py",
     }
+)
+_RUN_TRACES_CALLERS = frozenset(
+    {"simulate/services/run_traces_v3.py", "simulate/views/run_results_v3.py"}
 )
 # The entry points that hand those readers their project ids, pinned the same
 # way so that a new route to a builder fails here too.
@@ -1865,6 +1879,8 @@ ENTRY_POINTS = {
     # yet).
     "simulation_scope_for_run": (None, _RUN_SCOPE_CALLERS),
     "run_scope_project_ids": (None, _RUN_SCOPE_CALLERS),
+    "list_run_traces": (None, _RUN_TRACES_CALLERS),
+    "simulation_project_id": (None, _RUN_TRACES_CALLERS),
     "simulation_project_of": (None, frozenset()),
     "ensure_simulation_project": (None, frozenset()),
 }
@@ -2186,6 +2202,14 @@ def test_every_spans_reading_function_is_filed():
     ), f"categories nothing is filed under: {sorted(set(BUCKETS) - used)}"
     claims = _filing_problems(readers)
     assert not claims, "\n".join(claims)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("name", ["list_run_traces", "simulation_project_id"])
+def test_the_run_traces_read_is_pinned_to_the_files_that_serve_it(name):
+    assert ENTRY_POINTS.get(name) == (None, _RUN_TRACES_CALLERS)
+    # A pin on a name nothing uses any more would guard nothing.
+    assert files_naming(name)
 
 
 @pytest.mark.unit

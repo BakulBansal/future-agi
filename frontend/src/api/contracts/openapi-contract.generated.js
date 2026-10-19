@@ -32120,9 +32120,10 @@ export const OPENAPI_CONTRACT = Object.freeze({
         requestBody: null,
         queryParameters: {
           call_execution_id: {
-            required: false,
+            required: true,
             schema: {
               type: "string",
+              format: "uuid",
             },
           },
         },

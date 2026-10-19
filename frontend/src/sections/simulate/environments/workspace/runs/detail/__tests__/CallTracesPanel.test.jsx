@@ -64,13 +64,14 @@ describe("CallTracesPanel", () => {
     ]);
   });
 
-  it("opens the read-only trace drawer on the answer's project", () => {
-    renderPanel();
+  it("opens the read-only trace drawer on the answer's project, for the run", () => {
+    renderPanel({ testExecutionId: "run-1" });
     fireEvent.click(screen.getByText("verify_identity"));
 
     expect(mocks.store.setTraceDetailDrawerOpen).toHaveBeenCalledWith({
       traceId: "trace-1",
       projectId: "hidden-project",
+      testExecutionId: "run-1",
     });
     expect(screen.getByTestId("trace-drawer")).toBeInTheDocument();
     expect(mocks.drawerProps.mock.lastCall[0]).toMatchObject({
@@ -78,13 +79,25 @@ describe("CallTracesPanel", () => {
     });
   });
 
-  it("clears the trace drawer state when it unmounts", () => {
+  it("clears the trace drawer state and its URL key when it unmounts", () => {
     const { unmount } = renderPanel();
     expect(mocks.store.resetStates).not.toHaveBeenCalled();
+    expect(mocks.store.setTraceDetailDrawerOpen).not.toHaveBeenCalled();
 
     unmount();
 
     expect(mocks.store.resetStates).toHaveBeenCalledTimes(1);
+    expect(mocks.store.setTraceDetailDrawerOpen).toHaveBeenCalledWith(null);
+  });
+
+  it("tells its owner while it is mounted", () => {
+    const onMountedChange = vi.fn();
+    const { unmount } = renderPanel({ onMountedChange });
+    expect(onMountedChange.mock.calls).toEqual([[true]]);
+
+    unmount();
+
+    expect(onMountedChange.mock.calls).toEqual([[true], [false]]);
   });
 
   it("names a trace whose root span is not stored yet by its id", () => {
@@ -104,10 +117,11 @@ describe("CallTracesPanel", () => {
     expect(screen.getByText("trace-9")).toBeInTheDocument();
   });
 
-  it("says when the call has no traces", () => {
-    renderPanel({ traces: [] });
+  it("says only that the call has no trace", () => {
+    const { container } = renderPanel({ traces: [] });
 
-    expect(screen.getByText("No traces for this call")).toBeInTheDocument();
+    expect(screen.getByText("No trace for this call")).toBeInTheDocument();
+    expect(container.textContent).toBe("No trace for this call");
     expect(mocks.store.setVisibleTraces).toHaveBeenLastCalledWith([]);
   });
 
