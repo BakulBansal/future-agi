@@ -1284,6 +1284,7 @@ def _turn_on_observability(
     if (job.payload.get("metadata") or {}).get("observability_enabled") is not True:
         return
     details: dict[str, Any] = {}
+    failure: Exception | None = None
     if payload.get("agent_definition_id"):
         code = "bound"
     elif stored[0] != "stored":
@@ -1313,11 +1314,13 @@ def _turn_on_observability(
             details = refusal_body(exc)["details"]
         except Exception as exc:  # noqa: BLE001 - the provision must go on
             code = type(exc).__name__
+            failure = exc
     logger.warning(
         "harness_observability_not_enabled",
         job_id=str(job.id),
         agent_definition_id=str(agent_definition.id),
         code=code,
+        **({"exc_info": failure} if failure is not None else {}),
     )
     _save_observability_refusal(job, code, details)
 
@@ -1338,6 +1341,7 @@ def _save_observability_refusal(
             "harness_observability_refusal_not_saved",
             job_id=str(job.id),
             code=type(exc).__name__,
+            exc_info=True,
         )
 
 

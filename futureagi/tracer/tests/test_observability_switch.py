@@ -12,8 +12,9 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
-from django.db import connection
+from django.db import connection, transaction
 from django.db.models import QuerySet
+from rest_framework.exceptions import ErrorDetail
 from structlog.testing import capture_logs
 
 import tracer.services.observability_switch as switch
@@ -506,16 +507,209 @@ def test_turn_on_of_an_existing_off_row_is_checked(organization, workspace, user
     assert _stored(row)[1] is True
 
 
-def test_row_of_a_deleted_project_is_cleared(organization, workspace, user):
-    agent = _agent_with_row(organization, workspace, enabled=True)
+def _delete_project(agent):
     Project._base_manager.filter(pk=agent.observability_provider.project_id).update(
         deleted=True
     )
+
+
+def _delete_row(agent):
+    agent.observability_provider.delete()
+
+
+@pytest.mark.parametrize("delete", [_delete_project, _delete_row])
+def test_dead_row_is_cleared_on_turn_off(organization, workspace, user, delete):
+    agent = _agent_with_row(organization, workspace, enabled=True)
+    delete(agent)
     agent = _stored_agent(agent)
     with seams(make_summary()) as (read_summary, _):
-        assert _turn(agent, True, user, organization, workspace) is None
+        assert _turn(agent, False, user, organization, workspace) is None
     assert _stored_agent(agent).observability_provider_id is None
     read_summary.assert_not_called()
+
+
+def test_turn_on_after_a_deleted_project_makes_a_fresh_project(
+    organization, workspace, user
+):
+    # The user deleted the project, so the link is off; turning it on again
+    # makes a new project and row, the way a first turn-on does.
+    agent = _agent_with_row(organization, workspace, enabled=True)
+    dead = agent.observability_provider
+    _delete_project(agent)
+    agent = _stored_agent(agent)
+    projects, rows = _created()
+
+    with seams(make_summary(agent_definition_id=agent.id)) as (read_summary, _):
+        row = _turn(agent, True, user, organization, workspace)
+
+    assert row is not None and row.pk != dead.pk
+    assert row.project_id != dead.project_id
+    assert row.enabled
+    assert _stored_agent(agent).observability_provider_id == row.pk
+    assert _created() == (projects + 1, rows + 1)
+    # The first-turn-on path: prerequisites, then the agent's own name.
+    read_summary.assert_called_once()
+    assert _project_name(row) == agent.agent_name
+
+
+def test_turn_on_after_a_deleted_project_takes_the_agents_plain_name(
+    organization, workspace, user
+):
+    # The project the user deleted carried the agent's own name. The unique
+    # constraint leaves deleted projects out, so the new project takes that
+    # plain name too and the deleted one is left as it was.
+    agent = _agent_with_row(organization, workspace, enabled=True)
+    dead = agent.observability_provider
+    Project._base_manager.filter(pk=dead.project_id).update(name=agent.agent_name)
+    _delete_project(agent)
+    agent = _stored_agent(agent)
+
+    with seams(make_summary(agent_definition_id=agent.id)):
+        row = _turn(agent, True, user, organization, workspace)
+
+    assert row.pk != dead.pk and row.project_id != dead.project_id
+    assert _project_name(row) == agent.agent_name
+    old = Project._base_manager.get(pk=dead.project_id)
+    assert old.deleted and old.name == agent.agent_name
+    named = Project._base_manager.filter(name=agent.agent_name, trace_type="observe")
+    assert named.count() == 2
+    assert named.filter(deleted=False).get().pk == row.project_id
+
+
+def test_turn_off_after_a_deleted_project_switches_a_link_made_meanwhile(
+    organization, workspace, user
+):
+    # This copy still holds the dead link. Another request already cleared it
+    # and linked a new, enabled row, so this clear matches no row. Only the
+    # re-read on the primary shows the new link: a turn-off has no later
+    # re-read under a lock to find it.
+    agent = _agent_with_row(organization, workspace, enabled=True)
+    _delete_project(agent)
+    stale = _stored_agent(agent)
+    assert stale.observability_provider.project.deleted
+    newer = _row(organization, workspace, {})
+    AgentDefinition.no_workspace_objects.filter(pk=agent.pk).update(
+        observability_provider=newer
+    )
+    created = _created()
+
+    with (
+        seams(make_summary(agent_definition_id=agent.id)) as (read_summary, _),
+        patch.object(
+            AgentDefinition,
+            "refresh_from_db",
+            autospec=True,
+            side_effect=AgentDefinition.refresh_from_db,
+        ) as reread,
+    ):
+        row = _turn(stale, False, user, organization, workspace)
+
+    assert row.pk == newer.pk
+    assert _stored(newer)[1] is False
+    assert _stored_agent(agent).observability_provider_id == newer.pk
+    assert _created() == created
+    read_summary.assert_not_called()
+    reread.assert_called_once()
+    assert reread.call_args.kwargs["using"] == "default"
+
+
+def test_turn_off_after_a_deleted_project_makes_nothing(organization, workspace, user):
+    agent = _agent_with_row(organization, workspace, enabled=True)
+    _delete_project(agent)
+    agent = _stored_agent(agent)
+    created = _created()
+
+    with seams(make_summary()) as (read_summary, _):
+        assert _turn(agent, False, user, organization, workspace) is None
+
+    assert _stored_agent(agent).observability_provider_id is None
+    assert _created() == created
+    read_summary.assert_not_called()
+
+
+def test_two_turn_ons_after_a_deleted_project_make_one_project(
+    organization, workspace, user
+):
+    # Both requests loaded the agent while the link was still the dead one. The
+    # primary re-read and the lock both catch the second; two other tests pin
+    # each one alone.
+    agent = _agent_with_row(organization, workspace, enabled=True)
+    _delete_project(agent)
+    first, second = _stored_agent(agent), _stored_agent(agent)
+    assert first.observability_provider.project.deleted
+    assert second.observability_provider.project.deleted
+    projects, rows = _created()
+
+    with seams(make_summary(agent_definition_id=agent.id)):
+        one = _turn(first, True, user, organization, workspace)
+        two = _turn(second, True, user, organization, workspace)
+
+    assert one.pk == two.pk
+    assert _created() == (projects + 1, rows + 1)
+    assert_one_project_and_row(agent)
+
+
+def test_link_made_during_the_prerequisite_check_is_switched_not_replaced(
+    organization, workspace, user
+):
+    # The clear and the primary re-read are past: the clear matched the dead
+    # link. Another request links a new row while this one reads the agent for
+    # the prerequisites. Only the re-read under the lock finds it.
+    agent = _agent_with_row(organization, workspace, enabled=True)
+    _delete_project(agent)
+    stale = _stored_agent(agent)
+    newer = _row(organization, workspace, {})
+    ObservabilityProvider.no_workspace_objects.filter(pk=newer.pk).update(
+        enabled=False
+    )
+    created = _created()
+
+    def read(agent_id):
+        AgentDefinition.no_workspace_objects.filter(pk=agent.pk).update(
+            observability_provider=newer
+        )
+        return make_summary(agent_definition_id=agent.id)
+
+    with seams(read):
+        row = _turn(stale, True, user, organization, workspace)
+
+    assert row.pk == newer.pk
+    assert _stored(newer)[1] is True
+    assert _stored_agent(agent).observability_provider_id == newer.pk
+    assert _created() == created
+
+
+def test_turn_on_refused_after_a_deleted_project_writes_nothing(
+    organization, workspace, user
+):
+    agent = _agent_with_row(organization, workspace, enabled=True)
+    dead_id = agent.observability_provider_id
+    _delete_project(agent)
+    agent = _stored_agent(agent)
+    created = _created()
+
+    refusing = make_summary(agent_definition_id=agent.id, missing=("credential",))
+    with seams(refusing), pytest.raises(switch.ObservabilityRefused):
+        with transaction.atomic():
+            _turn(agent, True, user, organization, workspace)
+
+    assert _created() == created
+    # The clear of the dead link is one of the writes the caller's rollback undoes.
+    assert _stored_agent(agent).observability_provider_id == dead_id
+
+
+def test_turn_on_after_a_deleted_row_makes_a_fresh_one(organization, workspace, user):
+    agent = _agent_with_row(organization, workspace, enabled=False)
+    dead = agent.observability_provider
+    _delete_row(agent)
+
+    row = _turn_on(_stored_agent(agent), user, organization, workspace)
+
+    assert row is not None and row.pk != dead.pk
+    assert row.project_id != dead.project_id
+    linked = _stored_agent(agent).observability_provider_id
+    assert linked == row.pk
+    assert ObservabilityProvider.objects.filter(pk=linked, enabled=True).exists()
 
 
 @pytest.mark.parametrize("kind", [None, "hosted", "endpoint"])
@@ -1060,6 +1254,103 @@ def test_every_name_taken_is_a_project_error_and_writes_nothing(
     assert _stored_agent(agent).observability_provider_id is None
 
 
+def test_agent_named_like_a_hidden_project_gets_the_tagged_project(
+    organization, workspace, user
+):
+    # The name check cannot see hidden projects, and the create refuses the name.
+    name = f"fi-simulation-{uuid.uuid4()}"
+    agent = _agent(organization, workspace, agent_name=name)
+
+    row = _turn_on(agent, user, organization, workspace)
+
+    assert _project_name(row) == f"{name} {_short_tag(agent)}"
+    assert _stored_agent(agent).observability_provider_id == row.pk
+
+
+def test_turn_on_after_a_deleted_row_tags_the_name_its_project_holds(
+    organization, workspace, user
+):
+    name = f"Revived {uuid.uuid4().hex[:8]}"
+    agent = _agent(organization, workspace, agent_name=name)
+    dead = _turn_on(agent, user, organization, workspace)
+    assert _project_name(dead) == name
+    _delete_row(agent)
+
+    row = _turn_on(_stored_agent(agent), user, organization, workspace)
+
+    # The dead row's project is live and still holds the name.
+    assert row.pk != dead.pk
+    assert row.project_id != dead.project_id
+    assert _project_name(row) == f"{name} {_short_tag(agent)}"
+    assert _project_name(dead) == name
+    assert _stored_agent(agent).observability_provider_id == row.pk
+
+
+def _project_error_reason(logs, agent):
+    # One error event: our own reason word and the agent id, nothing else.
+    [logged] = _events(logs, "observability_switch_project_error")
+    assert logged["log_level"] == "error"
+    assert set(logged) - {"event", "log_level"} == {"agent_definition_id", "reason"}
+    assert logged["agent_definition_id"] == str(agent.id)
+    assert agent.agent_name not in str(logged)
+    return logged["reason"]
+
+
+def test_names_running_out_is_logged_with_its_reason(organization, workspace, user):
+    name = f"Full {uuid.uuid4().hex[:8]}"
+    agent = _agent(organization, workspace, agent_name=name)
+    _project(organization, workspace, name)
+    _project(organization, workspace, f"{name} {_short_tag(agent)}")
+    _project(organization, workspace, f"{name} {str(agent.id).replace('-', '')}")
+
+    with (
+        seams(make_summary(agent_definition_id=agent.id)),
+        capture_logs() as logs,
+        pytest.raises(switch.ObservabilityProjectError),
+    ):
+        _turn(agent, True, user, organization, workspace)
+
+    assert _project_error_reason(logs, agent) == "names_exhausted"
+
+
+def test_no_default_workspace_is_logged_with_its_reason(organization, workspace, user):
+    agent = _agent(organization, workspace)
+    Workspace.no_workspace_objects.filter(
+        organization=organization, is_default=True
+    ).update(is_active=False)
+
+    with (
+        seams(make_summary(agent_definition_id=agent.id)),
+        capture_logs() as logs,
+        pytest.raises(
+            switch.ObservabilityProjectError,
+            match="^observability project could not be created$",
+        ),
+    ):
+        _turn(agent, True, user, organization, None)
+
+    assert _project_error_reason(logs, agent) == "no_default_workspace"
+    assert _stored_agent(agent).observability_provider_id is None
+
+
+def test_malformed_workspace_id_is_logged_with_its_reason(
+    organization, workspace, user
+):
+    agent = _agent(organization, workspace)
+    before = _created()
+
+    with (
+        seams(make_summary(agent_definition_id=agent.id)),
+        capture_logs() as logs,
+        pytest.raises(switch.ObservabilityProjectError),
+    ):
+        _turn(agent, True, user, organization, "not-a-workspace-id")
+
+    assert _project_error_reason(logs, agent) == "bad_workspace_id"
+    assert "not-a-workspace-id" not in str(logs)
+    assert _created() == before
+
+
 def test_no_workspace_is_checked_in_the_default_workspace(
     organization, workspace, user
 ):
@@ -1236,13 +1527,11 @@ def test_switch_writes_only_the_link_when_it_clears_a_deleted_projects_row(
     organization, workspace, user
 ):
     agent = _agent_with_row(organization, workspace, enabled=True)
-    Project._base_manager.filter(pk=agent.observability_provider.project_id).update(
-        deleted=True
-    )
+    _delete_project(agent)
     agent = _stored_agent(agent)
     seen, recording = _statements()
     with seams(make_summary()), recording:
-        _turn(agent, True, user, organization, workspace)
+        _turn(agent, False, user, organization, workspace)
 
     assert agent_update_columns(seen) == [{"observability_provider_id", "updated_at"}]
 
@@ -1260,3 +1549,186 @@ def test_switch_keeps_a_field_another_copy_wrote_meanwhile(
     stored = _stored_agent(agent)
     assert stored.description == "Written meanwhile"
     assert stored.observability_provider_id is not None
+
+
+def test_first_turn_on_reads_the_agent_once(organization, workspace, user):
+    agent = _agent(organization, workspace)
+    with seams(make_summary(agent_definition_id=agent.id)) as (read_summary, _):
+        row = _turn(agent, True, user, organization, workspace)
+    assert row is not None
+    assert read_summary.call_count == 1
+
+
+def test_project_error_is_logged_before_the_refusal(organization, workspace, user):
+    agent = _agent(organization, workspace)
+    # What the serializer's errors look like when the helper returns them.
+    errors = {
+        "provider": [
+            ErrorDetail('"phone x" is not a valid choice.', code="invalid_choice")
+        ]
+    }
+    with (
+        seams(make_summary(agent_definition_id=agent.id)),
+        patch.object(switch, "create_observability_provider", return_value=errors),
+        capture_logs() as logs,
+        pytest.raises(switch.ObservabilityProjectError),
+    ):
+        _turn(agent, True, user, organization, workspace)
+
+    [logged] = _events(logs, "observability_switch_project_error")
+    assert logged["log_level"] == "error"
+    assert logged["agent_definition_id"] == str(agent.id)
+    assert (logged["fields"], logged["codes"]) == (["provider"], ["invalid_choice"])
+    # The message text can carry free text, so it is never logged.
+    assert "phone x" not in str(logged)
+    assert _stored_agent(agent).observability_provider_id is None
+
+
+def test_project_error_from_an_exception_logs_its_type(organization, workspace, user):
+    agent = _agent(organization, workspace)
+    errors = {"error": "Invalid data", "details": ValueError("agent name here")}
+    with (
+        seams(make_summary(agent_definition_id=agent.id)),
+        patch.object(switch, "create_observability_provider", return_value=errors),
+        capture_logs() as logs,
+        pytest.raises(switch.ObservabilityProjectError),
+    ):
+        _turn(agent, True, user, organization, workspace)
+
+    [logged] = _events(logs, "observability_switch_project_error")
+    assert logged["error_type"] == "ValueError"
+    assert "agent name here" not in str(logged)
+
+
+@pytest.mark.parametrize("enabled", [True, False])
+def test_clearing_a_dead_link_switches_a_link_made_meanwhile(
+    organization, workspace, user, enabled
+):
+    # This copy still holds the dead link; another request already linked a new row.
+    agent = _agent_with_row(organization, workspace, enabled=True)
+    _delete_row(agent)
+    stale = _stored_agent(agent)
+    assert stale.observability_provider.deleted  # loaded while dead
+    newer = _row(organization, workspace, {})
+    ObservabilityProvider.no_workspace_objects.filter(pk=newer.pk).update(
+        enabled=not enabled
+    )
+    AgentDefinition.no_workspace_objects.filter(pk=agent.pk).update(
+        observability_provider=newer
+    )
+    created = _created()
+
+    with seams(make_summary(agent_definition_id=agent.id)):
+        _turn(stale, enabled, user, organization, workspace)
+
+    assert _stored_agent(agent).observability_provider_id == newer.pk
+    assert _stored(newer)[1] is enabled
+    assert _created() == created
+
+
+@pytest.mark.parametrize(
+    "delete, enabled", [(_delete_project, False), (_delete_row, False)]
+)
+def test_clear_that_matches_no_row_still_drops_the_dead_link(
+    organization, workspace, user, delete, enabled
+):
+    # The agent was soft-deleted meanwhile, so the clear finds no row and the
+    # re-read still shows the dead link: the copy in hand drops it in memory.
+    agent = _agent_with_row(organization, workspace, enabled=True)
+    delete(agent)
+    stale = _stored_agent(agent)
+    dead_id = stale.observability_provider_id
+    AgentDefinition._base_manager.filter(pk=agent.pk).update(deleted=True)
+    created = _created()
+
+    with (
+        seams(make_summary(agent_definition_id=agent.id)),
+        patch.object(
+            AgentDefinition,
+            "refresh_from_db",
+            autospec=True,
+            side_effect=AgentDefinition.refresh_from_db,
+        ) as reread,
+    ):
+        assert _turn(stale, enabled, user, organization, workspace) is None
+
+    assert stale.observability_provider_id is None
+    stored = AgentDefinition._base_manager.get(pk=agent.pk)
+    assert stored.observability_provider_id == dead_id
+    assert _created() == created
+    # The re-read goes to the primary, so a lagging replica cannot answer it.
+    reread.assert_called_once()
+    assert reread.call_args.kwargs["using"] == "default"
+
+
+def test_turn_on_of_a_deleted_agent_after_a_deleted_project_raises(
+    organization, workspace, user
+):
+    # The agent was soft-deleted meanwhile. The turn-on takes the first-turn-on
+    # path, whose locked re-read finds no agent, so it raises (the version view
+    # answers that with a 404) and nothing is made.
+    agent = _agent_with_row(organization, workspace, enabled=True)
+    _delete_project(agent)
+    stale = _stored_agent(agent)
+    AgentDefinition._base_manager.filter(pk=agent.pk).update(deleted=True)
+    created = _created()
+
+    with seams(make_summary(agent_definition_id=agent.id)):
+        with pytest.raises(AgentDefinition.DoesNotExist):
+            _turn(stale, True, user, organization, workspace)
+
+    assert stale.observability_provider_id is None
+    assert _created() == created
+
+
+def _project_workspace(row):
+    return str(Project.no_workspace_objects.get(pk=row.project_id).workspace_id)
+
+
+def test_version_view_puts_the_project_in_the_agents_workspace(
+    auth_client, organization, user
+):
+    other = _other_workspace(organization, user)
+    auth_client.set_workspace(other)
+    agent = _agent(organization, other)
+
+    response = auth_client.post(
+        f"/simulate/agent-definitions/{agent.id}/versions/create/",
+        {"commit_message": "on", "observability_enabled": True},
+        format="json",
+    )
+
+    assert response.status_code == 201
+    assert _project_workspace(_stored_agent(agent).observability_provider) == str(
+        other.id
+    )
+
+
+def test_create_view_puts_the_project_in_the_request_workspace(
+    auth_client, organization, user
+):
+    other = _other_workspace(organization, user)
+    auth_client.set_workspace(other)
+
+    response = auth_client.post(
+        "/simulate/agent-definitions/create/",
+        {
+            "agent_name": f"Elsewhere {uuid.uuid4().hex[:8]}",
+            "agent_type": "voice",
+            "provider": "vapi",
+            "contact_number": "+12345678901",
+            "inbound": True,
+            "commit_message": "Initial version",
+            "languages": ["en"],
+            "api_key": "test-key",
+            "assistant_id": "assistant-1",
+            "authentication_method": "api_key",
+            "observability_enabled": True,
+        },
+        format="json",
+    )
+
+    assert response.status_code == 201
+    agent = AgentDefinition.no_workspace_objects.get(pk=response.json()["agent"]["id"])
+    assert str(agent.workspace_id) == str(other.id)
+    assert _project_workspace(agent.observability_provider) == str(other.id)

@@ -1,3 +1,4 @@
+from django.conf import settings
 from django.db import transaction
 from drf_yasg.utils import swagger_auto_schema
 from rest_framework import status
@@ -52,6 +53,7 @@ from tfc.utils.pagination import ExtendedPageNumberPagination
 from tracer.services.observability_switch import (
     ObservabilityRefused,
     agent_is_source,
+    observability_is_on,
     refusal_body,
     set_agent_observability,
 )
@@ -300,29 +302,40 @@ class CreateAgentVersionView(APIView):
                         creds_input.livekit_api_secret,
                         creds_input.livekit_agent_name,
                     )
+                    saved_config = creds_input.livekit_config_json
                 else:
                     saved_values = (creds_input.api_key, creds_input.assistant_id)
+                    saved_config = None
                 has_credential_value = any(
                     (value or "").strip() for value in saved_values
                 )
+                # Max Concurrency and Room Config are kept only on this row, and the
+                # page sends the default when nothing was changed.
+                has_setting_value = bool(saved_config) or (
+                    creds_input.livekit_max_concurrency is not None
+                    and creds_input.livekit_max_concurrency
+                    != settings.DEFAULT_LIVEKIT_MAX_CONCURRENCY
+                )
                 if not (
-                    sent_fields and not has_credential_value and agent_is_source(agent)
+                    sent_fields
+                    and not has_credential_value
+                    and not has_setting_value
+                    and agent_is_source(agent)
                 ):
                     sync_provider_credentials(version, creds_input)
 
                 if observability_enabled is None:
                     # An absent field leaves a code agent's switch as it is.
-                    row = agent.observability_provider
-                    observability_enabled = bool(
-                        row is not None and row.enabled and agent_is_source(agent)
-                    )
+                    observability_enabled = observability_is_on(
+                        agent
+                    ) and agent_is_source(agent)
                 set_agent_observability(
                     agent_definition=agent,
                     enabled=observability_enabled,
                     user_id=str(request.user.id),
                     organization=getattr(request, "organization", None)
                     or request.user.organization,
-                    workspace=getattr(request.user, "workspace", None),
+                    workspace=agent.workspace,
                 )
 
                 # Re-snapshot now that ProviderCredentials exist (LiveKit fields)

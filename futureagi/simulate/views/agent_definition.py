@@ -276,7 +276,9 @@ class CreateAgentDefinitionView(APIView):
             organization = (
                 getattr(request, "organization", None) or request.user.organization
             )
-            workspace = getattr(request.user, "workspace", None)
+            workspace = getattr(request, "workspace", None) or getattr(
+                request.user, "workspace", None
+            )
             user_id = str(request.user.id)
             commit_message = validated["commit_message"]
             description = validated.get("description", "")
@@ -353,7 +355,7 @@ class CreateAgentDefinitionView(APIView):
                         enabled=True,
                         user_id=user_id,
                         organization=organization,
-                        workspace=workspace,
+                        workspace=agent.workspace,
                     )
 
                 # Re-snapshot now that ProviderCredentials exist (LiveKit fields)

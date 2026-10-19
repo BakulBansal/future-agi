@@ -5,6 +5,7 @@ from __future__ import annotations
 from unittest.mock import patch
 
 import pytest
+from django.conf import settings
 from django.db import DatabaseError, connection, transaction
 from django.db.models import QuerySet
 from rest_framework.test import APIClient
@@ -525,7 +526,10 @@ def test_an_unexpected_error_in_the_switch_never_fails_the_provision(
 
     assert response.status_code == 200, response.content
     agent = _definition(job)
-    assert _events(logs, NOT_ENABLED) == [
+    events = _events(logs, NOT_ENABLED)
+    assert len(events) == 1
+    assert isinstance(events[0].pop("exc_info"), RuntimeError)
+    assert events == [
         {
             "event": NOT_ENABLED,
             "log_level": "warning",
@@ -598,6 +602,7 @@ def test_a_refusal_that_cannot_be_saved_never_fails_the_provision(
             "log_level": "error",
             "job_id": str(job.id),
             "code": _database_error_name(),
+            "exc_info": True,
         }
     ]
     assert _stored_refusal(job) is None
@@ -726,7 +731,8 @@ def _livekit_page_body(**overrides):
         "livekit_api_secret": "",
         "livekit_agent_name": "",
         "livekit_config_json": {},
-        "livekit_max_concurrency": 5,
+        # The page loads the version's value, which is the default with no row.
+        "livekit_max_concurrency": settings.DEFAULT_LIVEKIT_MAX_CONCURRENCY,
     }
     body.update(overrides)
     return body
@@ -841,3 +847,44 @@ def test_a_livekit_code_agent_with_an_assistant_id_but_blank_livekit_fields_gets
 
     assert saved.status_code == 201, saved.content
     assert not _credentials_of(_newest_version(agent)).exists()
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize(
+    "provider", ["livekit", "vapi"], ids=["livekit", "vapi"]
+)
+def test_a_code_agent_saved_with_a_changed_max_concurrency_keeps_it(
+    organization, workspace, auth_client, provider
+):
+    agent = _stored_agent_without_a_prompt(
+        organization, workspace, f"creds-conc-{provider}"
+    )
+
+    saved = auth_client.post(
+        f"/simulate/agent-definitions/{agent.id}/versions/create/",
+        _livekit_page_body(provider=provider, livekit_max_concurrency=10),
+        format="json",
+    )
+
+    assert saved.status_code == 201, saved.content
+    newest = _newest_version(agent)
+    assert newest.configuration_snapshot["livekit_max_concurrency"] == 10
+    assert _credentials_of(newest).get().max_concurrency == 10
+
+
+@pytest.mark.django_db
+def test_a_code_agent_saved_with_a_room_config_keeps_it(
+    organization, workspace, auth_client
+):
+    agent = _stored_agent_without_a_prompt(organization, workspace, "creds-room")
+
+    saved = auth_client.post(
+        f"/simulate/agent-definitions/{agent.id}/versions/create/",
+        _livekit_page_body(livekit_config_json={"room": "support"}),
+        format="json",
+    )
+
+    assert saved.status_code == 201, saved.content
+    newest = _newest_version(agent)
+    assert newest.configuration_snapshot["livekit_config_json"] == {"room": "support"}
+    assert _credentials_of(newest).get().config_json == {"room": "support"}

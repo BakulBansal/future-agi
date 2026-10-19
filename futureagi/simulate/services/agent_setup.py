@@ -26,6 +26,8 @@ LEGACY_TYPE = {"livekit": "livekit", "livekit_bridge": "livekit", "retell": "ret
 
 _FAILURE_MESSAGE_MAX = 2000
 _SETUP_HASH = re.compile(r"sh1:[0-9a-f]{64}")
+_ESCAPED_NUL = re.compile(r"(?<!\\)(?:\\\\)*\\u0000")
+_INT_MAX = 2**31 - 1
 _UNIT_ID = re.compile(r"[a-z0-9][a-z0-9_.:-]{0,127}")
 _TYPES = ("voice", "chat", "coding", "cua", "browser", "crawler")
 _KINDS = ("hosted", "source", "endpoint")
@@ -392,11 +394,13 @@ def _checked_version(
     agent_version_id: UUID, agent: dict, sdk_version: str
 ) -> AgentVersion:
     try:
-        size = len(json.dumps(agent, ensure_ascii=False, allow_nan=False).encode())
+        text = json.dumps(agent, ensure_ascii=False, allow_nan=False)
     except (TypeError, ValueError):
         raise AgentStoreError("agent_invalid") from None
-    if size > AGENT_MAX_BYTES:
+    if len(text.encode()) > AGENT_MAX_BYTES:
         raise AgentStoreError("agent_too_large")
+    if _ESCAPED_NUL.search(text):
+        raise AgentStoreError("agent_invalid")
     version = AgentVersion.no_workspace_objects.filter(id=agent_version_id).first()
     if version is None:
         raise AgentStoreError("agent_version_not_found")
@@ -565,6 +569,8 @@ def _number(value: Any, *, integer: bool = False) -> None:
         return
     accepted = int if integer else (int, float)
     if isinstance(value, bool) or not isinstance(value, accepted):
+        raise _Invalid
+    if integer and abs(value) > _INT_MAX:
         raise _Invalid
 
 

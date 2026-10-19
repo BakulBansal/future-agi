@@ -17,7 +17,6 @@ const harness = vi.hoisted(() => ({
     setActiveViewConfig: vi.fn(),
     setHeaderConfig: vi.fn(),
   },
-  addToQueueProps: [],
   callLogsGridProps: [],
   llmTracingState: {},
   params: { observeId: "project-1" },
@@ -26,7 +25,7 @@ const harness = vi.hoisted(() => ({
   traceGridProps: [],
   toolbarProps: [],
   projectDetail: { source: "observe" },
-  urlState: {},
+  removeSimulationCalls: undefined,
   replayState: {
     openReplaySessionDrawer: {},
     setIsReplayDrawerCollapsed: vi.fn(),
@@ -57,7 +56,7 @@ vi.mock("src/routes/hooks/use-url-state", async () => {
       ReactModule.useState(
         {
           selectedTab: harness.selectedTab,
-          ...harness.urlState,
+          remove_simulation_calls: harness.removeSimulationCalls,
         }[key] ?? defaultValue,
       ),
   };
@@ -170,15 +169,6 @@ vi.mock("src/api/annotation-queues/annotation-queues", () => ({
 vi.mock("src/sections/annotations/queues/create-queue-drawer", () => ({
   default: () => null,
 }));
-vi.mock(
-  "src/sections/annotations/queues/components/add-to-queue-dialog",
-  () => ({
-    default: (props) => {
-      harness.addToQueueProps.push(props);
-      return null;
-    },
-  }),
-);
 
 vi.mock("src/sections/test-detail/states", () => ({
   useTestDetailSideDrawerStoreShallow: (selector) =>
@@ -296,8 +286,7 @@ describe("LLMTracingView graph population", () => {
   beforeEach(() => {
     harness.callLogsGridProps = [];
     harness.primaryGraphProps = [];
-    harness.addToQueueProps = [];
-    harness.urlState = {};
+    harness.removeSimulationCalls = undefined;
     harness.selectedTab = "trace";
   });
 
@@ -329,30 +318,30 @@ describe("LLMTracingView graph population", () => {
     expect(props.observeType).toBeUndefined();
   });
 
-  it("never sends remove_simulation_calls", async () => {
+  it("applies the Voice list's simulation-call toggle to the Voice chart", async () => {
     harness.projectDetail = { source: "simulator" };
-    harness.urlState = { remove_simulation_calls: true, showCompare: true };
+    harness.removeSimulationCalls = true;
     renderView();
 
-    // The backend hides marked simulated calls on its own, so neither the
-    // chart nor the list asks for the field, whatever the URL holds.
-    const chartProps = await lastPrimaryGraphProps();
-    expect(chartProps.observeType).toBe("voice");
-    for (const props of harness.primaryGraphProps) {
-      expect(props).not.toHaveProperty("removeSimulationCalls");
-    }
+    const props = await lastPrimaryGraphProps();
+    expect(props.observeType).toBe("voice");
+    expect(props.removeSimulationCalls).toBe(true);
+    // The grid beside it lists calls under the same toggle.
     await waitFor(() =>
       expect(harness.callLogsGridProps.length).toBeGreaterThan(0),
     );
-    for (const props of harness.callLogsGridProps) {
-      expect(props.params).not.toHaveProperty("remove_simulation_calls");
-    }
-    await waitFor(() =>
-      expect(harness.addToQueueProps.length).toBeGreaterThan(0),
-    );
-    for (const props of harness.addToQueueProps) {
-      expect(props).not.toHaveProperty("removeSimulationCalls");
-    }
+    expect(
+      harness.callLogsGridProps.at(-1).params.remove_simulation_calls,
+    ).toBe(true);
+  });
+
+  it("keeps simulation calls on the Voice chart while the toggle is off", async () => {
+    harness.projectDetail = { source: "simulator" };
+    renderView();
+
+    const props = await lastPrimaryGraphProps();
+    expect(props.observeType).toBe("voice");
+    expect(props.removeSimulationCalls).toBe(false);
   });
 });
 
@@ -363,7 +352,6 @@ describe("LLMTracingView voice bulk tags", () => {
   beforeEach(() => {
     harness.callLogsGridProps = [];
     harness.toolbarProps = [];
-    harness.urlState = {};
     harness.selectedTab = "trace";
     harness.projectDetail = { source: "simulator" };
     axios.get.mockReset();

@@ -6,6 +6,7 @@ from agentcc.services.credential_manager import mask_key
 from simulate.models import AgentVersion
 from simulate.services.agent_definition import resolve_api_key_for_version
 from simulate.services.agent_setup import agent_summary
+from tracer.services.observability_switch import snapshot_as_shown
 
 logger = structlog.get_logger(__name__)
 
@@ -59,6 +60,7 @@ class AgentVersionResponseSerializer(serializers.ModelSerializer):
             for key in ["organization", "knowledge_base", "workspace", "id"]:
                 if key in snapshot and snapshot[key] is not None:
                     snapshot[key] = str(snapshot[key])
+        snapshot = snapshot_as_shown(snapshot, instance.agent_definition)
         data["configuration_snapshot"] = snapshot
         try:
             creds = instance.credentials

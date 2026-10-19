@@ -41,6 +41,8 @@ from tracer.tests.test_observability_switch import (
     _agent,
     _agent_with_row,
     _created,
+    _delete_project,
+    _delete_row,
     _row,
     _statements,
     _stored,
@@ -1214,6 +1216,231 @@ class TestCreateAgentVersionObservability:
             )
         assert response.status_code == status.HTTP_201_CREATED
         assert _stored(agent.observability_provider)[1] is False
+
+    @pytest.mark.parametrize("delete", [_delete_project, _delete_row])
+    def test_source_agent_absent_field_with_a_dead_row_stays_off(
+        self, auth_client, organization, workspace, delete
+    ):
+        # The link still points at the deleted row, whose enabled column says on.
+        agent = _agent_with_row(organization, workspace, enabled=True)
+        delete(agent)
+        created = _created()
+        summary = make_summary(agent_definition_id=agent.id, kind="source")
+        with (
+            seams(summary),
+            patch.object(
+                agent_version_views,
+                "set_agent_observability",
+                wraps=agent_version_views.set_agent_observability,
+            ) as switch_call,
+        ):
+            response = _create_version(auth_client, agent, {})
+
+        assert response.status_code == status.HTTP_201_CREATED
+        # The view reads the dead link as off, not the stored column.
+        switch_call.assert_called_once()
+        assert switch_call.call_args.kwargs["enabled"] is False
+        assert _stored_agent(agent).observability_provider_id is None
+        assert _created() == created
+        assert _newest_snapshot(agent)[1]["observability_enabled"] is False
+
+    def test_turn_on_with_the_project_deleted_makes_a_fresh_project(
+        self, auth_client, organization, workspace
+    ):
+        # The user deleted the project, so the link is off. One save with the
+        # box on, the web app's path, makes the new project and row.
+        agent = _agent_with_row(organization, workspace, enabled=True)
+        dead = agent.observability_provider
+        _delete_project(agent)
+        projects, rows = _created()
+        with seams(make_summary(agent_definition_id=agent.id)):
+            response = _create_version(
+                auth_client, agent, {"observability_enabled": True}
+            )
+
+        assert response.status_code == status.HTTP_201_CREATED
+        assert _created() == (projects + 1, rows + 1)
+        linked = _stored_agent(agent).observability_provider
+        assert linked.pk != dead.pk and linked.project_id != dead.project_id
+        assert _stored(linked)[1] is True
+        assert not linked.project.deleted
+        assert _newest_snapshot(agent)[1]["observability_enabled"] is True
+
+    def test_save_with_false_after_the_project_is_deleted_makes_nothing(
+        self, auth_client, organization, workspace
+    ):
+        agent = _agent_with_row(organization, workspace, enabled=True)
+        _delete_project(agent)
+        created = _created()
+        with seams(make_summary(agent_definition_id=agent.id)):
+            response = _create_version(
+                auth_client, agent, {"observability_enabled": False}
+            )
+
+        assert response.status_code == status.HTTP_201_CREATED
+        assert _created() == created
+        assert _stored_agent(agent).observability_provider_id is None
+        assert _newest_snapshot(agent)[1]["observability_enabled"] is False
+
+    def test_agent_page_reads_off_after_the_project_is_deleted(
+        self, auth_client, organization, workspace
+    ):
+        agent = _agent_with_row(organization, workspace, enabled=True)
+        version = agent.create_version(
+            description="while on",
+            commit_message="while on",
+            status=AgentVersion.StatusChoices.ACTIVE,
+        )
+        assert version.configuration_snapshot["observability_enabled"] is True
+        before = auth_client.get(_version_url(agent.id, version.id)).json()
+        assert before["configuration_snapshot"]["observability_enabled"] is True
+
+        _delete_project(agent)
+
+        # A version written now, and the one written while the project was live.
+        later = _stored_agent(agent).create_version(
+            description="after",
+            commit_message="after",
+            status=AgentVersion.StatusChoices.ARCHIVED,
+        )
+        assert later.configuration_snapshot["observability_enabled"] is False
+        for opened in (version, later):
+            body = auth_client.get(_version_url(agent.id, opened.id)).json()
+            assert body["configuration_snapshot"]["observability_enabled"] is False
+        # The stored snapshot is not rewritten.
+        version.refresh_from_db()
+        assert version.configuration_snapshot["observability_enabled"] is True
+
+    def test_form_save_from_an_old_snapshot_makes_nothing_after_the_delete(
+        self, auth_client, organization, workspace
+    ):
+        # The form starts from the snapshot it opened and sends it back as is.
+        agent = _agent_with_row(organization, workspace, enabled=True)
+        version = agent.create_version(
+            description="while on",
+            commit_message="while on",
+            status=AgentVersion.StatusChoices.ACTIVE,
+        )
+        assert version.configuration_snapshot["observability_enabled"] is True
+        _delete_project(agent)
+        created = _created()
+
+        page = auth_client.get(_version_url(agent.id, version.id)).json()
+        sent = page["configuration_snapshot"]["observability_enabled"]
+        with seams(make_summary(agent_definition_id=agent.id)):
+            response = _create_version(
+                auth_client,
+                agent,
+                {"description": "unrelated edit", "observability_enabled": sent},
+            )
+
+        assert response.status_code == status.HTTP_201_CREATED
+        assert sent is False
+        assert _created() == created
+        assert _stored_agent(agent).observability_provider_id is None
+
+    def test_test_run_page_reads_off_and_its_keys_save_makes_nothing(
+        self, auth_client, organization, workspace, simulator_agent
+    ):
+        # The Update Keys dialog on the test-run page starts from the version
+        # that page shows and saves through the version-create endpoint.
+        agent = _agent_with_row(organization, workspace, enabled=True)
+        version = agent.create_version(
+            description="while on",
+            commit_message="while on",
+            status=AgentVersion.StatusChoices.ACTIVE,
+        )
+        assert version.configuration_snapshot["observability_enabled"] is True
+        run_test = RunTest.objects.create(
+            name="Keys dialog run",
+            agent_definition=agent,
+            agent_version=version,
+            simulator_agent=simulator_agent,
+            organization=organization,
+            workspace=workspace,
+        )
+        url = f"/simulate/run-tests/{run_test.id}/"
+        live = auth_client.get(url).json()["agent_version"]
+        assert live["configuration_snapshot"]["observability_enabled"] is True
+
+        _delete_project(agent)
+        created = _created()
+        shown = auth_client.get(url).json()["agent_version"]["configuration_snapshot"]
+        assert shown["observability_enabled"] is False
+        # What is stored is left as it was.
+        version.refresh_from_db()
+        assert version.configuration_snapshot["observability_enabled"] is True
+
+        with seams(make_summary(agent_definition_id=agent.id)):
+            response = _create_version(
+                auth_client,
+                agent,
+                {
+                    "api_key": "new-test-key",
+                    "observability_enabled": shown["observability_enabled"],
+                },
+            )
+
+        assert response.status_code == status.HTTP_201_CREATED
+        assert _created() == created
+        assert _stored_agent(agent).observability_provider_id is None
+
+    def test_double_submit_after_the_project_is_deleted_makes_one_project(
+        self, auth_client, organization, workspace
+    ):
+        agent = _agent_with_row(organization, workspace, enabled=True)
+        _delete_project(agent)
+        projects, rows = _created()
+
+        # Both submits read the agent while its link was still the dead one.
+        with seams(make_summary(agent_definition_id=agent.id)), stale_copies(agent):
+            first = _create_version(
+                auth_client,
+                agent,
+                {"description": "First", "observability_enabled": True},
+            )
+            second = _create_version(
+                auth_client,
+                agent,
+                {"description": "Second", "observability_enabled": True},
+            )
+
+        assert first.status_code == status.HTTP_201_CREATED
+        assert second.status_code == status.HTTP_201_CREATED
+        assert _created() == (projects + 1, rows + 1)
+        assert_one_project_and_row(agent)
+
+    def test_refusal_after_the_project_is_deleted_rolls_back_every_write(
+        self, auth_client, organization, workspace
+    ):
+        agent = _agent_with_row(
+            organization, workspace, enabled=True, agent_name="Before Rename"
+        )
+        dead_id = agent.observability_provider_id
+        agent.create_version(
+            description="first",
+            commit_message="first",
+            status=AgentVersion.StatusChoices.ACTIVE,
+        )
+        _delete_project(agent)
+        versions = AgentVersion.objects.filter(agent_definition=agent).count()
+        created = _created()
+
+        refusing = make_summary(agent_definition_id=agent.id, missing=("credential",))
+        with seams(refusing):
+            response = _create_version(
+                auth_client,
+                agent,
+                {"agent_name": "After Rename", "observability_enabled": True},
+            )
+
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert response.json() == _refusal("credential")
+        stored = _stored_agent(agent)
+        assert stored.agent_name == "Before Rename"
+        assert stored.observability_provider_id == dead_id
+        assert AgentVersion.objects.filter(agent_definition=agent).count() == versions
+        assert _created() == created
 
     def test_project_error_is_500(self, auth_client, organization, workspace):
         agent = _agent(organization, workspace, agent_name="Before Rename")

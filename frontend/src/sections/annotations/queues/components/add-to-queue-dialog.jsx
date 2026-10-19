@@ -44,6 +44,10 @@ AddToQueueDialog.propTypes = {
   // (has_conversation_root, voice system metrics). Without this the
   // resolver would return the project's full trace set.
   isVoiceCall: PropTypes.bool,
+  // Voice/simulator projects only — mirrors the grid toolbar toggle. When
+  // true, the resolver excludes VAPI simulator calls so the queue receives
+  // the same set the grid shows.
+  removeSimulationCalls: PropTypes.bool,
 };
 
 export default function AddToQueueDialog({
@@ -57,6 +61,7 @@ export default function AddToQueueDialog({
   filter = null,
   projectId = null,
   isVoiceCall = false,
+  removeSimulationCalls = false,
 }) {
   const open = Boolean(anchorEl);
   const [searchQuery, setSearchQuery] = useState("");
@@ -168,6 +173,7 @@ export default function AddToQueueDialog({
               filter: filter || [],
               exclude_ids: sourceIds,
               is_voice_call: !!isVoiceCall,
+              remove_simulation_calls: !!removeSimulationCalls,
             },
           }
         : {
@@ -195,6 +201,7 @@ export default function AddToQueueDialog({
       filter,
       projectId,
       isVoiceCall,
+      removeSimulationCalls,
       addItems,
       showAddResult,
       onSuccess,
@@ -432,6 +439,7 @@ export default function AddToQueueDialog({
                   filter: filter || [],
                   exclude_ids: sourceIds,
                   is_voice_call: !!isVoiceCall,
+                  remove_simulation_calls: !!removeSimulationCalls,
                 },
               }
             : {
