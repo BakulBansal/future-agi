@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "source_contract": "swagger.json",
-  "source_contract_sha256": "c0a26fef1667545a866c94f6ee45262a57cba215112b8897dde0c275367e34fa",
+  "source_contract_sha256": "9fc4e2200226c011fb5a8c2d43c900742e60964c4d4e526540d060b6b70eed85",
   "tool_count": 92,
   "tools": [
     {
@@ -3611,6 +3611,16 @@
           "id": {
             "type": "string"
           },
+          "test_execution_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "A run the caller can read; opens the hidden simulation project of that run's agent."
+          },
+          "call_execution_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "A run the caller can read; opens the hidden simulation project of that run's agent."
+          },
           "project_id": {
             "type": "string",
             "format": "uuid",
@@ -3636,6 +3646,8 @@
             "id"
           ],
           "query": [
+            "test_execution_id",
+            "call_execution_id",
             "project_id"
           ],
           "body": []
@@ -3744,6 +3756,16 @@
           "id": {
             "type": "string"
           },
+          "test_execution_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "A run the caller can read; opens the hidden simulation project of that run's agent."
+          },
+          "call_execution_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "A run the caller can read; opens the hidden simulation project of that run's agent."
+          },
           "project_id": {
             "type": "string",
             "format": "uuid"
@@ -3790,6 +3812,8 @@
             "id"
           ],
           "query": [
+            "test_execution_id",
+            "call_execution_id",
             "project_id",
             "trace_id",
             "start_hour",
