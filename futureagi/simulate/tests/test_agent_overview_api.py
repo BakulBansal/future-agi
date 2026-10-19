@@ -338,6 +338,23 @@ def test_runs_of_a_deleted_environment_are_left_out_and_the_count_agrees(
 
 
 @pytest.mark.django_db
+def test_an_environment_of_a_deleted_test_is_not_counted(
+    auth_client, organization, workspace
+):
+    agent = _agent(organization, workspace, "Northwind")
+    live = _environment(agent, 1)
+    gone = _environment(agent, 2)
+    RunTest.all_objects.filter(id=gone.run_test_id).update(deleted=True)
+
+    detail = auth_client.get(f"{AGENTS}{agent.id}/").json()
+    row = _rows(auth_client)["Northwind"]
+
+    assert detail["environment_count"] == 1
+    assert row["environment_count"] == 1
+    assert [ref["id"] for ref in row["environments"]] == [str(live.id)]
+
+
+@pytest.mark.django_db
 def test_runs_limit_defaults_to_five_and_rejects_out_of_range(
     auth_client, organization, workspace
 ):

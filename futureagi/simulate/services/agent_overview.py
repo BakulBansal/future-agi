@@ -28,8 +28,11 @@ ENVIRONMENTS_PER_ROW = 5
 
 
 def _environments() -> QuerySet[HostedHarnessJob]:
+    # An environment of a deleted test is gone from the page, so it is not
+    # counted, as recent runs leave its runs out.
     return HostedHarnessJob.no_workspace_objects.filter(
         run_test__agent_definition=OuterRef("pk"),
+        run_test__deleted=False,
         environment__isnull=True,
         deleted=False,
     )
@@ -83,6 +86,7 @@ def environment_refs(agents: list[AgentDefinition]) -> dict[UUID, list[dict[str,
     jobs = (
         HostedHarnessJob.no_workspace_objects.filter(
             run_test__agent_definition__in=[agent.id for agent in agents],
+            run_test__deleted=False,
             environment__isnull=True,
             deleted=False,
         )
