@@ -1547,6 +1547,7 @@ def test_create_view_puts_the_project_in_the_request_workspace(
             "languages": ["en"],
             "api_key": "test-key",
             "assistant_id": "assistant-1",
+            "authentication_method": "api_key",
             "observability_enabled": True,
         },
         format="json",

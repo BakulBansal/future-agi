@@ -131,12 +131,13 @@ def _row_provider(
     return column if listed else ProviderChoices.OTHERS.value
 
 
-def check_observability_prerequisites(
-    agent_definition: AgentDefinition,
-    summary: agent_setup.AgentSummary | None = None,
+def check_observability_prerequisites(agent_definition: AgentDefinition) -> None:
+    _check_prerequisites(agent_definition, _agent_summary(agent_definition.id))
+
+
+def _check_prerequisites(
+    agent_definition: AgentDefinition, summary: agent_setup.AgentSummary
 ) -> None:
-    if summary is None:
-        summary = _agent_summary(agent_definition.id)
     agent_id = str(agent_definition.id)
     try:
         listed = summary.provider in _read_provider_list().providers
@@ -329,7 +330,7 @@ def set_agent_observability(
         return None
     # Read once: the check and the row's provider word both need it.
     summary = _agent_summary(agent_definition.id)
-    check_observability_prerequisites(agent_definition, summary)
+    _check_prerequisites(agent_definition, summary)
     with transaction.atomic():
         # A second turn-on of this agent that reaches here finds the first one's row.
         locked = AgentDefinition.no_workspace_objects.select_for_update(

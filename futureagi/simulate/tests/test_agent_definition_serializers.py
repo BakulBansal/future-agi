@@ -604,6 +604,7 @@ class TestAgentVersionResponseSerializer:
             "configuration_snapshot",
             "is_active",
             "is_latest",
+            "agent_kind",
             "created_at",
             "updated_at",
         }
