@@ -88,6 +88,28 @@ def test_get_agent_of_another_organization_404s(auth_client, workspace):
 
 
 @pytest.mark.django_db
+def test_other_organization_404(auth_client, workspace):
+    stranger = Organization.objects.create(name="Other Organization")
+    # Filed under the caller's workspace so the workspace-scoped manager still returns it:
+    # only the organization check can refuse it.
+    foreign = AgentDefinition.no_workspace_objects.create(
+        agent_name="Foreign",
+        agent_type=AgentDefinition.AgentTypeChoices.TEXT,
+        inbound=True,
+        description="x",
+        organization=stranger,
+        workspace=workspace,
+    )
+    foreign_version = foreign.create_version(description="", commit_message="x", status="active")
+    store_agent(agent_version_id=foreign_version.id, agent=source_agent(), sdk_version="0.2.3")
+
+    response = auth_client.get(_agent_url(foreign.id, foreign_version.id))
+
+    assert response.status_code == status.HTTP_404_NOT_FOUND
+    assert "Agent definition not found" in str(response.json())
+
+
+@pytest.mark.django_db
 def test_version_detail_carries_agent_kind_from_the_summary(auth_client, definition, version):
     assert auth_client.get(_detail_url(definition.id, version.id)).json()["agent_kind"] is None
 
