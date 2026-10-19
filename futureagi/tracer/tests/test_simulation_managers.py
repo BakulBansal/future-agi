@@ -10,8 +10,6 @@ import pytest
 from django.db import IntegrityError, transaction
 from rest_framework import status
 
-from ai_tools.base import ToolContext
-from ai_tools.registry import registry
 from model_hub.models.ai_model import AIModel
 from simulate.models.agent_definition import AgentDefinition
 from tfc.utils.error_codes import get_error_message
@@ -169,8 +167,7 @@ def test_save_full_clean_does_not_see_a_hidden_name_but_the_database_does(
 
 
 VIEW_PATHS = ("view_create", "view_rename", "view_patch")
-TOOL_PATHS = {"tool_create": "create_project", "tool_rename": "update_project"}
-EXACT_NAME_PATHS = ("get_or_create_project", *TOOL_PATHS)
+EXACT_NAME_PATHS = ("get_or_create_project",)
 VIEW_NOT_RESERVED_NAMES = [name for name in NOT_RESERVED_NAMES if name == name.strip()]
 HARMLESS_NAME = "A harmless name"
 RESERVED_PATH_CASES = (
@@ -181,11 +178,6 @@ RESERVED_PATH_CASES = (
 )
 
 
-def _run_tool(name, params, user, organization, workspace):
-    context = ToolContext(user=user, organization=organization, workspace=workspace)
-    return registry.get(name).run(params, context)
-
-
 @pytest.mark.parametrize(
     "path, name, refused",
     RESERVED_PATH_CASES,
@@ -194,7 +186,7 @@ def _run_tool(name, params, user, organization, workspace):
         for index, (path, _name, refused) in enumerate(RESERVED_PATH_CASES)
     ],
 )
-def test_reserved_name_is_refused_by_create_rename_tools_and_get_or_create(
+def test_reserved_name_is_refused_by_create_rename_views_and_get_or_create(
     path, name, refused, auth_client, user, organization, workspace
 ):
     target = _project(Project.objects, organization, workspace, "Target project")
@@ -212,27 +204,6 @@ def test_reserved_name_is_refused_by_create_rename_tools_and_get_or_create(
             )
             assert project.name == name
             assert Project.no_workspace_objects.filter(pk=project.pk).exists()
-    elif path in TOOL_PATHS:
-        context = ToolContext(user=user, organization=organization, workspace=workspace)
-        if path == "tool_create":
-            params = {
-                "name": name,
-                "trace_type": "observe",
-                "model_type": "GenerativeLLM",
-            }
-        else:
-            params = {"project_id": str(target.id), "name": name}
-        result = registry.get(TOOL_PATHS[path]).run(params, context)
-        if refused:
-            assert result.is_error
-            assert result.error_code == "VALIDATION_ERROR"
-            assert RESERVED_PROJECT_NAME_MESSAGE in result.content
-        else:
-            assert not result.is_error, result.content
-            if path == "tool_create":
-                assert Project.objects.get(name=name).trace_type == "observe"
-            else:
-                assert Project.objects.get(pk=target.pk).name == name
     elif path == "view_create":
         response = auth_client.post(
             "/tracer/project/",
@@ -274,23 +245,31 @@ def test_reserved_name_is_refused_by_create_rename_tools_and_get_or_create(
         assert not Project.with_simulation.filter(
             name__in={name, name.strip()}
         ).exists()
-        if path in ("view_rename", "view_patch", "tool_rename"):
+        if path in ("view_rename", "view_patch"):
             assert Project.objects.get(pk=target.pk).name == "Target project"
 
 
-@pytest.mark.parametrize("tool", ["create_project", "update_project"])
-def test_a_reserved_name_from_the_ai_tool_does_not_block_the_hidden_project(
-    tool, user, organization, workspace
+@pytest.mark.parametrize("path", ["view_create", "view_rename"])
+def test_a_refused_reserved_name_does_not_block_the_hidden_project(
+    path, auth_client, user, organization, workspace
 ):
     agent = _agent_without_context(organization, workspace)
     target = _project(Project.objects, organization, workspace, "Target project")
     name = simulation_project_name(agent.id)
-    if tool == "create_project":
-        params = {"name": name, "model_type": "GenerativeLLM"}
+    if path == "view_create":
+        response = auth_client.post(
+            "/tracer/project/",
+            {"name": name, "model_type": "GenerativeLLM", "trace_type": "observe"},
+            format="json",
+        )
     else:
-        params = {"project_id": str(target.id), "name": name}
+        response = auth_client.post(
+            "/tracer/project/update_project_name/",
+            {"project_id": str(target.id), "name": name},
+            format="json",
+        )
 
-    assert _run_tool(tool, params, user, organization, workspace).is_error
+    assert response.status_code == status.HTTP_400_BAD_REQUEST
     project = ensure_simulation_project(agent)
 
     assert project.simulation_agent_id == agent.id

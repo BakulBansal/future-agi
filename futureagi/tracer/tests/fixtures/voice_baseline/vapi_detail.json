@@ -30,6 +30,10 @@
   "ended_reason": "customer-ended-call",
   "error_message": null,
   "eval_outputs": {},
+  "eval_rollup": {
+    "evals": [],
+    "scope": "trace"
+  },
   "evaluation_data": null,
   "id": "5689f6d7-caaf-5e64-8dc9-6f526ccca69b",
   "message_count": 8,

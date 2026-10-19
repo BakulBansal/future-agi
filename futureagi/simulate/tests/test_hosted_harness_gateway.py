@@ -2938,7 +2938,7 @@ def test_platform_simulator_material_keeps_the_harness_untraced_without_opt_in(
 ):
     _set_observe_env(monkeypatch, flag)
 
-    values, _credentials = _platform_simulator_material()
+    values = _platform_simulator_material()
 
     # The keys travel regardless, because the harness grades with them.
     assert values["FI_API_KEY"] == "observe-key"
@@ -2970,7 +2970,7 @@ def test_platform_simulator_material_forwards_no_key_that_is_not_set(
 ):
     _set_observe_env(monkeypatch, flag, **missing)
 
-    values, _credentials = _platform_simulator_material()
+    values = _platform_simulator_material()
 
     if "api_key" in missing:
         assert "FI_API_KEY" not in values
@@ -2994,7 +2994,7 @@ def test_the_collector_host_follows_the_keys_whatever_the_harness_flag(monkeypat
     # The platform evals call the collector, so keys without the opt-in still need its host.
     for flag in (None, "off", "on"):
         _set_observe_env(monkeypatch, flag)
-        values, _credentials = _platform_simulator_material()
+        values = _platform_simulator_material()
         assert values["FI_BASE_URL"] == "https://collector.example.test"
         assert "collector.example.test" in _resolved_egress_domains(
             payload, {}, values, None
@@ -3003,7 +3003,7 @@ def test_the_collector_host_follows_the_keys_whatever_the_harness_flag(monkeypat
     # Without keys no rule adds the host in this setup, so the keys are what put it there.
     for api_key, secret in (("", ""), ("observe-key", ""), ("", "observe-secret")):
         _set_observe_env(monkeypatch, "on", api_key=api_key, secret=secret)
-        values, _credentials = _platform_simulator_material()
+        values = _platform_simulator_material()
         assert values["FI_BASE_URL"] == "https://collector.example.test"
         assert "collector.example.test" not in _resolved_egress_domains(
             payload, {}, values, None
@@ -3389,16 +3389,13 @@ class _ExportWorld:
 
         self.simulator_values = {
             "ALK_HARNESS": "vertex-gemini",
-            "GOOGLE_APPLICATION_CREDENTIALS": _SIMULATOR_VERTEX_CREDENTIALS_PATH,
-            "GOOGLE_CLOUD_PROJECT": "platform-simulator-project",
-            "GOOGLE_CLOUD_LOCATION": "global",
+            "ALK_HARNESS_MODEL": "gemini-3.7-flash",
+            "AGENTCC_BASE_URL": "https://gateway.example.test",
+            "AGENTCC_API_KEY": "harness-virtual-key",
         }
         monkeypatch.setattr(
             f"{_GATEWAY}._platform_simulator_material",
-            lambda: (
-                dict(self.simulator_values),
-                b'{"project_id":"platform-simulator-project"}',
-            ),
+            lambda: dict(self.simulator_values),
         )
         if cap_at_baseline:
             self.client.max_egress_domains = len(self.baseline_domains())
@@ -3705,7 +3702,7 @@ def test_the_harness_flag_never_changes_the_agents_own_export(
     # Same world as the bound-source export test above, except that the platform simulator
     # material is the real one for the four harness names, so the flag can reach the launch.
     world = _ExportWorld(organization, workspace, user, settings, monkeypatch)
-    real_values, _credentials = _platform_simulator_material()
+    real_values = _platform_simulator_material()
     world.simulator_values.update(
         {name: real_values[name] for name in _OBSERVE_NAMES if name in real_values}
     )

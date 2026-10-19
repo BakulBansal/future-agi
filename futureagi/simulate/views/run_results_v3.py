@@ -60,7 +60,7 @@ from simulate.services.scoring_status import (
 from simulate.services.test_executor import build_eval_configs_map
 from simulate.views.scoping import run_test_workspace_filter
 from tfc.utils.api_contracts import validated_request
-from tfc.utils.api_serializers import ApiDetailErrorResponseSerializer
+from tfc.utils.api_serializers import ApiErrorResponseSerializer
 from tfc.utils.general_methods import GeneralMethods
 from tracer.services.clickhouse.client import CHError
 
@@ -612,7 +612,7 @@ class RunTracesV3View(APIView):
         query_serializer=RunTracesV3QuerySerializer,
         responses={
             200: RunTracesV3ResponseSerializer,
-            503: ApiDetailErrorResponseSerializer,
+            503: ApiErrorResponseSerializer,
         },
         operation_id="simulate_v3_test_execution_traces",
     )
@@ -633,9 +633,10 @@ class RunTracesV3View(APIView):
                 test_execution_id=str(execution.id),
                 error=type(exc).__name__,
             )
-            return Response(
-                {"detail": "Traces are unavailable right now"},
-                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            return GeneralMethods(request=request).custom_error_response(
+                status.HTTP_503_SERVICE_UNAVAILABLE,
+                "Traces are unavailable right now",
+                code="run_traces_unavailable",
             )
         return Response(RunTracesV3ResponseSerializer(asdict(result)).data)
 

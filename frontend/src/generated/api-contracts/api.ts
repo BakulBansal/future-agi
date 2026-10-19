@@ -67867,7 +67867,7 @@ export type simulateV3TestExecutionTracesResponse200 = {
 };
 
 export type simulateV3TestExecutionTracesResponse503 = {
-  data: ApiDetailErrorResponseApi;
+  data: ApiErrorResponseApi;
   status: 503;
 };
 

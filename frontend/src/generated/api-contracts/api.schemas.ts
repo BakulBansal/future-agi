@@ -23807,6 +23807,39 @@ export interface RunTracesV3ResponseApi {
   traces: RunTraceApi[];
 }
 
+export type ApiErrorResponseApiType =
+  (typeof ApiErrorResponseApiType)[keyof typeof ApiErrorResponseApiType];
+
+export const ApiErrorResponseApiType = {
+  validation_error: "validation_error",
+  authentication_error: "authentication_error",
+  payment_required: "payment_required",
+  entitlement_error: "entitlement_error",
+  permission_error: "permission_error",
+  not_found: "not_found",
+  conflict: "conflict",
+  client_error: "client_error",
+  rate_limit: "rate_limit",
+  server_error: "server_error",
+  service_unavailable: "service_unavailable",
+  timeout: "timeout",
+  api_error: "api_error",
+} as const;
+
+export type ApiErrorResponseApiDetails = { [key: string]: string[] };
+
+export interface ApiErrorResponseApi {
+  status?: boolean;
+  type?: ApiErrorResponseApiType;
+  code?: string;
+  detail?: string;
+  result?: string;
+  message?: string;
+  error?: string;
+  attr?: string;
+  details?: ApiErrorResponseApiDetails;
+}
+
 export interface DeploymentHeartbeatApi {
   schema_version?: number;
   instance_id: string;
@@ -24186,39 +24219,6 @@ export interface BulkAnnotationResponseResultApi {
 export interface BulkAnnotationResponseApi {
   status?: boolean;
   result: BulkAnnotationResponseResultApi;
-}
-
-export type ApiErrorResponseApiType =
-  (typeof ApiErrorResponseApiType)[keyof typeof ApiErrorResponseApiType];
-
-export const ApiErrorResponseApiType = {
-  validation_error: "validation_error",
-  authentication_error: "authentication_error",
-  payment_required: "payment_required",
-  entitlement_error: "entitlement_error",
-  permission_error: "permission_error",
-  not_found: "not_found",
-  conflict: "conflict",
-  client_error: "client_error",
-  rate_limit: "rate_limit",
-  server_error: "server_error",
-  service_unavailable: "service_unavailable",
-  timeout: "timeout",
-  api_error: "api_error",
-} as const;
-
-export type ApiErrorResponseApiDetails = { [key: string]: string[] };
-
-export interface ApiErrorResponseApi {
-  status?: boolean;
-  type?: ApiErrorResponseApiType;
-  code?: string;
-  detail?: string;
-  result?: string;
-  message?: string;
-  error?: string;
-  attr?: string;
-  details?: ApiErrorResponseApiDetails;
 }
 
 export type FetchGraphResponseApiResultMetricStatistic =

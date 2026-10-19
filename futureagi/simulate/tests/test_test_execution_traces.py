@@ -644,7 +644,10 @@ def test_a_clickhouse_failure_is_the_views_error(
     response = _get(auth_client, execution, call)
 
     assert response.status_code == status.HTTP_503_SERVICE_UNAVAILABLE
-    assert response.json() == {"detail": "Traces are unavailable right now"}
+    body = response.json()
+    assert body["status"] is False
+    assert body["message"] == "Traces are unavailable right now"
+    assert body["code"] == "run_traces_unavailable"
 
 
 def test_a_run_of_another_organization_is_not_found(

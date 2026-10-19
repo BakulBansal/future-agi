@@ -765,6 +765,28 @@ _FILED_BY_MODULE: dict[str, dict[str, Filing]] = {
             table="error_embeddings",
         ),
     },
+    "ee.cloud.internal.scripts.backfill-simulate-to-ch": {
+        "backfill_table": filed(
+            NOT_A_USER_READ,
+            why="one-time operator backfill of simulation rows from Postgres",
+        ),
+        "main": filed(
+            NOT_A_USER_READ,
+            why="one-time operator backfill of simulation rows from Postgres",
+        ),
+    },
+    "ee.cloud.internal.scripts.sync_pg_to_clickhouse": {
+        "verify": filed(
+            NOT_A_USER_READ,
+            why="one-time operator sync: compares row counts after the backfill",
+        ),
+    },
+    "ee.cloud.tasks.retention": {
+        "hard_delete_expired_data": filed(
+            NOT_A_USER_READ,
+            why="weekly retention job: deletes rows soft-deleted long ago; no view",
+        ),
+    },
     "ee.usage.migrations.0015_backfill_plan_and_wallet_credits": {
         "migrate_wallet_to_credits": filed(
             NO_SPAN_TABLE,
@@ -861,6 +883,13 @@ _FILED_BY_MODULE: dict[str, dict[str, Filing]] = {
             NO_SPAN_TABLE,
             why="run results read call execution rows",
             table="the simulate call execution table",
+        ),
+    },
+    "simulate.services.run_results_v3_scan": {
+        "_SCAN_SQL": filed(
+            NO_SPAN_TABLE,
+            why="run results scan reads call execution and scenario rows",
+            table="CallExecution and Scenarios",
         ),
     },
     "simulate.services.run_traces_v3": {
@@ -999,6 +1028,13 @@ _FILED_BY_MODULE: dict[str, dict[str, Filing]] = {
             table="tracer_trace, trace_session and tracer_eval_logger",
         ),
         "ConsistencyChecker.get_cdc_lag": _CDC_LAG_CHECK,
+    },
+    "tracer.services.clickhouse.eval_logger_table": {
+        "latest_completed_eval_rows": filed(
+            NO_SPAN_TABLE,
+            why="newest completed eval row per key, over the eval rows it is given",
+            table="tracer_eval_logger",
+        ),
     },
     "tracer.services.clickhouse.exact_attribute_detail": {
         "EXACT_ATTRIBUTE_DETAIL_SQL": filed(
@@ -1749,9 +1785,9 @@ _FILED_BY_MODULE: dict[str, dict[str, Filing]] = {
         "backfill_blank_completed_status": _EVAL_LOG_BACKFILL,
     },
     "tracer.services.grouping.feature_store": {
-        "GroupingFeatureStore.candidate_occurrences": _GROUPING_STORE,
         "GroupingFeatureStore.read_vectors": _GROUPING_STORE,
         "GroupingFeatureStore.write_and_verify": _GROUPING_STORE,
+        "nearest_sql": _GROUPING_STORE,
     },
     "tracer.services.users_list_manager": {
         "_users_attr_enrichment_query": _SESSION_OR_USER,
@@ -1920,6 +1956,10 @@ def operator_tooling(module):
         or module == "tracer.services.clickhouse.v2.backfill"
         or module == "tracer.services.clickhouse.v2.validate"
         or last.startswith("migrate_")
+        # Enterprise operator scripts, run by hand inside the backend container.
+        or module.startswith("ee.cloud.internal.scripts.")
+        # The scheduled retention job: deletes rows soft-deleted months ago.
+        or module == "ee.cloud.tasks.retention"
     )
 
 
@@ -2910,6 +2950,9 @@ ROW_TYPES = {
     "prism.AgentccProject.tracer_project": USER_MADE,
     "tracer.CustomEvalConfig.project": USER_MADE,
     "tracer.EndUser.project": TRACE_STORE_ROW,
+    "tracer.ErrorFeedAlertRule.project": USER_MADE,
+    # Made from an error cluster, so only for a project the clustering job visits.
+    "tracer.ErrorFeedIssueEvent.project": JOB_THROUGH_MANAGERS,
     "tracer.ErrorMemory.project": JOB_THROUGH_MANAGERS,
     "tracer.ErrorPattern.project": JOB_THROUGH_MANAGERS,
     "tracer.EvalTask.project": USER_MADE,

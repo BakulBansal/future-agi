@@ -58618,7 +58618,7 @@
                     "503": {
                         "description": "",
                         "schema": {
-                            "$ref": "#/definitions/ApiDetailErrorResponse"
+                            "$ref": "#/definitions/ApiErrorResponse"
                         }
                     },
                     "default": {
@@ -140046,6 +140046,77 @@
                 }
             }
         },
+        "ApiErrorResponse": {
+            "type": "object",
+            "properties": {
+                "status": {
+                    "title": "Status",
+                    "type": "boolean",
+                    "default": false
+                },
+                "type": {
+                    "title": "Type",
+                    "type": "string",
+                    "enum": [
+                        "validation_error",
+                        "authentication_error",
+                        "payment_required",
+                        "entitlement_error",
+                        "permission_error",
+                        "not_found",
+                        "conflict",
+                        "client_error",
+                        "rate_limit",
+                        "server_error",
+                        "service_unavailable",
+                        "timeout",
+                        "api_error"
+                    ],
+                    "x-nullable": true
+                },
+                "code": {
+                    "title": "Code",
+                    "type": "string",
+                    "x-nullable": true
+                },
+                "detail": {
+                    "title": "Detail",
+                    "type": "string",
+                    "x-nullable": true
+                },
+                "result": {
+                    "title": "Result",
+                    "type": "string",
+                    "x-nullable": true
+                },
+                "message": {
+                    "title": "Message",
+                    "type": "string",
+                    "x-nullable": true
+                },
+                "error": {
+                    "title": "Error",
+                    "type": "string",
+                    "x-nullable": true
+                },
+                "attr": {
+                    "title": "Attr",
+                    "type": "string",
+                    "x-nullable": true
+                },
+                "details": {
+                    "title": "Details",
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "array",
+                        "items": {
+                            "type": "string",
+                            "minLength": 1
+                        }
+                    }
+                }
+            }
+        },
         "DeploymentHeartbeat": {
             "required": [
                 "instance_id",
@@ -141030,77 +141101,6 @@
                 },
                 "result": {
                     "$ref": "#/definitions/BulkAnnotationResponseResult"
-                }
-            }
-        },
-        "ApiErrorResponse": {
-            "type": "object",
-            "properties": {
-                "status": {
-                    "title": "Status",
-                    "type": "boolean",
-                    "default": false
-                },
-                "type": {
-                    "title": "Type",
-                    "type": "string",
-                    "enum": [
-                        "validation_error",
-                        "authentication_error",
-                        "payment_required",
-                        "entitlement_error",
-                        "permission_error",
-                        "not_found",
-                        "conflict",
-                        "client_error",
-                        "rate_limit",
-                        "server_error",
-                        "service_unavailable",
-                        "timeout",
-                        "api_error"
-                    ],
-                    "x-nullable": true
-                },
-                "code": {
-                    "title": "Code",
-                    "type": "string",
-                    "x-nullable": true
-                },
-                "detail": {
-                    "title": "Detail",
-                    "type": "string",
-                    "x-nullable": true
-                },
-                "result": {
-                    "title": "Result",
-                    "type": "string",
-                    "x-nullable": true
-                },
-                "message": {
-                    "title": "Message",
-                    "type": "string",
-                    "x-nullable": true
-                },
-                "error": {
-                    "title": "Error",
-                    "type": "string",
-                    "x-nullable": true
-                },
-                "attr": {
-                    "title": "Attr",
-                    "type": "string",
-                    "x-nullable": true
-                },
-                "details": {
-                    "title": "Details",
-                    "type": "object",
-                    "additionalProperties": {
-                        "type": "array",
-                        "items": {
-                            "type": "string",
-                            "minLength": 1
-                        }
-                    }
                 }
             }
         },
