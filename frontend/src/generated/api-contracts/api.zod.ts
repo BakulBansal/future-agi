@@ -59802,6 +59802,20 @@ export const TracerObservationSpanReadParams = zod.object({
 });
 
 export const TracerObservationSpanReadQueryParams = zod.object({
+  test_execution_id: zod
+    .string()
+    .uuid()
+    .optional()
+    .describe(
+      "A run the caller can read; opens the hidden simulation project of that run's agent.",
+    ),
+  call_execution_id: zod
+    .string()
+    .uuid()
+    .optional()
+    .describe(
+      "A run the caller can read; opens the hidden simulation project of that run's agent.",
+    ),
   project_id: zod.string().uuid().optional(),
   trace_id: zod.string().min(1).optional(),
   start_hour: zod.string().datetime({ offset: true }).optional(),
@@ -65633,6 +65647,20 @@ export const TracerTraceListVoiceCallsCreateResponse =
   TracerTraceListVoiceCallsResponse;
 
 export const TracerTraceVoiceCallDetailQueryParams = zod.object({
+  test_execution_id: zod
+    .string()
+    .uuid()
+    .optional()
+    .describe(
+      "A run the caller can read; opens the hidden simulation project of that run's agent.",
+    ),
+  call_execution_id: zod
+    .string()
+    .uuid()
+    .optional()
+    .describe(
+      "A run the caller can read; opens the hidden simulation project of that run's agent.",
+    ),
   trace_id: zod
     .string()
     .uuid()
@@ -65736,6 +65764,9 @@ export const TracerTraceVoiceCallDetailResponse = zod.object({
 /**
  * Query params:
 - project_id (optional) — the project the trace was opened from.
+- test_execution_id or call_execution_id (optional) — a run the caller
+  can read; the hidden simulation project of that run's agent is read
+  in place of the caller's projects.
  * @summary Retrieve a trace by its ID.
  */
 export const TracerTraceReadParams = zod.object({
@@ -65743,6 +65774,20 @@ export const TracerTraceReadParams = zod.object({
 });
 
 export const TracerTraceReadQueryParams = zod.object({
+  test_execution_id: zod
+    .string()
+    .uuid()
+    .optional()
+    .describe(
+      "A run the caller can read; opens the hidden simulation project of that run's agent.",
+    ),
+  call_execution_id: zod
+    .string()
+    .uuid()
+    .optional()
+    .describe(
+      "A run the caller can read; opens the hidden simulation project of that run's agent.",
+    ),
   project_id: zod
     .string()
     .uuid()
