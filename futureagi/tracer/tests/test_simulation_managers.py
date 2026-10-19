@@ -1,6 +1,7 @@
 """The hidden simulation project stays out of the project managers."""
 
 import json
+import re
 import uuid
 from pathlib import Path
 from types import SimpleNamespace
@@ -45,6 +46,9 @@ from tracer.tests.test_simulation_project import (
 from tracer.utils.otel import get_or_create_project
 
 pytestmark = pytest.mark.django_db
+
+REPO_ROOT = Path(__file__).resolve().parents[3]
+RUN_PARAMETERS = ("test_execution_id", "call_execution_id")
 
 
 def _agent(organization, workspace, name):
@@ -392,14 +396,50 @@ def test_the_three_query_serializers_declare_the_run_parameters(serializer, base
     ],
 )
 def test_the_published_schema_lists_the_run_parameters(path):
-    swagger = Path(__file__).resolve().parents[3] / "api_contracts/openapi/swagger.json"
+    swagger = REPO_ROOT / "api_contracts/openapi/swagger.json"
     parameters = json.loads(swagger.read_text())["paths"][path]["get"]["parameters"]
     by_name = {parameter["name"]: parameter for parameter in parameters}
 
-    for key in ("test_execution_id", "call_execution_id"):
+    for key in RUN_PARAMETERS:
         assert by_name[key]["in"] == "query"
         assert by_name[key]["required"] is False
+        assert by_name[key]["type"] == "string"
         assert by_name[key]["format"] == "uuid"
+
+
+@pytest.mark.parametrize(
+    ("path", "zod_name"),
+    [
+        ("/tracer/trace/{id}/", "TracerTraceReadQueryParams"),
+        ("/tracer/trace/voice_call_detail/", "TracerTraceVoiceCallDetailQueryParams"),
+        ("/tracer/observation-span/{id}/", "TracerObservationSpanReadQueryParams"),
+    ],
+)
+def test_the_generated_frontend_files_name_the_run_parameters(path, zod_name):
+    frontend = REPO_ROOT / "frontend/src"
+    zod_file = frontend / "generated/api-contracts/api.zod.ts"
+    contract_file = frontend / "api/contracts/openapi-contract.generated.js"
+    if not (zod_file.is_file() and contract_file.is_file()):
+        pytest.skip("the frontend sources are not part of this checkout")
+
+    zod_text = zod_file.read_text()
+    start = zod_text.index(f"export const {zod_name} = zod.object({{")
+    zod_block = zod_text[start : zod_text.find("\nexport const ", start + 1)]
+
+    contract_text = contract_file.read_text()
+    start = contract_text.index(f'    "{path}": {{')
+    end = contract_text.find('\n    "/', start + 1)
+    contract_block = contract_text[start:end]
+
+    for key in RUN_PARAMETERS:
+        assert re.search(
+            rf"\b{key}: zod\s*\.string\(\)\s*\.uuid\(\)\s*\.optional\(\)", zod_block
+        ), f"{zod_name} does not declare {key} as an optional uuid"
+        assert re.search(
+            rf'\b{key}: {{\s*required: false,\s*schema: {{\s*type: "string",'
+            rf'\s*format: "uuid",',
+            contract_block,
+        ), f"the contract table has no optional uuid {key} for {path}"
 
 
 def test_unknown_query_fields_are_still_rejected_or_ignored():
