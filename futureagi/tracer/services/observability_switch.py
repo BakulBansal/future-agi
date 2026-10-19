@@ -113,6 +113,21 @@ def observability_is_on(agent_definition: AgentDefinition) -> bool:
     return row is not None and row.enabled and not _is_dead(row)
 
 
+def snapshot_as_shown(snapshot, agent_definition: AgentDefinition):
+    """A stored version snapshot as every read of it shows it.
+
+    A snapshot written while the project was live still says on. A form that
+    starts from it sends the on back, which would make a new project after the
+    user deleted the old one. So a stored on reads off while the link is off or
+    dead. A stored off is never turned on. The stored value is not rewritten.
+    """
+    if not isinstance(snapshot, dict) or not snapshot.get("observability_enabled"):
+        return snapshot
+    if observability_is_on(agent_definition):
+        return snapshot
+    return {**snapshot, "observability_enabled": False}
+
+
 def agent_is_source(agent_definition: AgentDefinition) -> bool:
     return _agent_summary(agent_definition.id).kind == "source"
 
@@ -314,10 +329,10 @@ def set_agent_observability(
                     workspace=workspace,
                 )
         agent_definition.observability_provider = None
-        # The user deleted the project: nothing is made until a later turn-on.
-        # A deleted row alone is replaced by a fresh one when turning on.
-        if row.project.deleted:
-            return None
+        # The user deleted the project, so the link is off. Turning it on again
+        # makes a new project and row, as a deleted row alone does. A save with
+        # false makes nothing. The turn-on path below locks the agent row and
+        # re-reads the link, so two quick turn-ons still make one project.
         row = None
     if row is not None:
         if enabled and not row.enabled:

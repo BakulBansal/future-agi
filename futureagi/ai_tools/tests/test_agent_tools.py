@@ -14,6 +14,7 @@ from tracer.tests.test_observability_switch import (
     _agent,
     _agent_with_row,
     _created,
+    _delete_project,
     _statements,
     _stored,
     _stored_agent,
@@ -100,6 +101,42 @@ class TestListAgentVersionsTool:
         # May return empty list or error depending on implementation
         # Just verify it doesn't crash
         assert isinstance(result.is_error, bool)
+
+
+class TestGetAgentVersionTool:
+    @staticmethod
+    def _flag_line(tool_context, agent, version):
+        result = run_tool(
+            "get_agent_version",
+            {"agent_id": str(agent.id), "version_id": str(version.id)},
+            tool_context,
+        )
+        assert not result.is_error
+        [line] = [
+            line
+            for line in result.content.splitlines()
+            if line.startswith("**observability_enabled:**")
+        ]
+        return line
+
+    def test_snapshot_reads_off_once_the_project_is_deleted(self, tool_context):
+        agent = _agent_with_row(
+            tool_context.organization, tool_context.workspace, enabled=True
+        )
+        version = agent.create_version(
+            description="while on",
+            commit_message="while on",
+            status=AgentVersion.StatusChoices.ACTIVE,
+        )
+        assert version.configuration_snapshot["observability_enabled"] is True
+        assert self._flag_line(tool_context, agent, version).endswith("True")
+
+        _delete_project(agent)
+
+        assert self._flag_line(tool_context, agent, version).endswith("False")
+        # What is stored is left as it was.
+        version.refresh_from_db()
+        assert version.configuration_snapshot["observability_enabled"] is True
 
 
 class TestListTestExecutionsTool:

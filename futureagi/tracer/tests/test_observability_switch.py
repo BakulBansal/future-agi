@@ -12,7 +12,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
-from django.db import connection
+from django.db import connection, transaction
 from django.db.models import QuerySet
 from rest_framework.exceptions import ErrorDetail
 from structlog.testing import capture_logs
@@ -528,18 +528,174 @@ def test_dead_row_is_cleared_on_turn_off(organization, workspace, user, delete):
     read_summary.assert_not_called()
 
 
-def test_turn_on_after_a_deleted_project_makes_nothing(organization, workspace, user):
-    # The agent page sends its stored "on" with every save, so a fresh project
-    # here would bring back the one the user deleted.
+def test_turn_on_after_a_deleted_project_makes_a_fresh_project(
+    organization, workspace, user
+):
+    # The user deleted the project, so the link is off; turning it on again
+    # makes a new project and row, the way a first turn-on does.
+    agent = _agent_with_row(organization, workspace, enabled=True)
+    dead = agent.observability_provider
+    _delete_project(agent)
+    agent = _stored_agent(agent)
+    projects, rows = _created()
+
+    with seams(make_summary(agent_definition_id=agent.id)) as (read_summary, _):
+        row = _turn(agent, True, user, organization, workspace)
+
+    assert row is not None and row.pk != dead.pk
+    assert row.project_id != dead.project_id
+    assert row.enabled
+    assert _stored_agent(agent).observability_provider_id == row.pk
+    assert _created() == (projects + 1, rows + 1)
+    # The first-turn-on path: prerequisites, then the agent's own name.
+    read_summary.assert_called_once()
+    assert _project_name(row) == agent.agent_name
+
+
+def test_turn_on_after_a_deleted_project_takes_the_agents_plain_name(
+    organization, workspace, user
+):
+    # The project the user deleted carried the agent's own name. The unique
+    # constraint leaves deleted projects out, so the new project takes that
+    # plain name too and the deleted one is left as it was.
+    agent = _agent_with_row(organization, workspace, enabled=True)
+    dead = agent.observability_provider
+    Project._base_manager.filter(pk=dead.project_id).update(name=agent.agent_name)
+    _delete_project(agent)
+    agent = _stored_agent(agent)
+
+    with seams(make_summary(agent_definition_id=agent.id)):
+        row = _turn(agent, True, user, organization, workspace)
+
+    assert row.pk != dead.pk and row.project_id != dead.project_id
+    assert _project_name(row) == agent.agent_name
+    old = Project._base_manager.get(pk=dead.project_id)
+    assert old.deleted and old.name == agent.agent_name
+    named = Project._base_manager.filter(name=agent.agent_name, trace_type="observe")
+    assert named.count() == 2
+    assert named.filter(deleted=False).get().pk == row.project_id
+
+
+def test_turn_off_after_a_deleted_project_switches_a_link_made_meanwhile(
+    organization, workspace, user
+):
+    # This copy still holds the dead link. Another request already cleared it
+    # and linked a new, enabled row, so this clear matches no row. Only the
+    # re-read on the primary shows the new link: a turn-off has no later
+    # re-read under a lock to find it.
+    agent = _agent_with_row(organization, workspace, enabled=True)
+    _delete_project(agent)
+    stale = _stored_agent(agent)
+    assert stale.observability_provider.project.deleted
+    newer = _row(organization, workspace, {})
+    AgentDefinition.no_workspace_objects.filter(pk=agent.pk).update(
+        observability_provider=newer
+    )
+    created = _created()
+
+    with (
+        seams(make_summary(agent_definition_id=agent.id)) as (read_summary, _),
+        patch.object(
+            AgentDefinition,
+            "refresh_from_db",
+            autospec=True,
+            side_effect=AgentDefinition.refresh_from_db,
+        ) as reread,
+    ):
+        row = _turn(stale, False, user, organization, workspace)
+
+    assert row.pk == newer.pk
+    assert _stored(newer)[1] is False
+    assert _stored_agent(agent).observability_provider_id == newer.pk
+    assert _created() == created
+    read_summary.assert_not_called()
+    reread.assert_called_once()
+    assert reread.call_args.kwargs["using"] == "default"
+
+
+def test_turn_off_after_a_deleted_project_makes_nothing(organization, workspace, user):
     agent = _agent_with_row(organization, workspace, enabled=True)
     _delete_project(agent)
     agent = _stored_agent(agent)
     created = _created()
+
     with seams(make_summary()) as (read_summary, _):
-        assert _turn(agent, True, user, organization, workspace) is None
+        assert _turn(agent, False, user, organization, workspace) is None
+
     assert _stored_agent(agent).observability_provider_id is None
     assert _created() == created
     read_summary.assert_not_called()
+
+
+def test_two_turn_ons_after_a_deleted_project_make_one_project(
+    organization, workspace, user
+):
+    # Both requests loaded the agent while the link was still the dead one. The
+    # primary re-read and the lock both catch the second; two other tests pin
+    # each one alone.
+    agent = _agent_with_row(organization, workspace, enabled=True)
+    _delete_project(agent)
+    first, second = _stored_agent(agent), _stored_agent(agent)
+    assert first.observability_provider.project.deleted
+    assert second.observability_provider.project.deleted
+    projects, rows = _created()
+
+    with seams(make_summary(agent_definition_id=agent.id)):
+        one = _turn(first, True, user, organization, workspace)
+        two = _turn(second, True, user, organization, workspace)
+
+    assert one.pk == two.pk
+    assert _created() == (projects + 1, rows + 1)
+    assert_one_project_and_row(agent)
+
+
+def test_link_made_during_the_prerequisite_check_is_switched_not_replaced(
+    organization, workspace, user
+):
+    # The clear and the primary re-read are past: the clear matched the dead
+    # link. Another request links a new row while this one reads the agent for
+    # the prerequisites. Only the re-read under the lock finds it.
+    agent = _agent_with_row(organization, workspace, enabled=True)
+    _delete_project(agent)
+    stale = _stored_agent(agent)
+    newer = _row(organization, workspace, {})
+    ObservabilityProvider.no_workspace_objects.filter(pk=newer.pk).update(
+        enabled=False
+    )
+    created = _created()
+
+    def read(agent_id):
+        AgentDefinition.no_workspace_objects.filter(pk=agent.pk).update(
+            observability_provider=newer
+        )
+        return make_summary(agent_definition_id=agent.id)
+
+    with seams(read):
+        row = _turn(stale, True, user, organization, workspace)
+
+    assert row.pk == newer.pk
+    assert _stored(newer)[1] is True
+    assert _stored_agent(agent).observability_provider_id == newer.pk
+    assert _created() == created
+
+
+def test_turn_on_refused_after_a_deleted_project_writes_nothing(
+    organization, workspace, user
+):
+    agent = _agent_with_row(organization, workspace, enabled=True)
+    dead_id = agent.observability_provider_id
+    _delete_project(agent)
+    agent = _stored_agent(agent)
+    created = _created()
+
+    refusing = make_summary(agent_definition_id=agent.id, missing=("credential",))
+    with seams(refusing), pytest.raises(switch.ObservabilityRefused):
+        with transaction.atomic():
+            _turn(agent, True, user, organization, workspace)
+
+    assert _created() == created
+    # The clear of the dead link is one of the writes the caller's rollback undoes.
+    assert _stored_agent(agent).observability_provider_id == dead_id
 
 
 def test_turn_on_after_a_deleted_row_makes_a_fresh_one(organization, workspace, user):
@@ -1471,8 +1627,7 @@ def test_clearing_a_dead_link_switches_a_link_made_meanwhile(
 
 
 @pytest.mark.parametrize(
-    "delete, enabled",
-    [(_delete_project, False), (_delete_project, True), (_delete_row, False)],
+    "delete, enabled", [(_delete_project, False), (_delete_row, False)]
 )
 def test_clear_that_matches_no_row_still_drops_the_dead_link(
     organization, workspace, user, delete, enabled
@@ -1504,6 +1659,26 @@ def test_clear_that_matches_no_row_still_drops_the_dead_link(
     # The re-read goes to the primary, so a lagging replica cannot answer it.
     reread.assert_called_once()
     assert reread.call_args.kwargs["using"] == "default"
+
+
+def test_turn_on_of_a_deleted_agent_after_a_deleted_project_raises(
+    organization, workspace, user
+):
+    # The agent was soft-deleted meanwhile. The turn-on takes the first-turn-on
+    # path, whose locked re-read finds no agent, so it raises (the version view
+    # answers that with a 404) and nothing is made.
+    agent = _agent_with_row(organization, workspace, enabled=True)
+    _delete_project(agent)
+    stale = _stored_agent(agent)
+    AgentDefinition._base_manager.filter(pk=agent.pk).update(deleted=True)
+    created = _created()
+
+    with seams(make_summary(agent_definition_id=agent.id)):
+        with pytest.raises(AgentDefinition.DoesNotExist):
+            _turn(stale, True, user, organization, workspace)
+
+    assert stale.observability_provider_id is None
+    assert _created() == created
 
 
 def _project_workspace(row):
