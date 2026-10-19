@@ -178,7 +178,8 @@ export const STORED_AGENT = {
     direction_answer: null,
     gaps: ["flow_not_described"],
     instrumentation: "none",
-    setup_hash: "sh1:d5ea",
+    setup_hash:
+      "sh1:d5eaaae5421fd4bf8e7dc30693ba366740987ae71a3224d5a7422a64e1b91593",
   },
   sdk_version: "0.2.3",
   stored_at: "2026-10-14T11:50:22.212003Z",
