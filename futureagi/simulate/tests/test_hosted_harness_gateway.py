@@ -3551,7 +3551,7 @@ def _authoring_document(monkeypatch, events=None):
     monkeypatch.setattr(
         f"{_GATEWAY}._provider_import_authoring_material", lambda *_: ({}, "")
     )
-    monkeypatch.setattr(f"{_GATEWAY}._platform_simulator_material", lambda: ({}, None))
+    monkeypatch.setattr(f"{_GATEWAY}._platform_simulator_material", lambda: {})
     with pytest.raises(_StopAfterJobJson):
         gateway.author(job)
     return json.loads(client.sandbox.fs.uploads["/work/job.json"]), job
@@ -3572,7 +3572,7 @@ def _chat_document(monkeypatch, events=None):
         f"{_GATEWAY}.issue_conversation_capability",
         lambda *_a, **_k: SimpleNamespace(document={"conversation": "x"}),
     )
-    monkeypatch.setattr(f"{_GATEWAY}._platform_simulator_material", lambda: ({}, None))
+    monkeypatch.setattr(f"{_GATEWAY}._platform_simulator_material", lambda: {})
     with pytest.raises(_StopAfterJobJson):
         gateway._start_chat_sandbox(
             job,
