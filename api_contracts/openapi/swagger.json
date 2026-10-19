@@ -124747,8 +124747,10 @@
                     "title": "Metadata",
                     "type": "object",
                     "additionalProperties": {
-                        "type": "string",
-                        "x-nullable": true
+                        "type": "object",
+                        "x-nullable": true,
+                        "description": "Any valid JSON value.",
+                        "x-json-value": true
                     }
                 },
                 "runtime": {
@@ -125836,8 +125838,10 @@
                     "title": "Metadata",
                     "type": "object",
                     "additionalProperties": {
-                        "type": "string",
-                        "x-nullable": true
+                        "type": "object",
+                        "x-nullable": true,
+                        "description": "Any valid JSON value.",
+                        "x-json-value": true
                     },
                     "default": {}
                 }
@@ -125904,8 +125908,10 @@
                     "title": "Metadata",
                     "type": "object",
                     "additionalProperties": {
-                        "type": "string",
-                        "x-nullable": true
+                        "type": "object",
+                        "x-nullable": true,
+                        "description": "Any valid JSON value.",
+                        "x-json-value": true
                     },
                     "default": {}
                 },

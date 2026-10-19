@@ -63057,8 +63057,10 @@ export const OPENAPI_CONTRACT = Object.freeze({
           title: "Metadata",
           type: "object",
           additionalProperties: {
-            type: "string",
+            type: "object",
             "x-nullable": true,
+            description: "Any valid JSON value.",
+            "x-json-value": true,
           },
           default: {},
         },
@@ -63261,8 +63263,10 @@ export const OPENAPI_CONTRACT = Object.freeze({
           title: "Metadata",
           type: "object",
           additionalProperties: {
-            type: "string",
+            type: "object",
             "x-nullable": true,
+            description: "Any valid JSON value.",
+            "x-json-value": true,
           },
           default: {},
         },
@@ -92996,8 +93000,10 @@ export const OPENAPI_CONTRACT = Object.freeze({
           title: "Metadata",
           type: "object",
           additionalProperties: {
-            type: "string",
+            type: "object",
             "x-nullable": true,
+            description: "Any valid JSON value.",
+            "x-json-value": true,
           },
         },
         runtime: {
