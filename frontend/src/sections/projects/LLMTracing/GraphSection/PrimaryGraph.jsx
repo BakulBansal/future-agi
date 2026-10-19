@@ -362,8 +362,12 @@ const PrimaryGraph = ({
   // Optional: trace-graph population, e.g. "voice" to count only voice calls
   // (the Voice screen's list_voice_calls population). Omitted = every trace.
   observeType,
+  // Voice population only: the Voice list's "exclude simulation calls" toggle.
+  removeSimulationCalls = false,
 }) => {
   const { observeId } = useParams();
+  const excludeSimulationCalls =
+    observeType === "voice" && Boolean(removeSimulationCalls);
   const effectiveObserveId = observeIdOverride || observeId;
   // Keep the logical registry namespace (users/spans) distinct from the
   // physical transport adapter (sessions/traces).
@@ -620,6 +624,7 @@ const PrimaryGraph = ({
       graphPropertyId,
       graphTransportSource,
       observeType,
+      excludeSimulationCalls,
     ],
     queryFn: async ({ queryKey, signal }) => {
       const refresh = forceRefreshRef.current;
@@ -649,6 +654,9 @@ const PrimaryGraph = ({
                 },
                 project_id: effectiveObserveId,
                 ...(observeType && { observe_type: observeType }),
+                ...(excludeSimulationCalls && {
+                  remove_simulation_calls: true,
+                }),
               },
               {
                 params: refresh ? { refresh: true } : undefined,
@@ -1497,6 +1505,7 @@ PrimaryGraph.propTypes = {
   hasActiveFilter: PropTypes.bool,
   onFilterToggle: PropTypes.func,
   observeType: PropTypes.oneOf(["trace", "voice"]),
+  removeSimulationCalls: PropTypes.bool,
 };
 
 export default React.memo(PrimaryGraph);
