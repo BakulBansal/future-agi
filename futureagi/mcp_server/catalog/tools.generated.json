@@ -7672,7 +7672,7 @@
     },
     {
       "name": "update_agent",
-      "description": "Edit an agent definition. To use changed configuration in a versioned simulation, subsequently call create_agent_version, or supply the changes directly to create_agent_version.",
+      "description": "Edit an agent definition. Leave observability_enabled out to keep observability as it is; send true or false to turn it on or off. To use changed configuration in a versioned simulation, subsequently call create_agent_version, or supply the changes directly to create_agent_version.",
       "group": "simulation",
       "inputSchema": {
         "type": "object",
