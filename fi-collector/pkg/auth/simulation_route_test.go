@@ -1016,16 +1016,16 @@ func TestRoutingSnapshotAndOutcomeReporting(t *testing.T) {
 const expectedProjectConfig = `[
 	{"id": "run_name", "name": "Run Name", "is_visible": true, "group_by": null, "output_type": null,
 	 "reverse_output": null, "annotation_label_type": null, "choices": [null], "settings": null,
-	 "choices_map": null, "eval_template_id": null, "annotators": null, "source_field": null, "parent_eval_id": null},
+	 "choices_map": null, "eval_template_id": null, "target_type": null, "annotators": null, "source_field": null, "parent_eval_id": null},
 	{"id": "avg_cost", "name": "Avg. Cost", "is_visible": true, "group_by": "System Metrics", "output_type": null,
 	 "reverse_output": null, "annotation_label_type": null, "choices": [null], "settings": null,
-	 "choices_map": null, "eval_template_id": null, "annotators": null, "source_field": null, "parent_eval_id": null},
+	 "choices_map": null, "eval_template_id": null, "target_type": null, "annotators": null, "source_field": null, "parent_eval_id": null},
 	{"id": "avg_latency", "name": "Avg. Latency", "is_visible": true, "group_by": "System Metrics", "output_type": null,
 	 "reverse_output": null, "annotation_label_type": null, "choices": [null], "settings": null,
-	 "choices_map": null, "eval_template_id": null, "annotators": null, "source_field": null, "parent_eval_id": null},
+	 "choices_map": null, "eval_template_id": null, "target_type": null, "annotators": null, "source_field": null, "parent_eval_id": null},
 	{"id": "rank", "name": "Rank", "is_visible": false, "group_by": null, "output_type": null,
 	 "reverse_output": null, "annotation_label_type": null, "choices": [null], "settings": null,
-	 "choices_map": null, "eval_template_id": null, "annotators": null, "source_field": null, "parent_eval_id": null}
+	 "choices_map": null, "eval_template_id": null, "target_type": null, "annotators": null, "source_field": null, "parent_eval_id": null}
 ]`
 
 // The inserted row must carry the same list-column layout as the platform's
