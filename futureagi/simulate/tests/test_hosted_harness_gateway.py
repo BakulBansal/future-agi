@@ -4254,7 +4254,7 @@ def test_the_mark_check_accepts_only_the_documented_shape(mark, accepted):
 
 
 @pytest.mark.django_db
-def test_diagnostics_redaction_fallback_holds_every_ingest_key_switched_off_or_not(
+def test_diagnostics_redaction_fallback_holds_every_ingest_key_switched_off_deleted_or_not(
     organization, workspace, user, monkeypatch
 ):
     from accounts.models.organization import Organization
@@ -4280,6 +4280,14 @@ def test_diagnostics_redaction_fallback_holds_every_ingest_key_switched_off_or_n
         type="ingest",
         enabled=False,
     )
+    deleted = OrgApiKey.no_workspace_objects.create(
+        organization=organization,
+        workspace=workspace,
+        name="ingest gone",
+        type="ingest",
+    )
+    # Soft-deleted the way the keys view does it, so every manager but the base one hides it.
+    OrgApiKey._base_manager.filter(id=deleted.id).update(deleted=True)
     ordinary = OrgApiKey.no_workspace_objects.create(
         organization=organization, workspace=workspace, name="ordinary", type="user"
     )
@@ -4289,7 +4297,7 @@ def test_diagnostics_redaction_fallback_holds_every_ingest_key_switched_off_or_n
         name="ingest elsewhere",
         type="ingest",
     )
-    before = OrgApiKey.no_workspace_objects.filter(type="ingest").count()
+    before = OrgApiKey._base_manager.filter(type="ingest").count()
     seen = {}
 
     def poll(_attempt, _sandbox, **kwargs):
@@ -4302,8 +4310,10 @@ def test_diagnostics_redaction_fallback_holds_every_ingest_key_switched_off_or_n
     assert {ingest.api_key, ingest.secret_key} <= values
     # Switching a key off stops the export, but a running sandbox may still hold it.
     assert {switched_off.api_key, switched_off.secret_key} <= values
+    # So may a key deleted after the launch.
+    assert {deleted.api_key, deleted.secret_key} <= values
     assert not {ordinary.api_key, ordinary.secret_key} & values
     # Another organisation's key is not this job's to hold.
     assert not {stranger.api_key, stranger.secret_key} & values
     # Read, never created.
-    assert OrgApiKey.no_workspace_objects.filter(type="ingest").count() == before
+    assert OrgApiKey._base_manager.filter(type="ingest").count() == before

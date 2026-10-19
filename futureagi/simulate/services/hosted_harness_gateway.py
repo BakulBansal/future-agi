@@ -1336,11 +1336,13 @@ def attach_observability_export_secret_refs(
 
 
 def _ingest_key_values(organization_id: Any) -> tuple[str, ...]:
-    """Every ingest key's two values, switched off or not, read and never created."""
+    """Every ingest key's two values, switched off, deleted or not; read and never created."""
     from accounts.models.user import OrgApiKey
 
-    # A key switched off mid-run may still be in a sandbox that another worker polls.
-    rows = OrgApiKey.no_workspace_objects.filter(
+    # A key switched off or deleted mid-run may still be in a sandbox that another worker
+    # polls. The base manager, because the others hide deleted rows or filter by the
+    # request's workspace.
+    rows = OrgApiKey._base_manager.filter(
         organization_id=organization_id, type="ingest"
     ).values_list("api_key", "secret_key")
     return tuple(value for row in rows for value in row if value)
