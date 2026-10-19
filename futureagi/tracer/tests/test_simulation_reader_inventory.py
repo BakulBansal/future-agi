@@ -1875,14 +1875,19 @@ ENTRY_POINTS = {
     "read_physical_span_detail": (None, frozenset({_SPAN_READS})),
     # The functions that turn a run into the hidden project's id. A module that
     # lists a run's traces adds itself here in the change that first calls them
-    # (``simulation_project_of`` and ``ensure_simulation_project`` have no caller
-    # yet).
+    # (``simulation_project_of`` has no caller yet).
     "simulation_scope_for_run": (None, _RUN_SCOPE_CALLERS),
     "run_scope_project_ids": (None, _RUN_SCOPE_CALLERS),
     "list_run_traces": (None, _RUN_TRACES_CALLERS),
     "simulation_project_id": (None, _RUN_TRACES_CALLERS),
     "simulation_project_of": (None, frozenset()),
-    "ensure_simulation_project": (None, frozenset()),
+    # The launcher makes or reads the hidden project of the agent one run is bound
+    # to, in that run's organisation, so it can send the project's name and find the
+    # agent's key by the project's workspace. It reads no span.
+    "ensure_simulation_project": (
+        None,
+        frozenset({"simulate/services/hosted_harness_gateway.py"}),
+    ),
 }
 
 # A reader filed as taking an id takes an id of what it reads. The ids that only
