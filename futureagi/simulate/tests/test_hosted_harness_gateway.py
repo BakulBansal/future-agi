@@ -2979,6 +2979,7 @@ class _ExportWorld:
     job. The three producers owned by other tickets (the agent summary, the hidden
     simulation project and the key resolver) are stand-ins that record how they were
     called; the hidden project's row is made in the database when the stand-in is called.
+    With ``hidden="real"`` the hidden project is made by the real function instead.
     """
 
     def __init__(
@@ -3205,47 +3206,44 @@ class _ExportWorld:
             sys.modules, "tracer.services.collector_ingest", ingest_module
         )
 
-        project_module = ModuleType("tracer.services.simulation_project")
+        if hidden != "real":
+            from tracer.services.simulation_project import SimulationProjectError
 
-        class SimulationProjectError(Exception):
-            pass
+            def ensure_simulation_project(agent):
+                self.events.append(("hidden", None))
+                self.hidden_calls.append(agent.id)
+                if hidden == "raises":
+                    raise SimulationProjectError(_LEAK_SENTINEL)
+                hidden_workspace = agent.workspace
+                if hidden == "other_workspace":
+                    from accounts.models.workspace import Workspace
 
-        def ensure_simulation_project(agent):
-            self.events.append(("hidden", None))
-            self.hidden_calls.append(agent.id)
-            if hidden == "raises":
-                raise SimulationProjectError(_LEAK_SENTINEL)
-            # This branch's Project has no column naming its agent, so the row is only
-            # shaped like the hidden one: its name and its workspace.
-            hidden_workspace = agent.workspace
-            if hidden == "other_workspace":
-                from accounts.models.workspace import Workspace
-
-                hidden_workspace = Workspace.objects.create(
-                    name="Simulation workspace",
+                    hidden_workspace = Workspace.objects.create(
+                        name="Simulation workspace",
+                        organization=agent.organization,
+                        is_default=False,
+                        is_active=True,
+                        created_by=user,
+                    )
+                row = Project.with_simulation.create(
+                    name=f"fi-simulation-{agent.id}",
                     organization=agent.organization,
-                    is_default=False,
-                    is_active=True,
-                    created_by=user,
+                    workspace=hidden_workspace,
+                    model_type=AIModel.ModelTypes.GENERATIVE_LLM,
+                    trace_type="observe",
+                    simulation_agent=agent,
                 )
-            row = Project.no_workspace_objects.create(
-                name=f"fi-simulation-{agent.id}",
-                organization=agent.organization,
-                workspace=hidden_workspace,
-                model_type=AIModel.ModelTypes.GENERATIVE_LLM,
-                trace_type="observe",
-            )
-            if hidden == "no_workspace":
-                Project.no_workspace_objects.filter(id=row.id).update(workspace=None)
-                row.refresh_from_db()
-            self.hidden = row
-            return row
+                if hidden == "no_workspace":
+                    Project.with_simulation.filter(id=row.id).update(workspace=None)
+                    row = Project.with_simulation.get(id=row.id)
+                self.hidden = row
+                return row
 
-        project_module.SimulationProjectError = SimulationProjectError
-        project_module.ensure_simulation_project = ensure_simulation_project
-        monkeypatch.setitem(
-            sys.modules, "tracer.services.simulation_project", project_module
-        )
+            # Only the function is replaced: other modules import names from this one.
+            monkeypatch.setattr(
+                "tracer.services.simulation_project.ensure_simulation_project",
+                ensure_simulation_project,
+            )
         for module in library_missing:
             monkeypatch.setitem(sys.modules, module, None)
 
@@ -3565,14 +3563,18 @@ def test_the_observability_project_is_never_written_and_only_the_hidden_one_is_m
         organization, workspace, user, settings, monkeypatch, tag="untouched"
     )
     before = Project.no_workspace_objects.get(id=world.project.id)
-    projects_before = set(Project.no_workspace_objects.values_list("id", flat=True))
+    projects_before = set(Project.with_simulation.values_list("id", flat=True))
     world.launch()
     assert world.export_log() == []
     after = Project.no_workspace_objects.get(id=world.project.id)
     assert (after.name, after.updated_at) == (before.name, before.updated_at)
-    projects_after = set(Project.no_workspace_objects.values_list("id", flat=True))
+    projects_after = set(Project.with_simulation.values_list("id", flat=True))
     assert projects_after - projects_before == {world.hidden.id}
     assert projects_before <= projects_after
+    # The hidden project is left out of the managers the rest of the application reads.
+    assert world.hidden.id not in set(
+        Project.no_workspace_objects.values_list("id", flat=True)
+    )
 
 
 @pytest.mark.django_db
@@ -3616,6 +3618,81 @@ def test_the_key_is_asked_for_by_the_hidden_projects_workspace_when_it_is_anothe
     ]
     assert world.export_log() == []
     assert world.secrets == _INGEST_PAIR
+
+
+@pytest.mark.django_db
+def test_the_launch_through_the_real_hidden_project_function(
+    organization, workspace, user, settings, monkeypatch
+):
+    from tracer.models.project import Project
+    from tracer.services.simulation_project import simulation_project_name
+
+    world = _ExportWorld(
+        organization,
+        workspace,
+        user,
+        settings,
+        monkeypatch,
+        tag="real",
+        hidden="real",
+    ).launch()
+    assert world.export_log() == []
+    name = simulation_project_name(world.agent.id)
+    assert f"project_name={quote(name, safe='')}" in _mark_text(world.mark)
+    hidden = Project.with_simulation.get(simulation_agent=world.agent)
+    assert hidden.name == name
+    assert hidden.workspace_id == workspace.id
+    assert world.credential_calls == [
+        (str(organization.id), str(hidden.workspace_id), str(world.agent.id))
+    ]
+    # The other managers leave the hidden project out, so a read through one of them
+    # cannot be how the launch found it.
+    assert hidden.id not in set(
+        Project.no_workspace_objects.values_list("id", flat=True)
+    )
+
+    # Another job for the same agent finds the project and makes no second one.
+    payload = json.loads(json.dumps(world.job.payload))
+    payload.pop("run_id")
+    world.job, _ = create_hosted_job(
+        organization,
+        payload,
+        idempotency_key=f"export-real-{uuid.uuid4().hex[:8]}",
+        workspace=workspace,
+    )
+    world.launch()
+    assert world.export_log() == []
+    assert f"project_name={quote(name, safe='')}" in _mark_text(world.mark)
+    assert Project.with_simulation.filter(simulation_agent=world.agent).count() == 1
+
+
+@pytest.mark.django_db
+def test_a_deleted_hidden_project_warns_and_the_launch_goes_on_without_the_export(
+    organization, workspace, user, settings, monkeypatch
+):
+    from tracer.models.project import Project
+    from tracer.services.simulation_project import ensure_simulation_project
+
+    world = _ExportWorld(
+        organization,
+        workspace,
+        user,
+        settings,
+        monkeypatch,
+        tag="gone",
+        hidden="real",
+    )
+    hidden = ensure_simulation_project(world.agent)
+    Project.with_simulation.filter(id=hidden.id).update(deleted=True)
+    world.launch()
+    assert world.export_log() == [
+        (
+            "warning",
+            {"job_id": str(world.job.id), "reason": "SimulationProjectError"},
+        )
+    ]
+    assert world.credential_calls == []
+    _assert_launched_without_export(world)
 
 
 @pytest.mark.django_db
@@ -3686,11 +3763,6 @@ _REFUSALS = {
     "hidden_project_cannot_be_made": (
         {"hidden": "raises"},
         "SimulationProjectError",
-        "warning",
-    ),
-    "hidden_project_module_missing": (
-        {"library_missing": ("tracer.services.simulation_project",)},
-        "ModuleNotFoundError",
         "warning",
     ),
     "hosted_agent": ({"kind": "hosted"}, "not_source", "info"),
@@ -4185,6 +4257,7 @@ def test_the_mark_check_accepts_only_the_documented_shape(mark, accepted):
 def test_diagnostics_redaction_fallback_holds_every_ingest_key_switched_off_or_not(
     organization, workspace, user, monkeypatch
 ):
+    from accounts.models.organization import Organization
     from accounts.models.user import OrgApiKey
     from simulate.services.hosted_harness_diagnostics import (
         forget_attempt_redaction_values,
@@ -4210,6 +4283,12 @@ def test_diagnostics_redaction_fallback_holds_every_ingest_key_switched_off_or_n
     ordinary = OrgApiKey.no_workspace_objects.create(
         organization=organization, workspace=workspace, name="ordinary", type="user"
     )
+    stranger = OrgApiKey.no_workspace_objects.create(
+        organization=Organization.objects.create(name="Key owner org"),
+        workspace=None,
+        name="ingest elsewhere",
+        type="ingest",
+    )
     before = OrgApiKey.no_workspace_objects.filter(type="ingest").count()
     seen = {}
 
@@ -4224,5 +4303,7 @@ def test_diagnostics_redaction_fallback_holds_every_ingest_key_switched_off_or_n
     # Switching a key off stops the export, but a running sandbox may still hold it.
     assert {switched_off.api_key, switched_off.secret_key} <= values
     assert not {ordinary.api_key, ordinary.secret_key} & values
+    # Another organisation's key is not this job's to hold.
+    assert not {stranger.api_key, stranger.secret_key} & values
     # Read, never created.
     assert OrgApiKey.no_workspace_objects.filter(type="ingest").count() == before
