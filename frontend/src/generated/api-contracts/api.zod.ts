@@ -32241,68 +32241,6 @@ export const SimulateAgentDefinitionsVersionsReadResponse = zod.object({
   is_active: zod.string().optional(),
   is_latest: zod.string().optional(),
   agent_kind: zod.string().min(1).optional(),
-  agent_details: zod
-    .object({
-      agent: zod.object({
-        schema_version: zod.string().min(1),
-        type: zod.string().min(1),
-        kind: zod.string().min(1),
-        name: zod.string().min(1),
-        provider_ref: zod.object({
-          provider: zod.string().min(1),
-          id: zod.string().min(1),
-          version: zod.string().min(1),
-        }),
-        behaviour: zod.array(
-          zod.object({
-            id: zod.string().min(1),
-            shape: zod.string().min(1),
-            instructions: zod.string().min(1),
-            tools: zod.array(zod.string().min(1)),
-            transitions: zod.array(zod.string().min(1)),
-          }),
-        ),
-        tools: zod.array(
-          zod.object({
-            name: zod.string().min(1),
-            description: zod.string().min(1),
-            kind: zod.string().min(1),
-            parameters: zod.object({}).passthrough(),
-            endpoint: zod.object({
-              url: zod.string().min(1),
-            }),
-          }),
-        ),
-        model: zod.object({
-          provider: zod.string().min(1),
-          name: zod.string().min(1),
-          temperature: zod.number(),
-          max_tokens: zod.number(),
-        }),
-        voice: zod.object({
-          provider: zod.string().min(1),
-          voice_id: zod.string().min(1),
-          language: zod.string().min(1),
-          speed: zod.number(),
-        }),
-        telephony: zod.array(
-          zod.object({
-            number: zod.string().min(1),
-            provider: zod.string().min(1),
-            direction_supported: zod.array(zod.string().min(1)),
-          }),
-        ),
-        supports: zod.array(zod.string().min(1)),
-        direction_answer: zod.string().min(1),
-        gaps: zod.array(zod.string().min(1)),
-        instrumentation: zod.string().min(1),
-        setup_hash: zod.string().min(1),
-      }),
-      sdk_version: zod.string().min(1),
-      stored_at: zod.string().datetime({ offset: true }),
-      setup_stale: zod.boolean(),
-    })
-    .optional(),
   api_key: zod.string().min(1).optional(),
   created_at: zod.string().datetime({ offset: true }).optional(),
   updated_at: zod.string().datetime({ offset: true }).optional(),
@@ -32386,68 +32324,6 @@ export const SimulateAgentDefinitionsVersionsActivateCreateResponse =
         is_active: zod.string().optional(),
         is_latest: zod.string().optional(),
         agent_kind: zod.string().min(1).optional(),
-        agent_details: zod
-          .object({
-            agent: zod.object({
-              schema_version: zod.string().min(1),
-              type: zod.string().min(1),
-              kind: zod.string().min(1),
-              name: zod.string().min(1),
-              provider_ref: zod.object({
-                provider: zod.string().min(1),
-                id: zod.string().min(1),
-                version: zod.string().min(1),
-              }),
-              behaviour: zod.array(
-                zod.object({
-                  id: zod.string().min(1),
-                  shape: zod.string().min(1),
-                  instructions: zod.string().min(1),
-                  tools: zod.array(zod.string().min(1)),
-                  transitions: zod.array(zod.string().min(1)),
-                }),
-              ),
-              tools: zod.array(
-                zod.object({
-                  name: zod.string().min(1),
-                  description: zod.string().min(1),
-                  kind: zod.string().min(1),
-                  parameters: zod.object({}).passthrough(),
-                  endpoint: zod.object({
-                    url: zod.string().min(1),
-                  }),
-                }),
-              ),
-              model: zod.object({
-                provider: zod.string().min(1),
-                name: zod.string().min(1),
-                temperature: zod.number(),
-                max_tokens: zod.number(),
-              }),
-              voice: zod.object({
-                provider: zod.string().min(1),
-                voice_id: zod.string().min(1),
-                language: zod.string().min(1),
-                speed: zod.number(),
-              }),
-              telephony: zod.array(
-                zod.object({
-                  number: zod.string().min(1),
-                  provider: zod.string().min(1),
-                  direction_supported: zod.array(zod.string().min(1)),
-                }),
-              ),
-              supports: zod.array(zod.string().min(1)),
-              direction_answer: zod.string().min(1),
-              gaps: zod.array(zod.string().min(1)),
-              instrumentation: zod.string().min(1),
-              setup_hash: zod.string().min(1),
-            }),
-            sdk_version: zod.string().min(1),
-            stored_at: zod.string().datetime({ offset: true }),
-            setup_stale: zod.boolean(),
-          })
-          .optional(),
         api_key: zod.string().min(1).optional(),
         created_at: zod.string().datetime({ offset: true }).optional(),
         updated_at: zod.string().datetime({ offset: true }).optional(),
@@ -32952,68 +32828,6 @@ export const SimulateAgentDefinitionsVersionsRestoreCreateResponse = zod.object(
         is_active: zod.string().optional(),
         is_latest: zod.string().optional(),
         agent_kind: zod.string().min(1).optional(),
-        agent_details: zod
-          .object({
-            agent: zod.object({
-              schema_version: zod.string().min(1),
-              type: zod.string().min(1),
-              kind: zod.string().min(1),
-              name: zod.string().min(1),
-              provider_ref: zod.object({
-                provider: zod.string().min(1),
-                id: zod.string().min(1),
-                version: zod.string().min(1),
-              }),
-              behaviour: zod.array(
-                zod.object({
-                  id: zod.string().min(1),
-                  shape: zod.string().min(1),
-                  instructions: zod.string().min(1),
-                  tools: zod.array(zod.string().min(1)),
-                  transitions: zod.array(zod.string().min(1)),
-                }),
-              ),
-              tools: zod.array(
-                zod.object({
-                  name: zod.string().min(1),
-                  description: zod.string().min(1),
-                  kind: zod.string().min(1),
-                  parameters: zod.object({}).passthrough(),
-                  endpoint: zod.object({
-                    url: zod.string().min(1),
-                  }),
-                }),
-              ),
-              model: zod.object({
-                provider: zod.string().min(1),
-                name: zod.string().min(1),
-                temperature: zod.number(),
-                max_tokens: zod.number(),
-              }),
-              voice: zod.object({
-                provider: zod.string().min(1),
-                voice_id: zod.string().min(1),
-                language: zod.string().min(1),
-                speed: zod.number(),
-              }),
-              telephony: zod.array(
-                zod.object({
-                  number: zod.string().min(1),
-                  provider: zod.string().min(1),
-                  direction_supported: zod.array(zod.string().min(1)),
-                }),
-              ),
-              supports: zod.array(zod.string().min(1)),
-              direction_answer: zod.string().min(1),
-              gaps: zod.array(zod.string().min(1)),
-              instrumentation: zod.string().min(1),
-              setup_hash: zod.string().min(1),
-            }),
-            sdk_version: zod.string().min(1),
-            stored_at: zod.string().datetime({ offset: true }),
-            setup_stale: zod.boolean(),
-          })
-          .optional(),
         api_key: zod.string().min(1).optional(),
         created_at: zod.string().datetime({ offset: true }).optional(),
         updated_at: zod.string().datetime({ offset: true }).optional(),

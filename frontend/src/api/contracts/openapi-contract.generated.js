@@ -48812,9 +48812,6 @@ export const OPENAPI_CONTRACT = Object.freeze({
           minLength: 1,
           "x-nullable": true,
         },
-        agent_details: {
-          $ref: "#/definitions/StoredAgentResponse",
-        },
         api_key: {
           title: "Api key",
           type: "string",

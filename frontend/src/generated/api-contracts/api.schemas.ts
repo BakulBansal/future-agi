@@ -16074,6 +16074,76 @@ export const AgentVersionResponseApiStatus = {
   deprecated: "deprecated",
 } as const;
 
+/**
+ * Snapshot of agent configuration at this version
+ */
+export type AgentVersionResponseApiConfigurationSnapshot = {
+  [key: string]: unknown;
+};
+
+export interface AgentVersionResponseApi {
+  readonly id?: string;
+  /** Version number of the agent */
+  readonly version_number?: number;
+  /**
+   * Human-readable version name (e.g., 'v1.2.3')
+   * @minLength 1
+   */
+  readonly version_name?: string;
+  readonly version_name_display?: string;
+  /** Current status of this version */
+  readonly status?: AgentVersionResponseApiStatus;
+  /** @minLength 1 */
+  readonly status_display?: string;
+  /** Performance score (0.0 to 10.0) */
+  readonly score?: string;
+  /** Number of tests run for this version */
+  readonly test_count?: number;
+  /** Test pass rate percentage */
+  readonly pass_rate?: string;
+  /**
+   * Description of changes in this version
+   * @minLength 1
+   */
+  readonly description?: string;
+  /**
+   * Commit message for the agent version
+   * @minLength 1
+   */
+  readonly commit_message?: string;
+  /**
+   * Detailed release notes for this version
+   * @minLength 1
+   */
+  readonly release_notes?: string;
+  /** Parent agent definition */
+  readonly agent_definition?: string;
+  /** Organization this version belongs to */
+  readonly organization?: string;
+  /** Snapshot of agent configuration at this version */
+  readonly configuration_snapshot?: AgentVersionResponseApiConfigurationSnapshot;
+  readonly is_active?: string;
+  readonly is_latest?: string;
+  /** @minLength 1 */
+  readonly agent_kind?: string;
+  /** @minLength 1 */
+  readonly api_key?: string;
+  readonly created_at?: string;
+  readonly updated_at?: string;
+}
+
+export interface AgentVersionCreateResponseApi {
+  /** @minLength 1 */
+  readonly message?: string;
+  version?: AgentVersionResponseApi;
+}
+
+export interface AgentVersionActivateResponseApi {
+  /** @minLength 1 */
+  readonly message?: string;
+  version?: AgentVersionResponseApi;
+}
+
 export interface StoredProviderRefApi {
   /** @minLength 1 */
   provider: string;
@@ -16170,77 +16240,6 @@ export interface StoredAgentResponseApi {
   sdk_version: string;
   stored_at: string;
   setup_stale: boolean;
-}
-
-/**
- * Snapshot of agent configuration at this version
- */
-export type AgentVersionResponseApiConfigurationSnapshot = {
-  [key: string]: unknown;
-};
-
-export interface AgentVersionResponseApi {
-  readonly id?: string;
-  /** Version number of the agent */
-  readonly version_number?: number;
-  /**
-   * Human-readable version name (e.g., 'v1.2.3')
-   * @minLength 1
-   */
-  readonly version_name?: string;
-  readonly version_name_display?: string;
-  /** Current status of this version */
-  readonly status?: AgentVersionResponseApiStatus;
-  /** @minLength 1 */
-  readonly status_display?: string;
-  /** Performance score (0.0 to 10.0) */
-  readonly score?: string;
-  /** Number of tests run for this version */
-  readonly test_count?: number;
-  /** Test pass rate percentage */
-  readonly pass_rate?: string;
-  /**
-   * Description of changes in this version
-   * @minLength 1
-   */
-  readonly description?: string;
-  /**
-   * Commit message for the agent version
-   * @minLength 1
-   */
-  readonly commit_message?: string;
-  /**
-   * Detailed release notes for this version
-   * @minLength 1
-   */
-  readonly release_notes?: string;
-  /** Parent agent definition */
-  readonly agent_definition?: string;
-  /** Organization this version belongs to */
-  readonly organization?: string;
-  /** Snapshot of agent configuration at this version */
-  readonly configuration_snapshot?: AgentVersionResponseApiConfigurationSnapshot;
-  readonly is_active?: string;
-  readonly is_latest?: string;
-  /** @minLength 1 */
-  readonly agent_kind?: string;
-  agent_details?: StoredAgentResponseApi;
-  /** @minLength 1 */
-  readonly api_key?: string;
-  readonly created_at?: string;
-  readonly updated_at?: string;
-}
-
-export interface AgentVersionCreateResponseApi {
-  /** @minLength 1 */
-  readonly message?: string;
-  version?: AgentVersionResponseApi;
-}
-
-export interface AgentVersionActivateResponseApi {
-  /** @minLength 1 */
-  readonly message?: string;
-  version?: AgentVersionResponseApi;
 }
 
 /**
