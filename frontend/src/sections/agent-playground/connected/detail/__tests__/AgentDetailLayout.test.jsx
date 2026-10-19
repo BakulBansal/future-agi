@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import PropTypes from "prop-types";
 import {
   act,
   fireEvent,
@@ -39,6 +40,7 @@ const LocationProbe = () => {
 };
 
 const Tab = ({ name }) => <div data-testid={`tab-${name}`} />;
+Tab.propTypes = { name: PropTypes.string.isRequired };
 
 // Mirrors the connected/:agentId block in routes/sections/dashboard.jsx.
 const renderAt = (url) => {
