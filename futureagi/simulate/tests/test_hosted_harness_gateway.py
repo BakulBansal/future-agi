@@ -2853,14 +2853,48 @@ def test_hosted_execution_cancel_signals_workflow_without_deleting_sandbox(
     assert job.cancel_reason == "user_canceled"
 
 
-def test_platform_simulator_material_carries_observe_credentials(monkeypatch):
-    for name, value in {
-        "HARNESS_OBSERVABILITY": "on",
-        "FI_API_KEY": "observe-key",
-        "FI_SECRET_KEY": "observe-secret",
-        "FI_HARNESS_PROJECT": "hosted-harness",
-    }.items():
-        monkeypatch.setenv(name, value)
+_OBSERVE_NAMES = (
+    "HARNESS_OBSERVABILITY",
+    "FI_API_KEY",
+    "FI_SECRET_KEY",
+    "FI_HARNESS_PROJECT",
+)
+
+
+def _set_observe_env(
+    monkeypatch, flag, *, api_key="observe-key", secret="observe-secret"
+):
+    for name in _OBSERVE_NAMES:
+        monkeypatch.delenv(name, raising=False)
+    if flag is not None:
+        monkeypatch.setenv("HARNESS_OBSERVABILITY", flag)
+    if api_key:
+        monkeypatch.setenv("FI_API_KEY", api_key)
+    if secret:
+        monkeypatch.setenv("FI_SECRET_KEY", secret)
+    monkeypatch.setenv("FI_HARNESS_PROJECT", "hosted-harness")
+
+
+@pytest.mark.parametrize("flag", [None, "", "off", "0", "false", "maybe"])
+def test_platform_simulator_material_keeps_the_harness_untraced_without_opt_in(
+    monkeypatch, flag
+):
+    _set_observe_env(monkeypatch, flag)
+
+    values, _credentials = _platform_simulator_material()
+
+    # The keys travel regardless, because the harness grades with them.
+    assert values["FI_API_KEY"] == "observe-key"
+    assert values["FI_SECRET_KEY"] == "observe-secret"
+    assert values["FI_HARNESS_PROJECT"] == "hosted-harness"
+    assert values["HARNESS_OBSERVABILITY"] == "off"
+
+
+@pytest.mark.parametrize("flag", ["on", "ON ", "true", "1", " Yes "])
+def test_platform_simulator_material_lets_the_harness_trace_on_opt_in(
+    monkeypatch, flag
+):
+    _set_observe_env(monkeypatch, flag)
 
     values, _credentials = _platform_simulator_material()
 
@@ -2868,6 +2902,55 @@ def test_platform_simulator_material_carries_observe_credentials(monkeypatch):
     assert values["FI_SECRET_KEY"] == "observe-secret"
     assert values["FI_HARNESS_PROJECT"] == "hosted-harness"
     assert values["HARNESS_OBSERVABILITY"] == "on"
+
+
+@pytest.mark.parametrize(
+    "missing", [{"api_key": ""}, {"secret": ""}, {"api_key": "", "secret": ""}]
+)
+@pytest.mark.parametrize("flag", [None, "on"])
+def test_platform_simulator_material_forwards_no_key_that_is_not_set(
+    monkeypatch, flag, missing
+):
+    _set_observe_env(monkeypatch, flag, **missing)
+
+    values, _credentials = _platform_simulator_material()
+
+    if "api_key" in missing:
+        assert "FI_API_KEY" not in values
+    else:
+        assert values["FI_API_KEY"] == "observe-key"
+    if "secret" in missing:
+        assert "FI_SECRET_KEY" not in values
+    else:
+        assert values["FI_SECRET_KEY"] == "observe-secret"
+    # The flag is always sent; without keys the harness has nothing to trace with anyway.
+    assert values["HARNESS_OBSERVABILITY"] == ("on" if flag else "off")
+
+
+def test_the_collector_host_follows_the_keys_whatever_the_harness_flag(monkeypatch):
+    monkeypatch.setenv("ALK_HOSTED_FI_BASE_URL", "https://collector.example.test")
+    payload = {
+        "agent": {"connector": "auto"},
+        "security": {"allowed_egress_domains": []},
+    }
+
+    # The platform evals call the collector, so keys without the opt-in still need its host.
+    for flag in (None, "off", "on"):
+        _set_observe_env(monkeypatch, flag)
+        values, _credentials = _platform_simulator_material()
+        assert values["FI_BASE_URL"] == "https://collector.example.test"
+        assert "collector.example.test" in _resolved_egress_domains(
+            payload, {}, values, None
+        )
+
+    # Without keys no rule adds the host in this setup, so the keys are what put it there.
+    for api_key, secret in (("", ""), ("observe-key", ""), ("", "observe-secret")):
+        _set_observe_env(monkeypatch, "on", api_key=api_key, secret=secret)
+        values, _credentials = _platform_simulator_material()
+        assert values["FI_BASE_URL"] == "https://collector.example.test"
+        assert "collector.example.test" not in _resolved_egress_domains(
+            payload, {}, values, None
+        )
 
 
 def test_platform_simulator_prefers_public_callback_for_hosted_observability(
@@ -3551,6 +3634,58 @@ def test_export_environment_and_keys_for_a_bound_source_agent_with_observability
     # The launch-time redaction set holds each value.
     redacted = cached_attempt_redaction_values(world.attempt.id)
     assert {_EXPORT_API_KEY, _EXPORT_SECRET_KEY} <= set(redacted)
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize("flag", [None, "off", "on"])
+def test_the_harness_flag_never_changes_the_agents_own_export(
+    flag, organization, workspace, user, settings, monkeypatch
+):
+    from tracer.services.simulation_mark import customer_code_environment
+
+    backend_key = "backend-observe-key-0001"
+    _set_observe_env(monkeypatch, flag, api_key=backend_key)
+    # Same world as the bound-source export test above, except that the platform simulator
+    # material is the real one for the four harness names, so the flag can reach the launch.
+    world = _ExportWorld(organization, workspace, user, settings, monkeypatch)
+    real_values, _credentials = _platform_simulator_material()
+    world.simulator_values.update(
+        {name: real_values[name] for name in _OBSERVE_NAMES if name in real_values}
+    )
+    world.launch()
+
+    # The export is the one the flag-free test above expects: the hidden project, the
+    # collector, the two ingest aliases with the export's own values.
+    job = world.job
+    assert world.export_log() == []
+    assert world.mark == customer_code_environment(
+        organization_id=str(job.organization_id),
+        job_id=str(job.id),
+        run_id=str(job.run_id),
+        run_test_id=None,
+        test_execution_id=None,
+        project_name=world.hidden.name,
+        collector_url=_COLLECTOR,
+        export="our_keys",
+        instrumentation="opentelemetry",
+    )
+    assert world.secrets == _INGEST_PAIR
+    assert set(world.refs) == set(_INGEST_PAIR)
+    assert "collector.example.com" in world.domains
+    assert world.credential_calls == [
+        (str(organization.id), str(world.hidden.workspace_id), str(world.agent.id))
+    ]
+    # The backend's key is never the agent's: not among the plan's secrets, the document or
+    # the agent's secrets file.
+    assert backend_key not in world.secrets.values()
+    assert backend_key.encode() not in world.uploads["/work/job.json"]
+    assert backend_key.encode() not in world.uploads["/run/futureagi/secrets.json"]
+    # The harness's own file always holds the keys (it grades with them); the flag decides only
+    # whether it traces itself.
+    harness_file = json.loads(world.uploads[_SIMULATOR_SECRETS_PATH])
+    assert harness_file["FI_API_KEY"] == backend_key
+    assert harness_file["FI_SECRET_KEY"] == "observe-secret"
+    assert harness_file["HARNESS_OBSERVABILITY"] == ("on" if flag == "on" else "off")
 
 
 @pytest.mark.django_db

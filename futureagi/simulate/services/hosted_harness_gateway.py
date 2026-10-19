@@ -350,9 +350,7 @@ def _platform_simulator_material() -> tuple[dict[str, str], bytes | None]:
         "SIMULATOR_STT_PROVIDER",
         "SIMULATOR_TTS_MODEL",
         "SIMULATOR_TTS_PROVIDER",
-        # Observe credentials for the guest. The harness's model calls happen inside the sandbox,
-        # so without these a run is only readable as log text in the diagnostics archive.
-        "HARNESS_OBSERVABILITY",
+        # Observe account of the guest: platform evals and, on opt-in, the harness's own traces.
         "FI_API_KEY",
         "FI_SECRET_KEY",
         "FI_HARNESS_PROJECT",
@@ -369,6 +367,14 @@ def _platform_simulator_material() -> tuple[dict[str, str], bytes | None]:
         value = str(os.environ.get(name) or "").strip()
         if value:
             values[name] = value
+    # Keys always travel (the evals need them); self-tracing is opt-in, because a
+    # collector of another deployment refuses them on every run.
+    values["HARNESS_OBSERVABILITY"] = (
+        "on"
+        if str(os.environ.get("HARNESS_OBSERVABILITY") or "").strip().lower()
+        in {"1", "on", "true", "yes"}
+        else "off"
+    )
     catalogue = _noise_catalogue_setting()
     if catalogue:
         values["ALK_BACKGROUND_NOISE_CATALOG"] = catalogue
@@ -1706,17 +1712,9 @@ def _resolved_egress_domains(
             )
             if clip_host:
                 values.append(clip_host)
-    # Observe, when the guest is given credentials for it. Derived rather than requested, because a
-    # customer cannot be expected to know the collector is a dependency of their own run.
+    # The guest's Observe host, derived because a customer cannot know their run depends on it.
     simulator_values = {str(k).upper(): v for k, v in simulator_env.items()}
-    observability_off = str(
-        simulator_values.get("HARNESS_OBSERVABILITY") or ""
-    ).strip().lower() in {"0", "off", "false", "no"}
-    if (
-        not observability_off
-        and simulator_values.get("FI_API_KEY")
-        and simulator_values.get("FI_SECRET_KEY")
-    ):
+    if simulator_values.get("FI_API_KEY") and simulator_values.get("FI_SECRET_KEY"):
         collector = _hostname_from_url(simulator_values.get("FI_BASE_URL"))
         if collector:
             values.append(collector)
