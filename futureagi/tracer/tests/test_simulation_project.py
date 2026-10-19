@@ -13,9 +13,11 @@ from django.db import IntegrityError, connection
 from django.db.migrations import AddField, AlterModelOptions
 from django.db.migrations.loader import MigrationLoader
 from django.db.models import CASCADE, OneToOneField
+from django.test.utils import CaptureQueriesContext
 
 from accounts.models.organization import Organization
 from accounts.models.workspace import Workspace
+from model_hub.management.commands import backfill_score_tracer_project
 from model_hub.models.ai_model import AIModel
 from simulate.models.agent_definition import AgentDefinition
 from simulate.models.run_test import RunTest
@@ -139,6 +141,34 @@ def test_migration_adds_one_nullable_unique_column():
     assert ("simulate", "0097_merge_selected_runs_environment_v3") in (
         migration.dependencies
     )
+
+
+def test_score_backfill_that_runs_before_0115_never_names_the_column(
+    organization, workspace
+):
+    plan = MigrationLoader(connection).graph.forwards_plan(
+        ("tracer", "0115_project_simulation_agent")
+    )
+    assert ("model_hub", "0120_backfill_score_tracer_project") in plan
+    visible = Project.objects.create(
+        name="A visible project",
+        organization=organization,
+        workspace=workspace,
+        model_type=AIModel.ModelTypes.GENERATIVE_LLM,
+        trace_type="observe",
+    )
+    # Any queryset with organization_id stands in for the pending scores.
+    base = Project._base_manager.filter(pk=visible.pk)
+
+    for only_project in (str(visible.id), None):
+        with CaptureQueriesContext(connection) as queries:
+            projects, _ = backfill_score_tracer_project._projects_for_pending_scores(
+                base, only_project
+            )
+        assert str(visible.id) in {ref.project_id for ref in projects}
+        assert queries.captured_queries
+        for query in queries.captured_queries:
+            assert "simulation_agent" not in query["sql"]
 
 
 def test_hard_delete_of_the_agent_removes_the_project(organization, workspace):

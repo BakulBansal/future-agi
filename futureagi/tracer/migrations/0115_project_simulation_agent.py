@@ -3,7 +3,6 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
         ("simulate", "0097_merge_selected_runs_environment_v3"),
         ("tracer", "0114_backfill_group_redirects"),

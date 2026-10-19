@@ -2512,7 +2512,15 @@ NON_RESERVED_PREFIX = "constant non-reserved prefix"
 OPERATOR_TOOLING = "operator tooling"
 REFUSES_RESERVED_NAMES = "refuses reserved names"
 HIDDEN_PROJECT_OF_AN_AGENT = "hidden project of an agent"
-NO_GUARD_REMOVED_ELSEWHERE = "removed elsewhere, no guard"
+
+# Files the dev branch deletes and this branch still has. An entry for one of them
+# is skipped once the file is gone, whatever its claim, so the merge that brings
+# the deletion does not fail the case below; the entry goes when the file does.
+# Nothing else is skipped: a pinned creator in any other absent file fails.
+REMOVED_ON_DEV = {
+    "ai_tools/tools/tracing/create_project.py",
+    "ai_tools/tools/tracing/update_project.py",
+}
 
 # Every direct call that builds a project in non-test code, by file and function,
 # with the claim that makes it safe and why. A creator that fits no claim fails
@@ -2703,7 +2711,7 @@ def creator_claim_holds(claim, creator):
             creator.relative == "tracer/services/simulation_project.py"
             and creator.manager == "with_simulation"
         )
-    return claim == NO_GUARD_REMOVED_ELSEWHERE
+    return False
 
 
 def creator_problems(found, pinned, present):
@@ -2728,10 +2736,32 @@ def creator_problems(found, pinned, present):
         if key in found:
             continue
         relative = key.split(":", 1)[0]
-        if claim == NO_GUARD_REMOVED_ELSEWHERE and relative not in present:
+        if relative in REMOVED_ON_DEV and relative not in present:
             continue
         problems.append(f"{key} is pinned as a creator and builds no project any more")
     return problems
+
+
+@pytest.mark.unit
+def test_an_entry_for_a_file_dev_deletes_is_skipped_only_while_it_is_absent():
+    tool = "ai_tools/tools/tracing/create_project.py"
+    pinned = {
+        f"{tool}:CreateProjectTool.execute": (REFUSES_RESERVED_NAMES, "a guard"),
+    }
+    # The file is there and builds nothing: the entry is stale and must fail.
+    assert creator_problems({}, pinned, {tool}) == [
+        f"{tool}:CreateProjectTool.execute is pinned as a creator and builds no "
+        "project any more"
+    ]
+    # The file is gone from the tree: the entry goes with it.
+    assert creator_problems({}, pinned, set()) == []
+
+    # Any other file is not excused by being absent.
+    other = {"tracer/services/gone.py:make": (CONSTANT_NAME, "a literal")}
+    assert creator_problems({}, other, set()) == [
+        "tracer/services/gone.py:make is pinned as a creator and builds no project "
+        "any more"
+    ]
 
 
 SAMPLE_CREATORS = """

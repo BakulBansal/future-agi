@@ -1,6 +1,7 @@
 """The hidden simulation project stays out of the project managers."""
 
 import json
+import re
 import uuid
 from pathlib import Path
 from types import SimpleNamespace
@@ -45,6 +46,9 @@ from tracer.tests.test_simulation_project import (
 from tracer.utils.otel import get_or_create_project
 
 pytestmark = pytest.mark.django_db
+
+REPO_ROOT = Path(__file__).resolve().parents[3]
+RUN_PARAMETERS = ("test_execution_id", "call_execution_id")
 
 
 def _agent(organization, workspace, name):
@@ -184,22 +188,15 @@ def test_save_full_clean_does_not_see_a_hidden_name_but_the_database_does(
 
 
 VIEW_PATHS = ("view_create", "view_rename", "view_patch")
-# The assistant's tools do not trim a name, so only the exact name is reserved.
-TOOL_PATHS = ("tool_create", "tool_rename")
+TOOL_PATHS = {"tool_create": "create_project", "tool_rename": "update_project"}
+EXACT_NAME_PATHS = ("get_or_create_project", *TOOL_PATHS)
 VIEW_NOT_RESERVED_NAMES = [name for name in NOT_RESERVED_NAMES if name == name.strip()]
 HARMLESS_NAME = "A harmless name"
 RESERVED_PATH_CASES = (
-    [
-        (path, RESERVED_NAME, True)
-        for path in (*VIEW_PATHS, *TOOL_PATHS, "get_or_create_project")
-    ]
+    [(path, RESERVED_NAME, True) for path in (*VIEW_PATHS, *EXACT_NAME_PATHS)]
     + [(path, f" {RESERVED_NAME} ", True) for path in VIEW_PATHS]
     + [(path, name, False) for path in VIEW_PATHS for name in VIEW_NOT_RESERVED_NAMES]
-    + [
-        (path, name, False)
-        for path in (*TOOL_PATHS, "get_or_create_project")
-        for name in NOT_RESERVED_NAMES
-    ]
+    + [(path, name, False) for path in EXACT_NAME_PATHS for name in NOT_RESERVED_NAMES]
 )
 
 
@@ -235,24 +232,26 @@ def test_reserved_name_is_refused_by_create_rename_tools_and_get_or_create(
             assert project.name == name
             assert Project.no_workspace_objects.filter(pk=project.pk).exists()
     elif path in TOOL_PATHS:
+        context = ToolContext(user=user, organization=organization, workspace=workspace)
         if path == "tool_create":
-            params = {"name": name, "model_type": "GenerativeLLM"}
+            params = {
+                "name": name,
+                "trace_type": "observe",
+                "model_type": "GenerativeLLM",
+            }
         else:
             params = {"project_id": str(target.id), "name": name}
-        result = _run_tool(
-            "create_project" if path == "tool_create" else "update_project",
-            params,
-            user,
-            organization,
-            workspace,
-        )
+        result = registry.get(TOOL_PATHS[path]).run(params, context)
         if refused:
             assert result.is_error
+            assert result.error_code == "VALIDATION_ERROR"
             assert RESERVED_PROJECT_NAME_MESSAGE in result.content
         else:
             assert not result.is_error, result.content
-            assert result.data["name"] == name
-            assert Project.objects.filter(pk=result.data["project_id"]).exists()
+            if path == "tool_create":
+                assert Project.objects.get(name=name).trace_type == "observe"
+            else:
+                assert Project.objects.get(pk=target.pk).name == name
     elif path == "view_create":
         response = auth_client.post(
             "/tracer/project/",
@@ -397,14 +396,81 @@ def test_the_three_query_serializers_declare_the_run_parameters(serializer, base
     ],
 )
 def test_the_published_schema_lists_the_run_parameters(path):
-    swagger = Path(__file__).resolve().parents[3] / "api_contracts/openapi/swagger.json"
+    swagger = REPO_ROOT / "api_contracts/openapi/swagger.json"
     parameters = json.loads(swagger.read_text())["paths"][path]["get"]["parameters"]
     by_name = {parameter["name"]: parameter for parameter in parameters}
 
-    for key in ("test_execution_id", "call_execution_id"):
+    for key in RUN_PARAMETERS:
         assert by_name[key]["in"] == "query"
         assert by_name[key]["required"] is False
+        assert by_name[key]["type"] == "string"
         assert by_name[key]["format"] == "uuid"
+
+
+def test_only_the_expected_operations_name_the_run_parameters():
+    swagger = REPO_ROOT / "api_contracts/openapi/swagger.json"
+    paths = json.loads(swagger.read_text())["paths"]
+
+    found = {}
+    for path, item in paths.items():
+        for method, operation in item.items():
+            if not isinstance(operation, dict):
+                continue
+            # Path parameters of other routes share these names; only the
+            # query string is in question here.
+            declared = item.get("parameters", []) + operation.get("parameters", [])
+            names = {p.get("name") for p in declared if p.get("in") == "query"}
+            named = frozenset(names & set(RUN_PARAMETERS))
+            if named:
+                found[(path, method)] = named
+
+    both = frozenset(RUN_PARAMETERS)
+    expected = {
+        # The three detail reads that take the run parameters.
+        ("/tracer/trace/{id}/", "get"): both,
+        ("/tracer/trace/voice_call_detail/", "get"): both,
+        ("/tracer/observation-span/{id}/", "get"): both,
+        # Unrelated listings that already carried one filter of their own.
+        ("/sdk/api/v1/simulation/metrics/", "get"): frozenset({"call_execution_id"}),
+        ("/sdk/api/v1/simulation/runs/", "get"): frozenset({"call_execution_id"}),
+        ("/simulate/api/call-executions/", "get"): frozenset({"test_execution_id"}),
+    }
+    assert found == expected
+
+
+@pytest.mark.parametrize(
+    ("path", "zod_name"),
+    [
+        ("/tracer/trace/{id}/", "TracerTraceReadQueryParams"),
+        ("/tracer/trace/voice_call_detail/", "TracerTraceVoiceCallDetailQueryParams"),
+        ("/tracer/observation-span/{id}/", "TracerObservationSpanReadQueryParams"),
+    ],
+)
+def test_the_generated_frontend_files_name_the_run_parameters(path, zod_name):
+    frontend = REPO_ROOT / "frontend/src"
+    zod_file = frontend / "generated/api-contracts/api.zod.ts"
+    contract_file = frontend / "api/contracts/openapi-contract.generated.js"
+    if not (zod_file.is_file() and contract_file.is_file()):
+        pytest.skip("the frontend sources are not part of this checkout")
+
+    zod_text = zod_file.read_text()
+    start = zod_text.index(f"export const {zod_name} = zod.object({{")
+    zod_block = zod_text[start : zod_text.find("\nexport const ", start + 1)]
+
+    contract_text = contract_file.read_text()
+    start = contract_text.index(f'    "{path}": {{')
+    end = contract_text.find('\n    "/', start + 1)
+    contract_block = contract_text[start:end]
+
+    for key in RUN_PARAMETERS:
+        assert re.search(
+            rf"\b{key}: zod\s*\.string\(\)\s*\.uuid\(\)\s*\.optional\(\)", zod_block
+        ), f"{zod_name} does not declare {key} as an optional uuid"
+        assert re.search(
+            rf'\b{key}: {{\s*required: false,\s*schema: {{\s*type: "string",'
+            rf'\s*format: "uuid",',
+            contract_block,
+        ), f"the contract table has no optional uuid {key} for {path}"
 
 
 def test_unknown_query_fields_are_still_rejected_or_ignored():
