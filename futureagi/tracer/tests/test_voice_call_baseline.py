@@ -41,7 +41,7 @@ PROJECT_NAME = "voice-baseline"
 # for the readers, which only need it to be a non-negative int.
 ROW_VERSION = 1
 # Invented; only the stubbed gRPC exporter ever sees it.
-INGEST_KEY_PAIR = ("baseline-ingest-key", "baseline-ingest-secret")
+SYSTEM_KEY_PAIR = ("baseline-ingest-key", "baseline-ingest-secret")
 
 
 def _load(name: str) -> Any:
@@ -174,10 +174,10 @@ class _SequentialUuid:
 # prefixes (:32-40, :133-140), ``DeriveHotKeys``
 # (:212-271) with its ``providerKeys`` (:289-295) and ``firstString``
 # (:317-324), then ``fi-collector/exporter/clickhouse25exporter/converter.go``
-# ``spanToRow`` (:268-408), ``resolveObservationType`` (:107-131) with its
-# tables (:64-68, :79-101),
-# ``statusString`` (:750-759), ``formatDateTime64`` (:787-789),
-# ``traceIDToUUIDString`` (:816-820). The column names are not typed here: the
+# ``spanToRow`` (:271-414), ``resolveObservationType`` (:110-134) with its
+# tables (:67-71, :82-104),
+# ``statusString`` (:756-765), ``formatDateTime64`` (:793-795),
+# ``traceIDToUUIDString`` (:822-826). The column names are not typed here: the
 # readers' own statements are asserted against the row below. ``model``, the token counts
 # and ``cost`` stay empty because neither reader reads them for a root span,
 # and the Go overflow of integers beyond 2**53 and non-finite doubles is left
@@ -365,9 +365,9 @@ def _run_top_span(patch: pytest.MonkeyPatch, call: dict) -> tuple[dict, Any]:
     def _leave_url(*, audio_url, **_kwargs):
         return audio_url, 0
 
-    def _ingest_key(organization_id, workspace_id):
+    def _system_key(organization_id, workspace_id):
         seen["credentials"].append((organization_id, workspace_id))
-        return INGEST_KEY_PAIR
+        return SYSTEM_KEY_PAIR
 
     real_export = sim_emit.export_sim_spans
 
@@ -397,8 +397,8 @@ def _run_top_span(patch: pytest.MonkeyPatch, call: dict) -> tuple[dict, Any]:
         "fetch_and_parse_call_logs",
         classmethod(lambda cls, **_kwargs: None),
     )
-    # The real lookup reads or creates the organisation's key in Postgres.
-    patch.setattr(collector_ingest, "resolve_ingest_credentials", _ingest_key)
+    # The real lookup reads or creates the organisation's system key in Postgres.
+    patch.setattr(collector_ingest, "resolve_system_emit_credentials", _system_key)
     patch.setattr(sim_emit, "export_sim_spans", _keep_dict)
     patch.setattr(sim_emit, "OTLPSpanExporter", _KeepingExporter)
     patch.setattr(
@@ -420,12 +420,12 @@ def _run_top_span(patch: pytest.MonkeyPatch, call: dict) -> tuple[dict, Any]:
     [export] = seen["exports"]
     assert export["project_name"] == PROJECT_NAME
     assert export["project_type"] == "observe"
-    assert (export["api_key"], export["secret_key"]) == INGEST_KEY_PAIR
+    assert (export["api_key"], export["secret_key"]) == SYSTEM_KEY_PAIR
     assert export["service_name"] == "fi-provider"
     [exporter] = seen["exporters"]
     assert exporter.kwargs["headers"] == (
-        ("x-api-key", INGEST_KEY_PAIR[0]),
-        ("x-secret-key", INGEST_KEY_PAIR[1]),
+        ("x-api-key", SYSTEM_KEY_PAIR[0]),
+        ("x-secret-key", SYSTEM_KEY_PAIR[1]),
     )
     [span] = export["spans"]
     [readable] = exporter.exported
