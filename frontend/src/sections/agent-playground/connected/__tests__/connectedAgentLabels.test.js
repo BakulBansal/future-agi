@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
+  modalityIcon,
   humanize,
   modalityLabel,
   sourceLabel,
@@ -39,6 +40,25 @@ describe("modalityLabel", () => {
 
   it("falls back to a dash with no modality", () => {
     expect(modalityLabel({ modality: null })).toBe("—");
+  });
+});
+
+describe("modalityIcon", () => {
+  it("uses the old Agent Definition page's icons", () => {
+    expect(modalityIcon({ modality: "voice", direction: "inbound" })).toBe(
+      "/assets/icons/ic_phone_call.svg",
+    );
+    expect(modalityIcon({ modality: "voice", direction: "outbound" })).toBe(
+      "/assets/icons/ic_phone_call.svg",
+    );
+    expect(modalityIcon({ modality: "text", direction: null })).toBe(
+      "/assets/icons/ic_chat_single.svg",
+    );
+  });
+
+  it("has no icon when the modality is unknown or missing", () => {
+    expect(modalityIcon({ modality: null })).toBeNull();
+    expect(modalityIcon({ modality: "video" })).toBeNull();
   });
 });
 

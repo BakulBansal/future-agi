@@ -85,6 +85,13 @@ describe("ConnectedAgentsView", () => {
     ).toBeInTheDocument();
   });
 
+  it("puts the old page's modality icon next to voice and chat", async () => {
+    renderView();
+    await screen.findByText("Clinic receptionist");
+    expect(screen.getByTestId("modality-icon-ca-03")).toBeInTheDocument();
+    expect(screen.getByTestId("modality-icon-ca-04")).toBeInTheDocument();
+  });
+
   it("shows an error instead of the empty state when the list fails", async () => {
     axios.get.mockReset();
     axios.get.mockRejectedValue({ message: "Network Error" });

@@ -1,3 +1,5 @@
+import { getChipConfig } from "src/components/scenarios/CustomCellRenderers/ChipCellRenderer";
+
 // Cell text for the Connected agents table. Known values get their proper
 // spelling; anything else the API sends is shown humanised, never dropped.
 
@@ -24,6 +26,14 @@ export const modalityLabel = ({ modality, direction }) => {
   if (!modality) return EMPTY;
   const label = MODALITY_LABELS[modality] || humanize(modality);
   return direction ? `${label} · ${humanize(direction)}` : label;
+};
+
+// The icon the old Agent Definition list showed for the same modality.
+const MODALITY_ICON_KEYS = { voice: "voice", text: "chat", chat: "chat" };
+export const modalityIcon = ({ modality, direction }) => {
+  const key = MODALITY_ICON_KEYS[modality];
+  if (!key) return null;
+  return getChipConfig(direction ? `${key}_${direction}` : key).icon ?? null;
 };
 
 export const sourceLabel = (source) =>

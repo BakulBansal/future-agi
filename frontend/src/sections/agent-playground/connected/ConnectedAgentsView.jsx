@@ -5,11 +5,13 @@ import { CONNECTED_AGENTS_PATH } from "../agentsTabs";
 import { Box, Button, Stack, Typography } from "@mui/material";
 import { format } from "date-fns";
 import Iconify from "src/components/iconify";
+import SvgColor from "src/components/svg-color";
 import FormSearchField from "src/components/FormSearchField/FormSearchField";
 import { DataTable, DataTablePagination } from "src/components/data-table";
 import { useDebounce } from "src/hooks/use-debounce";
 import { useConnectedAgents } from "src/api/agents/connectedAgents";
 import {
+  modalityIcon,
   modalityLabel,
   sourceLabel,
   usedInLabel,
@@ -61,7 +63,26 @@ const columns = [
     header: "Modality",
     size: 160,
     enableSorting: false,
-    cell: ({ row }) => <CellText>{modalityLabel(row.original)}</CellText>,
+    cell: ({ row }) => {
+      const icon = modalityIcon(row.original);
+      return (
+        <Stack direction="row" alignItems="center" spacing={0.75} minWidth={0}>
+          {icon && (
+            <SvgColor
+              src={icon}
+              data-testid={`modality-icon-${row.original.id}`}
+              sx={{
+                width: 16,
+                height: 16,
+                flexShrink: 0,
+                color: "text.secondary",
+              }}
+            />
+          )}
+          <CellText>{modalityLabel(row.original)}</CellText>
+        </Stack>
+      );
+    },
   },
   {
     id: "source",
