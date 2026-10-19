@@ -32061,8 +32061,6 @@ export const simulateAgentDefinitionsVersionsCreateCreateBodyLivekitAgentNameMax
 export const simulateAgentDefinitionsVersionsCreateCreateBodyLivekitMaxConcurrencyMax = 25;
 
 export const simulateAgentDefinitionsVersionsCreateCreateBodyCommitMessageDefault = ``;
-export const simulateAgentDefinitionsVersionsCreateCreateBodyObservabilityEnabledDefault =
-  false;
 
 export const SimulateAgentDefinitionsVersionsCreateCreateBody = zod.object({
   agent_name: zod
@@ -32113,11 +32111,7 @@ export const SimulateAgentDefinitionsVersionsCreateCreateBody = zod.object({
     .default(
       simulateAgentDefinitionsVersionsCreateCreateBodyCommitMessageDefault,
     ),
-  observability_enabled: zod
-    .boolean()
-    .default(
-      simulateAgentDefinitionsVersionsCreateCreateBodyObservabilityEnabledDefault,
-    ),
+  observability_enabled: zod.boolean().optional(),
 });
 
 /**
