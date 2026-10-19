@@ -120715,8 +120715,7 @@
                     "title": "Setup stale",
                     "type": "boolean"
                 }
-            },
-            "x-nullable": true
+            }
         },
         "AgentVersionResponse": {
             "type": "object",

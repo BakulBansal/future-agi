@@ -77224,7 +77224,6 @@ export const OPENAPI_CONTRACT = Object.freeze({
           type: "boolean",
         },
       },
-      "x-nullable": true,
     },
     StreamStatusResponse: {
       required: ["status", "result"],
