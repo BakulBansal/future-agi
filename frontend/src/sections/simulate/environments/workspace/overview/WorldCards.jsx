@@ -12,7 +12,9 @@ const MONO = "ui-monospace, Menlo, monospace";
 
 export function SeededDataCard({ env }) {
   const tables = worldTables(env);
-  const totalRows = tables.reduce((a, t) => a + t.rows, 0);
+  // A table the API sent without a row count adds nothing and shows no count.
+  const hasRows = (t) => Number.isFinite(t.rows);
+  const totalRows = tables.filter(hasRows).reduce((a, t) => a + t.rows, 0);
   return (
     <SectionCard
       title={OVERVIEW_COPY.seededTitle}
@@ -27,9 +29,11 @@ export function SeededDataCard({ env }) {
               <Typography sx={{ typography: "s2", fontWeight: "fontWeightSemiBold", fontFamily: MONO }}>{t.name}</Typography>
               {t.note && <Typography noWrap sx={{ typography: "s3", color: "text.subtitle" }}>{t.note}</Typography>}
             </Box>
-            <Typography sx={{ typography: "s2", fontWeight: "fontWeightBold", fontVariantNumeric: "tabular-nums" }}>
-              {t.rows.toLocaleString()}
-            </Typography>
+            {hasRows(t) && (
+              <Typography sx={{ typography: "s2", fontWeight: "fontWeightBold", fontVariantNumeric: "tabular-nums" }}>
+                {t.rows.toLocaleString()}
+              </Typography>
+            )}
           </Stack>
         ))}
       </Stack>

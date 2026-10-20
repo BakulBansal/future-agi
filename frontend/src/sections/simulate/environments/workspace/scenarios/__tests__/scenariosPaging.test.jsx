@@ -220,6 +220,19 @@ describe("ScenariosStep — keyboard and drawer", () => {
     expect(screen.getByText("scenario selected")).toBeInTheDocument();
   });
 
+  it("lets Escape close a popover without clearing the selection", async () => {
+    renderStep();
+    await screen.findByText(/Showing 1–25 of 60/);
+    fireEvent.click(screen.getAllByRole("checkbox")[1]);
+    expect(screen.getByText("scenario selected")).toBeInTheDocument();
+    // The selection bar's Repeats control (its tooltip names the button).
+    fireEvent.click(screen.getByText(/^Repeats: \d/).closest("button"));
+    const popoverHeading = await screen.findByText("Repeats per scenario");
+    fireEvent.keyDown(popoverHeading, { key: "Escape" });
+    await waitFor(() => expect(screen.queryByText("Repeats per scenario")).toBeNull());
+    expect(screen.getByText("scenario selected")).toBeInTheDocument();
+  });
+
   it("opens a row in a drawer with its detail", async () => {
     renderStep();
     await screen.findByText(/Showing 1–25 of 60/);

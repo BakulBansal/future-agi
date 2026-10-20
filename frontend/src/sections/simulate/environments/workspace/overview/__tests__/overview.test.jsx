@@ -133,6 +133,18 @@ describe("OverviewPanel", () => {
     expect(screen.getByText("900")).toBeInTheDocument();
   });
 
+  it("shows a seeded table the API sent without a row count, without breaking", () => {
+    renderPanel({
+      env: { ...MOCK_WORLD, seed: { tables: [{ name: "bookings", rows: 900 }, { name: "fares" }] } },
+      backedWorld: BACKED_WORLD,
+    });
+    expect(screen.getByText("fares")).toBeInTheDocument();
+    expect(screen.getByText("900")).toBeInTheDocument();
+    // The total counts only the rows the API reported.
+    expect(screen.getByText(/^900 rows fill/)).toBeInTheDocument();
+    expect(screen.queryByText(/NaN/)).toBeNull();
+  });
+
   it("leaves the harness's own tables out of Seeded data, and the card with them", () => {
     renderPanel({
       env: {
