@@ -31,13 +31,7 @@ describe("buildSummaryRow", () => {
     expect(row.scores).toEqual({ task_success: 49, policy: 28 });
   });
 
-  it("takes tokens and cost from the run's own usage", () => {
-    const row = buildSummaryRow(run, {}, { tokens: 38396, cost: 1.25 });
-    expect(row.tokens).toBe(38396);
-    expect(row.cost).toBe(1.25);
-  });
-
-  it("leaves tokens and cost empty while the run's usage is unknown", () => {
+  it("leaves tokens and cost empty: the runs list has no field for them", () => {
     const row = buildSummaryRow(run, {});
     expect(row.tokens).toBeNull();
     expect(row.cost).toBeNull();

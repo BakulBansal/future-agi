@@ -12,12 +12,9 @@ import StopRunControl from "../StopRunControl";
 // The dashed cell a run with no value for a column shows.
 const DASH = "-";
 
-const formatTokens = (n) => n.toLocaleString();
-const formatCost = (dollars) => `$${dollars.toFixed(2)}`;
-
-// The run comparison table. Every column is read from the run: pass, duration,
-// tokens and cost, plus the derived eval columns. A run with no value for a
-// column shows a plain dashed cell.
+// The run comparison table. Real columns (pass, avg duration) plus the derived
+// eval columns render live values; Tokens and Cost have no field on the runs
+// list and show a plain dashed cell.
 export default function SummaryTable({ rows, evals, onOpenRun }) {
   return (
     // The card no longer clips (the graph tooltip must escape it), so clip the
@@ -124,14 +121,8 @@ function SummaryRow({ row, evals, onOpenRun }) {
 
       <NumCell value={`${row.passRate}%`} bold />
       <NumCell value={row.durationS != null ? formatDuration(row.durationS) : DASH} />
-      <NumCell
-        value={row.tokens != null ? formatTokens(row.tokens) : DASH}
-        muted={row.tokens == null}
-      />
-      <NumCell
-        value={row.cost != null ? formatCost(row.cost) : DASH}
-        muted={row.cost == null}
-      />
+      <NumCell value={DASH} muted />
+      <NumCell value={DASH} muted />
       {evals.map((e) => {
         const v = row.scores?.[e.id];
         return <NumCell key={e.id} value={v == null ? DASH : `${Math.round(v)}%`} muted={v == null} />;
