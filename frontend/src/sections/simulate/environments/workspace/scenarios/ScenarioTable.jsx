@@ -19,12 +19,15 @@ import { GROUP_SHAPE, SCENARIO_SHAPE } from "./scenarios.shapes";
 // intentional rather than broken.
 const LOCK_TOOLTIP = "Fork this environment to edit.";
 
-// Body cells pinned to an edge need an opaque base (rows scroll under them),
-// the row's hover tint layered on top, and a soft shadow on the inner side.
+// Body cells pinned to an edge need an opaque base (rows scroll under them)
+// and the row's hover tint layered on top. Only the actions column on the
+// right casts a shadow; the checkbox column sits flat beside the row.
 const pinnedBodyCellSx = (side) => ({
   position: "sticky", [side]: 0, zIndex: 1,
   bgcolor: "background.paper",
-  boxShadow: (t) => `${side === "left" ? 8 : -8}px 0 12px -6px ${alpha(t.palette.common.black, t.palette.mode === "dark" ? 0.45 : 0.08)}`,
+  ...(side === "right" && {
+    boxShadow: (t) => `-8px 0 12px -6px ${alpha(t.palette.common.black, t.palette.mode === "dark" ? 0.45 : 0.08)}`,
+  }),
   transition: "background-image 120ms ease",
   ".MuiTableRow-hover:hover &": {
     backgroundImage: (t) => `linear-gradient(${t.palette.action.hover}, ${t.palette.action.hover})`,
