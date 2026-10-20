@@ -33,7 +33,7 @@ import { useCreditExhaustion } from "src/hooks/use-credit-exhaustion";
 
 import { useEnvironmentsStore } from "../store/useEnvironmentsStore";
 import { useEnvState } from "../store/envState";
-import { BUILD_STATUS, ENV_STATUS } from "../myEnvironments.constants";
+import { BUILD_STATUS } from "../myEnvironments.constants";
 import ChatSplitPane from "../components/ChatSplitPane";
 import EmptyState from "../components/EmptyState";
 import BuilderConsole from "../buildEnvironment/console/BuilderConsole";
@@ -49,31 +49,13 @@ import useWorkspaceTab from "./helpers/useWorkspaceTab";
 import { gapsByTab, counts } from "./helpers/workspaceGaps";
 import { forkEnvironment as buildFork } from "./helpers/forkEnvironment";
 import { WORKSPACE_COPY } from "./workspace.constants";
+import { blockedReason } from "./runBlocked";
 
 const EXECUTION_PATTERN = {
   path: `${paths.dashboard.simulate.environments.root}/:envId/runs/:testId/:executionId`,
   end: false,
 };
 
-// The named reason a run is blocked, in the designer's order: an agent first,
-// then scenarios, then evals, then a generic fallback. Only read when the header
-// button is disabled, so it never shows for a runnable environment.
-// Evals are intentionally not a run blocker — canRun needs only an agent and
-// scenarios, so a run without evals is allowed (it just isn't scored).
-const blockedReason = (envState, env, backed, starting = false) => {
-  if (starting) return WORKSPACE_COPY.runBlocked.starting;
-  // A backed env runs only once it is Ready (canRunHeader), e.g. not while a
-  // run is already going.
-  if (backed && env?.status && env.status !== ENV_STATUS.READY) {
-    return WORKSPACE_COPY.runBlocked.notReady;
-  }
-  if (!envState.agent) return WORKSPACE_COPY.runBlocked.agent;
-  if (!envState.scenarios?.length) return WORKSPACE_COPY.runBlocked.scenarios;
-  // A backed env runs through its run test; until the build links one, there
-  // is nothing to start a run on.
-  if (backed && !env?.platform?.runTestId) return WORKSPACE_COPY.runBlocked.noRunTest;
-  return WORKSPACE_COPY.runBlocked.generic;
-};
 
 /**
  * The environment workspace at `environments/:envId`.

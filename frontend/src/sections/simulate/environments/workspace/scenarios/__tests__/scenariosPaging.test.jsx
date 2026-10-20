@@ -225,9 +225,10 @@ describe("ScenariosStep — keyboard and drawer", () => {
     await screen.findByText(/Showing 1–25 of 60/);
     const first = PAGING_ROWS.find((r) => screen.queryAllByText(r.name).length);
     fireEvent.click(screen.getAllByText(first.name)[0]);
-    expect(await screen.findByText(`Scenario ${first.number}`)).toBeInTheDocument();
-    expect(screen.queryByText("Scenario null")).toBeNull();
-    expect(screen.getByText("What this tests")).toBeInTheDocument();
+    // The drawer's header carries the name and Edit; the table's own edit
+    // buttons are labelled "Edit scenario".
+    expect(await screen.findByRole("button", { name: "Edit" })).toBeInTheDocument();
+    expect(screen.getAllByText(first.name).length).toBeGreaterThan(1);
   });
 });
 

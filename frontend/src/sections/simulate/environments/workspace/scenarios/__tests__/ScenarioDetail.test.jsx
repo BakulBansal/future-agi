@@ -56,12 +56,6 @@ describe("ScenarioDetail persona", () => {
 });
 
 describe("ScenarioDetailBody", () => {
-  it("leads with what the scenario tests when asked", () => {
-    render(<ScenarioDetailBody testsFirst row={{ ...row(["a"]), expected: "Passes when the refund is issued." }} />);
-    const headings = screen.getAllByText(/What this tests|The person is told/).map((n) => n.textContent);
-    expect(headings[0]).toBe("What this tests");
-  });
-
   it("shows the branch once when the category says the same", () => {
     render(<ScenarioDetailBody row={{ ...row([]), branchCategory: "Price objection", conversationBranch: "Price objection" }} />);
     expect(screen.queryByText("Category")).toBeNull();
@@ -71,7 +65,7 @@ describe("ScenarioDetailBody", () => {
 
 describe("ScenarioDetailBody — empty scenario", () => {
   it("leaves out sections with nothing in them", () => {
-    render(<ScenarioDetailBody testsFirst row={{ id: "x", name: "orphan", subTasks: [] }} />);
+    render(<ScenarioDetailBody row={{ id: "x", name: "orphan", subTasks: [] }} />);
     expect(screen.queryByText("What this tests")).toBeNull();
     expect(screen.queryByText("The person is told")).toBeNull();
   });

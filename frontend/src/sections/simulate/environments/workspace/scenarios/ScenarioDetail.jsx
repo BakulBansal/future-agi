@@ -82,9 +82,9 @@ const PERSONA_ROWS = [
 ];
 
 // What a scenario is, section by section: the brief, its sub-goals, the
-// persona, the conversation flow and what it tests. Shared by the list view's
-// expanded row and the table's scenario drawer.
-export function ScenarioDetailBody({ row, testsFirst = false, sx }) {
+// persona, the conversation flow and what it tests: the list view's expanded
+// row.
+export function ScenarioDetailBody({ row, sx }) {
   const s = row;
   if (!s) return null;
   // A section with nothing to say is left out rather than shown empty.
@@ -116,8 +116,6 @@ export function ScenarioDetailBody({ row, testsFirst = false, sx }) {
         ...sx,
       }}
     >
-      {testsFirst && whatItTests}
-
       {(s.task || s.persona?.name) && (
       <Section title="The person is told">
         <Typography
@@ -184,15 +182,13 @@ export function ScenarioDetailBody({ row, testsFirst = false, sx }) {
         </Section>
       )}
 
-      {!testsFirst && whatItTests}
+      {whatItTests}
     </Stack>
   );
 }
 
 ScenarioDetailBody.propTypes = {
   row: SCENARIO_SHAPE,
-  // Lead with what the scenario tests (the drawer); the list view keeps it last.
-  testsFirst: PropTypes.bool,
   sx: PropTypes.object,
 };
 

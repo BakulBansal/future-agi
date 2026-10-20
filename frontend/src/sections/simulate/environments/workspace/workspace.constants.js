@@ -102,7 +102,7 @@ export const WORKSPACE_COPY = {
     evals: "Add at least one evaluation on the Evaluations tab",
     generic: "Setup incomplete",
     starting: "Starting a run",
-    notReady: "Wait for the current run to finish",
+    notReady: "This environment hasn't finished building",
     noRunTest: "This environment isn't linked to a run yet. Rebuild it to run simulations.",
     detailFailed: "This environment's details didn't load. Retry them first.",
     detailLoading: "Loading this environment's details",
