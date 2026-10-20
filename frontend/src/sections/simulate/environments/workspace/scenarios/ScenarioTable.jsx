@@ -68,10 +68,14 @@ const selectableCheckboxSx = {
   "&.MuiCheckbox-indeterminate": { color: "text.primary" },
 };
 
-// The per-row edit pencil opens the scenario editor through onEdit. Stripped
-// from the source: the twin-seed override icon (twinSeedPrompt) — twin-only, not
-// on either entry path.
-export default function ScenarioTable({ rows, groups, onEdit, onRemove, onHideGroup, selectedIds, onSelectionChange, selection, pageIds, onTogglePage, locked = false, rowHeight = "Short" }) {
+// Stop a click inside a cell (checkbox, row actions) from also opening the row.
+const stopRowClick = (e) => e.stopPropagation();
+
+// The per-row edit pencil opens the scenario editor through onEdit; a click
+// anywhere else on the row opens it in full through onOpen. Stripped from the
+// source: the twin-seed override icon (twinSeedPrompt) — twin-only, not on
+// either entry path.
+export default function ScenarioTable({ rows, groups, onEdit, onRemove, onOpen, onHideGroup, selectedIds, onSelectionChange, selection, pageIds, onTogglePage, locked = false, rowHeight = "Short" }) {
   const limits = ROW_HEIGHTS[rowHeight] || ROW_HEIGHTS.Short;
   const [widths, setWidths] = useState(readWidths);
   const widthsRef = useRef(widths);
@@ -302,11 +306,27 @@ export default function ScenarioTable({ rows, groups, onEdit, onRemove, onHideGr
                 const idealOutcomeText = row.outcome || row.expected || "";
 
                 return (
-                  <TableRow key={row.id} hover>
+                  <TableRow
+                    key={row.id}
+                    hover
+                    onClick={onOpen ? () => onOpen(row) : undefined}
+                    // Reachable from the keyboard too: Tab to the row, Enter opens it.
+                    tabIndex={onOpen ? 0 : undefined}
+                    onKeyDown={onOpen ? (e) => {
+                      if (e.target !== e.currentTarget || e.key !== "Enter") return;
+                      e.preventDefault();
+                      onOpen(row);
+                    } : undefined}
+                    aria-label={onOpen ? SCENARIOS_COPY.openRow(row.name || row.title) : undefined}
+                    sx={onOpen ? {
+                      cursor: "pointer",
+                      "&:focus-visible": { outline: "2px solid", outlineColor: "primary.main", outlineOffset: -2 },
+                    } : undefined}
+                  >
                     {!locked && (
                       // Pinned to the left edge so the selection stays in reach
                       // while the table scrolls sideways.
-                      <TableCell padding="checkbox" sx={pinnedSelectCellSx}>
+                      <TableCell padding="checkbox" sx={pinnedSelectCellSx} onClick={stopRowClick}>
                         <Checkbox
                           size="small"
                           checked={rowChecked(row.id)}
@@ -362,6 +382,7 @@ export default function ScenarioTable({ rows, groups, onEdit, onRemove, onHideGr
 
                     <TableCell
                       align="right"
+                      onClick={stopRowClick}
                       sx={{
                         ...pinnedBodyCellSx("right"),
                         whiteSpace: "nowrap", verticalAlign: "top",
@@ -398,6 +419,8 @@ ScenarioTable.propTypes = {
   groups: PropTypes.arrayOf(GROUP_SHAPE),
   onEdit: PropTypes.func,
   onRemove: PropTypes.func,
+  // Opens a row in full (the scenario drawer).
+  onOpen: PropTypes.func,
   onHideGroup: PropTypes.func,
   selectedIds: PropTypes.arrayOf(PropTypes.string),
   onSelectionChange: PropTypes.func,
@@ -409,3 +432,4 @@ ScenarioTable.propTypes = {
   locked: PropTypes.bool,
   rowHeight: PropTypes.oneOf(Object.keys(ROW_HEIGHTS)),
 };
+

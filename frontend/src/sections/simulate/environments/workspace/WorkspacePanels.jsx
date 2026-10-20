@@ -51,6 +51,7 @@ export default function WorkspacePanels({
   graphData,
   onStartRun,
   canRun = false,
+  runBlockedReason,
 }) {
   const navigate = useNavigate();
   const {
@@ -104,7 +105,7 @@ export default function WorkspacePanels({
       case "contract":
         return <RlContractPanel env={env} envState={envState} patch={patch} onGo={go} locked={locked} onFork={onFork} graphData={graphData} />;
       case "scenarios":
-        return <ScenariosStep env={env} envState={envState} patch={patch} locked={locked} onFork={onFork} onStartRun={onStartRun} canRun={canRun} />;
+        return <ScenariosStep env={env} envState={envState} patch={patch} locked={locked} onFork={onFork} onStartRun={onStartRun} canRun={canRun} runBlockedReason={runBlockedReason} />;
       case "evals":
         return (
           <EvalsStep
@@ -228,4 +229,6 @@ WorkspacePanels.propTypes = {
   onStartRun: PropTypes.func,
   // Whether the env is runnable; gates the scenarios selection-bar Run.
   canRun: PropTypes.bool,
+  // Why Run is unavailable, for the Scenarios selection bar's disabled Run.
+  runBlockedReason: PropTypes.string,
 };

@@ -3,14 +3,15 @@ import { Box, Stack, Typography } from "@mui/material";
 import Iconify from "src/components/iconify";
 import SectionCard from "../../components/SectionCard";
 import MockBadge from "../../components/MockBadge";
-import { ENV_SHAPE, OVERVIEW_COPY } from "./overview.constants";
+import { ENV_SHAPE, OVERVIEW_COPY, worldTables } from "./overview.constants";
 
 const MONO = "ui-monospace, Menlo, monospace";
 
 // The seeded rows that fill the world before the agent arrives — rebuilt every
 // task, so nothing carries over.
+
 export function SeededDataCard({ env }) {
-  const tables = env.seed?.tables || [];
+  const tables = worldTables(env);
   const totalRows = tables.reduce((a, t) => a + t.rows, 0);
   return (
     <SectionCard

@@ -33,7 +33,7 @@ import { useCreditExhaustion } from "src/hooks/use-credit-exhaustion";
 
 import { useEnvironmentsStore } from "../store/useEnvironmentsStore";
 import { useEnvState } from "../store/envState";
-import { BUILD_STATUS } from "../myEnvironments.constants";
+import { BUILD_STATUS, ENV_STATUS } from "../myEnvironments.constants";
 import ChatSplitPane from "../components/ChatSplitPane";
 import EmptyState from "../components/EmptyState";
 import BuilderConsole from "../buildEnvironment/console/BuilderConsole";
@@ -60,9 +60,18 @@ const EXECUTION_PATTERN = {
 // button is disabled, so it never shows for a runnable environment.
 // Evals are intentionally not a run blocker — canRun needs only an agent and
 // scenarios, so a run without evals is allowed (it just isn't scored).
-const blockedReason = (envState) => {
+const blockedReason = (envState, env, backed, starting = false) => {
+  if (starting) return WORKSPACE_COPY.runBlocked.starting;
+  // A backed env runs only once it is Ready (canRunHeader), e.g. not while a
+  // run is already going.
+  if (backed && env?.status && env.status !== ENV_STATUS.READY) {
+    return WORKSPACE_COPY.runBlocked.notReady;
+  }
   if (!envState.agent) return WORKSPACE_COPY.runBlocked.agent;
   if (!envState.scenarios?.length) return WORKSPACE_COPY.runBlocked.scenarios;
+  // A backed env runs through its run test; until the build links one, there
+  // is nothing to start a run on.
+  if (backed && !env?.platform?.runTestId) return WORKSPACE_COPY.runBlocked.noRunTest;
   return WORKSPACE_COPY.runBlocked.generic;
 };
 
@@ -424,7 +433,7 @@ export default function EnvironmentWorkspace() {
         envState={envState}
         patch={patch}
         canRun={runnable && !runMutation.isPending && !detailBlock}
-        runBlockedReason={detailBlock || blockedReason(envState)}
+        runBlockedReason={detailBlock || blockedReason(envState, env, backed, runMutation.isPending)}
         locked={locked}
         backed={source === "harness"}
         onFork={onFork}
@@ -489,6 +498,7 @@ export default function EnvironmentWorkspace() {
             graphData={graphData}
             onStartRun={startRun}
             canRun={runnable && !runMutation.isPending}
+            runBlockedReason={blockedReason(envState, env, backed, runMutation.isPending)}
           />
           )}
         </ChatSplitPane>

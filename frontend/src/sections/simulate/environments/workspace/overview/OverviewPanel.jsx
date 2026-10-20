@@ -2,7 +2,16 @@ import PropTypes from "prop-types";
 import { Box, Stack, Typography, Grid } from "@mui/material";
 import { getSurface } from "src/api/simulate-environments/_fixtures/surfaces";
 import { contractFor } from "src/api/simulate-environments/_fixtures/contract";
-import { ENV_SHAPE, ENV_STATE_SHAPE, OVERVIEW_COPY } from "./overview.constants";
+import {
+  CONNECTOR_LABEL,
+  DIRECTION_LABEL,
+  ENV_SHAPE,
+  ENV_STATE_SHAPE,
+  MODE_LABEL,
+  OVERVIEW_COPY,
+  sourceLabel,
+  worldTables,
+} from "./overview.constants";
 import { PARALLELISM_COPY, degradeReasonCopy } from "../../parallelism.constants";
 // Manage-versions (the agent "test subject" card + its version drawer) is
 // commented out below, to be picked up later — its imports go with it:
@@ -17,19 +26,7 @@ import AgentRefreshBanner from "./AgentRefreshBanner";
 import NextStepsChecklist from "./NextStepsChecklist";
 import StateSummary from "./StateSummary";
 import { UseCasesCard, AmendmentsCard } from "./OverviewCards";
-import { DependsOnCard } from "./WorldCards";
-
-// Display names for the real connector (§1/§6 `settings.agent.connector`,
-// surfaced here as `envState.agent.typeId` — the job poll's detected connector).
-// Falls back to the raw value for anything unmapped.
-const CONNECTOR_LABEL = {
-  livekit: "LiveKit",
-  vapi: "Vapi",
-  retell: "Retell",
-  retell_chat: "Retell (chat)",
-  phone: "Phone",
-  auto: "Auto",
-};
+import { DependsOnCard, SeededDataCard } from "./WorldCards";
 
 /**
  * What this environment is.
@@ -94,6 +91,23 @@ export default function OverviewPanel({ env, envState, patch, onGo, agentConnect
       >
         <Fact label={OVERVIEW_COPY.facts.channel} value={surface?.label ?? "-"} />
         <Fact label={OVERVIEW_COPY.facts.connector} value={connectorLabel} />
+        {/* Domain, direction, source and mode are real §6 fields; a client-only
+            env (template, fork) carries sample values for them, so they show
+            for a backed env only. */}
+        {backedWorld && env.domain ? <Fact label={OVERVIEW_COPY.facts.domain} value={env.domain} /> : null}
+        {/* A call has a direction; a chat doesn't, whatever the contract says. */}
+        {backedWorld && surface?.id === "voice" && env.callDirection ? (
+          <Fact
+            label={OVERVIEW_COPY.facts.direction}
+            value={DIRECTION_LABEL[env.callDirection] || env.callDirection}
+          />
+        ) : null}
+        {backedWorld && sourceLabel(env.source) ? (
+          <Fact label={OVERVIEW_COPY.facts.source} value={sourceLabel(env.source)} />
+        ) : null}
+        {backedWorld && env.agentMode ? (
+          <Fact label={OVERVIEW_COPY.facts.mode} value={MODE_LABEL[env.agentMode] || env.agentMode} />
+        ) : null}
         {parallelism?.requested ? (
           <Fact label={PARALLELISM_COPY.fact} value={PARALLELISM_COPY.factValue(parallelism)} />
         ) : null}
@@ -154,9 +168,9 @@ export default function OverviewPanel({ env, envState, patch, onGo, agentConnect
         </Grid>
       </Grid>
 
-      {/* The Seeded-data card was removed — the stores now live only in the
-          "How the world was built" map above (real §6 world.stores). "What it
-          depends on" stays, driven by real §6 contract.dependencies. */}
+      {/* The world the agent works in: the seeded tables (real §6
+          world.stores, shown only when there are any) and what it depends on
+          (real §6 contract.dependencies). */}
       <GroupHeading>{OVERVIEW_COPY.world}</GroupHeading>
       <Grid container spacing={2} alignItems="flex-start" sx={{ mb: 3 }}>
         <Grid item xs={12} md={7}>
@@ -164,6 +178,11 @@ export default function OverviewPanel({ env, envState, patch, onGo, agentConnect
             dependsOn={backedWorld ? dependsFromContract(backedWorld.dependencies) : contract.dependsOn}
           />
         </Grid>
+        {backedWorld && worldTables(env).length > 0 && (
+          <Grid item xs={12} md={5}>
+            <SeededDataCard env={env} />
+          </Grid>
+        )}
       </Grid>
 
       {/* Agent version-management drawer — commented out with the "Manage

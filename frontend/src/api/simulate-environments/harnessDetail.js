@@ -137,7 +137,11 @@ export function harnessDetailToEnvironment(detail) {
     useCases: contract?.real_use_cases || null,
     personas: world?.personas || null,
     stores: world?.stores || null,
-    callDirection: contract?.call_direction ?? null,
+    callDirection: contract?.call_direction ?? settings.agent?.call_direction ?? null,
+    // Where the agent was read from (`settings.source`: kind, repository, ref)
+    // and how it is run (`settings.agent.mode`), for the Overview's facts.
+    source: settings.source ?? null,
+    agentMode: settings.agent?.mode ?? null,
     // Real per-table field types and per-tool callables, when ALK read them
     // from source. Empty for provider agents, which have neither.
     dataSchema: contract?.data_schema || null,

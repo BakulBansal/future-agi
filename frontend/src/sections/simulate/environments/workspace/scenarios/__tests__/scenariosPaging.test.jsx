@@ -198,6 +198,39 @@ describe("ScenariosStep — select all matching", () => {
   });
 });
 
+describe("ScenariosStep — keyboard and drawer", () => {
+  it("clears the selection on Escape", async () => {
+    renderStep();
+    await screen.findByText(/Showing 1–25 of 60/);
+    const box = screen.getAllByRole("checkbox")[1];
+    fireEvent.click(box);
+    box.focus();
+    expect(screen.getByText("scenario selected")).toBeInTheDocument();
+    // The just-ticked checkbox still has focus; Escape clears anyway.
+    fireEvent.keyDown(box, { key: "Escape" });
+    await waitFor(() => expect(screen.queryByText("scenario selected")).toBeNull());
+  });
+
+  it("keeps Escape for the search box while typing", async () => {
+    renderStep();
+    await screen.findByText(/Showing 1–25 of 60/);
+    fireEvent.click(screen.getAllByRole("checkbox")[1]);
+    const search = screen.getByPlaceholderText(/Search scenarios/);
+    fireEvent.keyDown(search, { key: "Escape" });
+    expect(screen.getByText("scenario selected")).toBeInTheDocument();
+  });
+
+  it("opens a row in a drawer with its detail", async () => {
+    renderStep();
+    await screen.findByText(/Showing 1–25 of 60/);
+    const first = PAGING_ROWS.find((r) => screen.queryAllByText(r.name).length);
+    fireEvent.click(screen.getAllByText(first.name)[0]);
+    expect(await screen.findByText(`Scenario ${first.number}`)).toBeInTheDocument();
+    expect(screen.queryByText("Scenario null")).toBeNull();
+    expect(screen.getByText("What this tests")).toBeInTheDocument();
+  });
+});
+
 describe("ScenariosStep — run a selection", () => {
   const runButton = () => screen.getByRole("button", { name: /scenarios? × \d+ repeat/ });
 
