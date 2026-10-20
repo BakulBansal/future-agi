@@ -163,6 +163,46 @@ export function buildRunStats(kpis, perf, row) {
 }
 
 /**
+ * One run's summary read (the v3 calls list at page size 1, kept for its
+ * `execution.summary`), as react-query options. The run-detail header and the
+ * runs table both build it here, so they share one cache entry per run.
+ * @param {string} executionId
+ * @param {import("@tanstack/react-query").QueryClient} queryClient
+ */
+export function runSummaryQueryOptions(executionId, queryClient) {
+  return {
+    queryKey: runSummaryKey(executionId),
+    queryFn: async () => {
+      const data = await fetchRunCalls(executionId, { page: 1, page_size: 1 });
+      // A later request's snapshot landed while this one was in flight.
+      const current = queryClient.getQueryData(runSummaryKey(executionId));
+      return current?.requestedAt > data.requestedAt ? current : data;
+    },
+    refetchInterval: (query) =>
+      ACTIVE_EXECUTION_STATUSES.has(query.state.data?.execution?.status)
+        ? 3000
+        : false,
+    staleTime: 1000 * 60 * 5,
+  };
+}
+
+/**
+ * Tokens and cost for one run, from its summary read. Null where the run
+ * recorded none (most voice runs carry no tokens; cost is often unmeasured).
+ * @param {?Object} summary  `execution.summary` from the v3 calls payload.
+ * @returns {{ tokens: ?number, cost: ?number }}  cost in dollars.
+ */
+export function runUsageFromSummary(summary) {
+  return {
+    tokens: summary?.tokens?.total_value ?? null,
+    cost:
+      summary?.cost_cents?.total_value != null
+        ? summary.cost_cents.total_value / 100
+        : null,
+  };
+}
+
+/**
  * The run-detail header + stats hook.
  * @param {string} runTestId   The run-test id (owns the executions list).
  * @param {string} executionId The execution row to detail.
@@ -177,20 +217,9 @@ export function useRunDetail(
 ) {
   const queryClient = useQueryClient();
   const query = useQuery({
-    queryKey: runSummaryKey(executionId),
-    queryFn: async () => {
-      const data = await fetchRunCalls(executionId, { page: 1, page_size: 1 });
-      // A later request's snapshot landed while this one was in flight.
-      const current = queryClient.getQueryData(runSummaryKey(executionId));
-      return current?.requestedAt > data.requestedAt ? current : data;
-    },
+    ...runSummaryQueryOptions(executionId, queryClient),
     // The calls table's own polls keep this fresh while it's shown.
     enabled: !!executionId && !callsShown,
-    refetchInterval: (query) =>
-      ACTIVE_EXECUTION_STATUSES.has(query.state.data?.execution?.status)
-        ? 3000
-        : false,
-    staleTime: 1000 * 60 * 5,
   });
   const execution = query.data?.execution;
   const summary = execution?.summary;
@@ -244,11 +273,7 @@ export function useRunDetail(
       avgTurnCount: null,
       connectedPct: null,
       agentType: execution?.agent_type ?? null,
-      tokens: summary?.tokens?.total_value ?? null,
-      cost:
-        summary?.cost_cents?.total_value != null
-          ? summary.cost_cents.total_value / 100
-          : null,
+      ...runUsageFromSummary(summary),
       scores: {},
       measured: summary?.measured ?? 0,
       unmeasured: summary?.outcomes?.inconclusive ?? 0,

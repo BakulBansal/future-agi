@@ -28,6 +28,7 @@ import {
 } from "src/api/simulate-environments/runs";
 import { listAllScenarioKeys } from "src/api/simulate-environments/scenarioSelection";
 import { CreditExhaustionBanner } from "src/components/CreditExhaustionBanner";
+import { LoadingScreen } from "src/components/loading-screen";
 import { useCreditExhaustion } from "src/hooks/use-credit-exhaustion";
 
 import { useEnvironmentsStore } from "../store/useEnvironmentsStore";
@@ -250,9 +251,12 @@ export default function EnvironmentWorkspace() {
     );
   }
 
-  // Still resolving the id — a blank centred box, never a flash of "not found".
+  // Still resolving the id. Until the job loads the page can't tell a build
+  // from a built environment, so it shows the app's loader (the same one the
+  // route shows while its code loads), never a blank page or a flash of
+  // "not found".
   if (!env) {
-    return <Box sx={{ height: "100%", minHeight: 420, display: "grid", placeItems: "center" }} />;
+    return <LoadingScreen />;
   }
 
   // Still deriving OR terminally failed: the workspace header over the two-pane
@@ -400,14 +404,27 @@ export default function EnvironmentWorkspace() {
         }
       : undefined;
 
+  // A backed env's tabs all read the detail. Until it lands, or if it fails,
+  // the job poll alone would fill them with a guessed channel, no agent, zero
+  // counts and sample cards, so the tab area waits for it or offers a retry.
+  const detailFailed = backed && !backedDetail && evalDetailQuery.isError;
+  const detailLoading = backed && !backedDetail && !detailFailed;
+  // Run needs the details too: without them the page can't show what a run
+  // would test against, so it waits for them like the tabs do.
+  const detailBlock = detailFailed
+    ? WORKSPACE_COPY.runBlocked.detailFailed
+    : detailLoading
+      ? WORKSPACE_COPY.runBlocked.detailLoading
+      : null;
+
   return (
     <Box sx={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0 }}>
       <WorkspaceHeader
         env={displayEnv}
         envState={envState}
         patch={patch}
-        canRun={runnable && !runMutation.isPending}
-        runBlockedReason={blockedReason(envState)}
+        canRun={runnable && !runMutation.isPending && !detailBlock}
+        runBlockedReason={detailBlock || blockedReason(envState)}
         locked={locked}
         backed={source === "harness"}
         onFork={onFork}
@@ -417,7 +434,7 @@ export default function EnvironmentWorkspace() {
       {creditBanner}
 
       <SystemBanners env={env} envState={envState} patch={patch} />
-      <VersionBar env={env} envState={envState} />
+      {!detailLoading && !detailFailed && <VersionBar env={env} envState={envState} />}
 
       {/* A template-seeded env is read-only until forked — the banner states the
           lock and offers the fork. */}
@@ -441,6 +458,20 @@ export default function EnvironmentWorkspace() {
             />
           )}
         >
+          {detailFailed ? (
+            <EmptyState
+              icon="solar:danger-triangle-linear"
+              title={WORKSPACE_COPY.detailError.title}
+              body={WORKSPACE_COPY.detailError.body}
+              action={
+                // While the retry is in flight the query is no longer in error,
+                // so the loading state below takes over from this one.
+                <Button variant="outlined" size="small" onClick={() => evalDetailQuery.refetch()}>
+                  {WORKSPACE_COPY.detailError.retry}
+                </Button>
+              }
+            />
+          ) : detailLoading ? null : (
           <WorkspacePanels
             env={displayEnv}
             envState={envState}
@@ -459,6 +490,7 @@ export default function EnvironmentWorkspace() {
             onStartRun={startRun}
             canRun={runnable && !runMutation.isPending}
           />
+          )}
         </ChatSplitPane>
       </Box>
     </Box>

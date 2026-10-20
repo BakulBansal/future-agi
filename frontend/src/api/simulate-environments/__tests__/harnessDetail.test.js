@@ -123,9 +123,33 @@ describe("harnessDetailToEnvironment", () => {
     expect(env.id).toBe("0b1c");
     expect(env.name).toBe("ride-voice-agent");
     expect(env.domain).toBe("Logistics");
+    expect(env.tagline).toBe("Logistics");
     expect(env.agentType).toBe("voice");
     expect(env.surface).toBe("voice");
     expect(env.buildStatus).toBe("ready");
+  });
+
+  it("takes the channel from agent_type, not the contract's raw modality", () => {
+    // The authoring vocabulary says "text" for chat; agent_type is the
+    // backend's own voice-or-chat answer and the only one the UI knows.
+    const { env } = harnessDetailToEnvironment({
+      ...DETAIL,
+      overview: { ...DETAIL.overview, agent_type: "chat" },
+      contract: { ...DETAIL.contract, modality: "text" },
+    });
+    expect(env.surface).toBe("chat");
+  });
+
+  it("leaves the channel unset when agent_type is missing", () => {
+    const { env } = harnessDetailToEnvironment({
+      ...DETAIL,
+      overview: { ...DETAIL.overview, agent_type: undefined },
+    });
+    expect(env.surface).toBeUndefined();
+  });
+
+  it("keeps the remaining identity fields", () => {
+    const { env } = harnessDetailToEnvironment(DETAIL);
     expect(env.status).toBe(ENV_STATUS.READY);
     expect(env.platform).toMatchObject({
       runTestId: "rt-1",

@@ -1,11 +1,15 @@
 import { useMemo } from "react";
-import { useQueries } from "@tanstack/react-query";
+import { useQueries, useQueryClient } from "@tanstack/react-query";
 import { kpisQueryOptions } from "src/hooks/useKpis";
 import { extractKpis } from "src/sections/test-detail/common";
 import {
   RUNS_PAGE_SIZE,
   useEnvironmentRuns,
 } from "src/api/simulate-environments/runs";
+import {
+  runSummaryQueryOptions,
+  runUsageFromSummary,
+} from "src/api/simulate-environments/runDetail";
 import { buildSummaryRow, buildEvalSeries, deriveEvals } from "./summaryData";
 
 // The populated Runs tab's data source: every run of the environment as one
@@ -15,9 +19,12 @@ import { buildSummaryRow, buildEvalSeries, deriveEvals } from "./summaryData";
 // Real columns (pass rate, tasks, avg duration) come from the executions list
 // row. Per-eval scores come from each run's kpis — the SAME payload the
 // run-detail page reads (`extractKpis(...).evalMetrics`), fetched once per run
-// and cached — so the summary and the detail never disagree. A mock run (the
-// `?mockRuns=1` switch) carries its scores inline, so no fetch is made for it.
+// and cached — so the summary and the detail never disagree. Tokens and cost
+// come the same way from the run's summary read, shared with the run-detail
+// header. A mock run (the `?mockRuns=1` switch) carries its scores inline, so
+// no fetch is made for it.
 export function useRunsSummary(env, envState, paging, graphRuns = RUNS_PAGE_SIZE) {
+  const queryClient = useQueryClient();
   const {
     runs = [],
     count,
@@ -54,16 +61,31 @@ export function useRunsSummary(env, envState, paging, graphRuns = RUNS_PAGE_SIZE
     })),
   });
 
-  // A stable signal for the memo: the runs plus each run's resolved score map.
+  const usageQueries = useQueries({
+    queries: runs.map((r) => ({
+      ...runSummaryQueryOptions(r.executionId, queryClient),
+      enabled: !!r.executionId && !r.scores,
+      select: (data) => runUsageFromSummary(data?.execution?.summary),
+    })),
+  });
+
+  // A stable signal for the memo: the runs plus each run's resolved score map
+  // and usage.
   const scoresById = Object.fromEntries(
     scoredRuns.map((r, i) => [r.id, r.scores || scoreQueries[i]?.data || {}]),
   );
+  const usageById = Object.fromEntries(
+    runs.map((r, i) => [r.id, usageQueries[i]?.data]),
+  );
   const scoreKey = JSON.stringify(scoresById);
+  const usageKey = JSON.stringify(usageById);
 
   return useMemo(() => {
     // Rows are newest-first (the executions list is already sorted that way) for
     // the table; the graph reads them oldest-first so the trend runs left→right.
-    const rows = runs.map((r) => buildSummaryRow(r, scoresById[r.id]));
+    const rows = runs.map((r) =>
+      buildSummaryRow(r, scoresById[r.id], usageById[r.id]),
+    );
     const graphRows = graphRunList.map((r) => buildSummaryRow(r, scoresById[r.id]));
     const rowsChrono = [...graphRows].reverse();
     const evals = deriveEvals([
@@ -80,8 +102,8 @@ export function useRunsSummary(env, envState, paging, graphRuns = RUNS_PAGE_SIZE
       coveredScenarioCount,
       isLoading: runsLoading,
     };
-    // scoreKey stands in for scoresById (fresh object each render); runs is stable
-    // across renders while the query data is unchanged.
+    // scoreKey/usageKey stand in for scoresById/usageById (fresh objects each
+    // render); runs is stable across renders while the query data is unchanged.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [runs, graphRunList, scoreKey, runsLoading, count, coveredScenarioCount]);
+  }, [runs, graphRunList, scoreKey, usageKey, runsLoading, count, coveredScenarioCount]);
 }

@@ -11,7 +11,7 @@ import Iconify from "src/components/iconify";
  * comes from the same state the Runs/Scenarios/Evaluations tabs read from, so
  * the summary and the detail can't drift.
  */
-export default function StateSummary({ env, envState, counts, onGo }) {
+export default function StateSummary({ env, envState, counts, latestRun, onGo }) {
   // A backed env passes real §6 counts; otherwise derive from the client store.
   // `??` (not `||`) so a real 0 is respected rather than falling back.
   const scenarioCount = counts?.scenarios ?? (envState?.scenarios?.length || 0);
@@ -19,8 +19,17 @@ export default function StateSummary({ env, envState, counts, onGo }) {
   const runs = envState?.runs || [];
   const runCount = counts?.runs ?? runs.length;
   const ruleCount = counts?.hardRules ?? (env?.rules?.length || 0);
-  const latest = runs[0] || null;
-  const latestPassRate = latest?.passRate != null ? Math.round(latest.passRate) : null;
+  // A backed env's runs come from the executions list, newest first; the
+  // client store only holds runs for a non-backed env.
+  const latest = latestRun || runs[0] || null;
+  // A pass rate only means something once the run has finished.
+  const finished = latest?.status === "passed" || latest?.status === "failed";
+  const latestPassRate =
+    latest?.passRate != null
+      ? Math.round(latest.passRate)
+      : finished && latest?.total
+        ? Math.round((latest.passed / latest.total) * 100)
+        : null;
 
   const tiles = [
     { id: "scenarios", label: "Scenarios", value: scenarioCount, icon: "solar:layers-minimalistic-linear", to: "scenarios" },
@@ -123,6 +132,14 @@ StateSummary.propTypes = {
     evaluations: PropTypes.number,
     runs: PropTypes.number,
     hardRules: PropTypes.number,
+  }),
+  // The newest run from the executions list (backed env); see runs.js.
+  latestRun: PropTypes.shape({
+    label: PropTypes.string,
+    agentVersion: PropTypes.string,
+    status: PropTypes.string,
+    total: PropTypes.number,
+    passed: PropTypes.number,
   }),
   onGo: PropTypes.func,
 };

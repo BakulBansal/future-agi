@@ -57,7 +57,7 @@ const dependsFromContract = (dependencies) =>
     usedBy: d?.used_by || [],
   }));
 
-export default function OverviewPanel({ env, envState, patch, onGo, agentConnected, locked = false, buildMode, counts, backedWorld }) {
+export default function OverviewPanel({ env, envState, patch, onGo, agentConnected, locked = false, buildMode, counts, latestRun, backedWorld }) {
   // Manage-versions drawer state — commented with the card + drawer below,
   // to be picked up later.
   // const [agentDrawerOpen, setAgentDrawerOpen] = useState(false);
@@ -92,7 +92,7 @@ export default function OverviewPanel({ env, envState, patch, onGo, agentConnect
         divider={<Box sx={{ width: "1px", bgcolor: "divider", mx: 2 }} />}
         sx={{ my: 2, py: 1.25, px: 2, border: "1px solid", borderColor: "divider", borderRadius: 1.5, rowGap: 1, width: "fit-content", maxWidth: "100%" }}
       >
-        <Fact label={OVERVIEW_COPY.facts.channel} value={surface.label} />
+        <Fact label={OVERVIEW_COPY.facts.channel} value={surface?.label ?? "-"} />
         <Fact label={OVERVIEW_COPY.facts.connector} value={connectorLabel} />
         {parallelism?.requested ? (
           <Fact label={PARALLELISM_COPY.fact} value={PARALLELISM_COPY.factValue(parallelism)} />
@@ -121,7 +121,7 @@ export default function OverviewPanel({ env, envState, patch, onGo, agentConnect
       {/* State-of-the-env summary tiles + latest run — the "how's this env doing
           right now?" answer. Each tile jumps to the tab it summarises. For a
           backed env the numbers come from §6 (summaryCounts). */}
-      <StateSummary env={env} envState={envState} counts={counts} onGo={onGo} />
+      <StateSummary env={env} envState={envState} counts={counts} latestRun={latestRun} onGo={onGo} />
 
       {/* Getting-started checklist for envs that haven't been seeded yet. A
           scratch env arrives carrying a derived world, so the same checklist
@@ -140,10 +140,10 @@ export default function OverviewPanel({ env, envState, patch, onGo, agentConnect
           Contract tab, which owns the tool inventory and the hard-rule list. */}
       <Grid container spacing={2} alignItems="flex-start" sx={{ mb: 3 }}>
         <Grid item xs={12} md={7}>
-          {/* Prefer the real §6 fields (contract.real_use_cases / amendments)
-              when the detail endpoint has authored them; fall back to the
-              fixture derivation while it has not (or is disabled). */}
-          <UseCasesCard useCases={env.useCases ?? contract.useCases} />
+          {/* A backed env reads only the real §6 fields; a use case the build
+              didn't write stays empty rather than being made up. The fixture
+              derivation is for client-only envs (templates, forks). */}
+          <UseCasesCard useCases={backedWorld ? env.useCases ?? [] : env.useCases ?? contract.useCases} />
         </Grid>
         <Grid item xs={12} md={5}>
           {!buildMode && (
@@ -187,6 +187,8 @@ OverviewPanel.propTypes = {
   // Real §6 summary counts for a backed env (from EnvironmentWorkspace); the
   // client-store fallback in StateSummary covers non-backed envs.
   counts: PropTypes.object,
+  // The newest run from the executions list, for the latest-run card.
+  latestRun: PropTypes.object,
   // Real §6 world content for a backed env: { stores, amendments, dependencies }.
   // Undefined for a non-backed env (keeps the client/fixture source).
   backedWorld: PropTypes.shape({

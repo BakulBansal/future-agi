@@ -107,8 +107,14 @@ export function harnessDetailToEnvironment(detail) {
     name: overview.name || environmentName({ job_id: detail.id }),
     description,
     domain: overview.domain ?? null,
+    // The header's one-line subtitle. The description already opens the
+    // Overview, so the subtitle names the domain instead; none when unset.
+    tagline: overview.domain ?? null,
     agentType: AGENT_TYPE[overview.agent_type] || overview.agent_type || null,
-    surface: contract?.modality || overview.agent_type || undefined,
+    // The channel is the backend's own voice-or-chat answer. The contract's
+    // raw modality uses the authoring vocabulary ("text" for chat), which the
+    // UI's channel list doesn't know.
+    surface: overview.agent_type || undefined,
     status: overview.status
       ? envStatusFor(overview.stage, stageToStatus(overview.status))
       : undefined,

@@ -32,4 +32,49 @@ describe("StateSummary", () => {
     // Hard rules 3 (env.rules length), unique among the store-derived numbers.
     expect(screen.getByText("3")).toBeInTheDocument();
   });
+
+  const finished = {
+    id: "ex-14",
+    label: "Run 14",
+    agentVersion: "v1",
+    status: "passed",
+    total: 4,
+    passed: 3,
+  };
+
+  it("shows the newest run from the runs list, with its pass rate", () => {
+    render(
+      <StateSummary
+        env={{ rules: [] }}
+        envState={{ runs: [] }}
+        counts={{ runs: 14 }}
+        latestRun={finished}
+        onGo={vi.fn()}
+      />,
+    );
+    expect(screen.getByText("Latest run")).toBeInTheDocument();
+    expect(screen.getByText("Run 14 · v1")).toBeInTheDocument();
+    expect(screen.getByText("75%")).toBeInTheDocument();
+  });
+
+  it("shows no pass rate for a run that has not finished", () => {
+    render(
+      <StateSummary
+        env={{ rules: [] }}
+        envState={{ runs: [] }}
+        counts={{ runs: 1 }}
+        latestRun={{ ...finished, status: "running", passed: 0 }}
+        onGo={vi.fn()}
+      />,
+    );
+    expect(screen.getByText("Run 14 · v1")).toBeInTheDocument();
+    expect(screen.queryByText("pass rate")).toBeNull();
+  });
+
+  it("has no latest-run card before the first run", () => {
+    render(
+      <StateSummary env={{ rules: [] }} envState={{ runs: [] }} counts={{ runs: 0 }} onGo={vi.fn()} />,
+    );
+    expect(screen.queryByText("Latest run")).toBeNull();
+  });
 });
