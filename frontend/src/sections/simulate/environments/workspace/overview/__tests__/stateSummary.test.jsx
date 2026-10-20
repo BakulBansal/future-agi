@@ -42,7 +42,7 @@ describe("StateSummary", () => {
     passed: 3,
   };
 
-  it("shows the newest run from the runs list, with its pass rate", () => {
+  it("shows the newest run from the runs list, by name and agent version only", () => {
     render(
       <StateSummary
         env={{ rules: [] }}
@@ -54,20 +54,7 @@ describe("StateSummary", () => {
     );
     expect(screen.getByText("Latest run")).toBeInTheDocument();
     expect(screen.getByText("Run 14 · v1")).toBeInTheDocument();
-    expect(screen.getByText("75%")).toBeInTheDocument();
-  });
-
-  it("shows no pass rate for a run that has not finished", () => {
-    render(
-      <StateSummary
-        env={{ rules: [] }}
-        envState={{ runs: [] }}
-        counts={{ runs: 1 }}
-        latestRun={{ ...finished, status: "running", passed: 0 }}
-        onGo={vi.fn()}
-      />,
-    );
-    expect(screen.getByText("Run 14 · v1")).toBeInTheDocument();
+    expect(screen.queryByText("75%")).toBeNull();
     expect(screen.queryByText("pass rate")).toBeNull();
   });
 
