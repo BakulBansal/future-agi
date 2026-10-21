@@ -103,8 +103,8 @@ def test_the_version_gate_reopens_for_this_change():
     # The cache is process-wide, not rolled back with the test transaction:
     # restore whatever was there so no later test sees this test's value.
     previous = cache.get("system_evals_version")
-    assert SYSTEM_EVALS_VERSION > 20
-    cache.set("system_evals_version", 20)
+    assert SYSTEM_EVALS_VERSION > 26
+    cache.set("system_evals_version", 26)
     try:
         seed_evals()
         for name, extra in SIX.items():

@@ -917,6 +917,21 @@ def runnable_eval_config_ids(run_test_id) -> list[str]:
     ]
 
 
+def live_eval_config_ids(run_test_id) -> list[str]:
+    """Every config still on the run test, with a mapping of its own or not.
+
+    The scoring clock counts a placeholder or a dispatch stamp for any of
+    them: a config with no mapping can still be graded again on a finished
+    run, and its lost job must time out like any other.
+    """
+    return [
+        str(config_id)
+        for config_id in SimulateEvalConfig.objects.filter(
+            run_test_id=run_test_id, deleted=False
+        ).values_list("id", flat=True)
+    ]
+
+
 def _tool_evaluation_on(run_test_id) -> bool:
     """Whether ``run_test_id``'s tool-call judge switch is on.
 
