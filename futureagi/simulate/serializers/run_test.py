@@ -84,7 +84,7 @@ class SimulateEvalConfigSimpleSerializer(serializers.ModelSerializer):
 
     def to_representation(self, instance):
         data = super().to_representation(instance)
-        if data["mapping"]:
+        if isinstance(data["mapping"], dict):
             data["mapping"] = effective_simulation_mapping(
                 instance.eval_template, data["mapping"]
             )
