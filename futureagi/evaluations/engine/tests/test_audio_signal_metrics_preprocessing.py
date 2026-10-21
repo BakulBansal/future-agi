@@ -1,5 +1,3 @@
-"""Tests for the backend preprocessor used by the audio signal Code Eval."""
-
 from __future__ import annotations
 
 import io

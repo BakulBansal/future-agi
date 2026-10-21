@@ -1,5 +1,3 @@
-"""Regression tests for provider-independent audio metrics."""
-
 from io import BytesIO
 from math import gcd
 

@@ -1,5 +1,3 @@
-"""Golden tests for the visible audio signal Code Eval body and definition."""
-
 from pathlib import Path
 
 import yaml

@@ -3182,6 +3182,7 @@ def test_a_call_whose_grader_could_not_be_started_does_not_hold_the_run(
     assert mock_run.call_count == 2 - len(not_started)
     assert test_execution.status == TestExecution.ExecutionStatus.COMPLETED
 
+
 @pytest.mark.django_db
 @pytest.mark.parametrize("runner", [_run, _run_xl])
 @pytest.mark.parametrize("source", ["voice_recording", "call.voice_recording"])

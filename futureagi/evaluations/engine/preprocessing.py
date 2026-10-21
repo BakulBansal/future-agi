@@ -477,7 +477,6 @@ def _preprocess_dead_air_detection(inputs):
 
 @register_preprocessor("audio_signal_metrics")
 def _preprocess_audio_signal_metrics(inputs):
-    """Decode audio and inject deterministic pitch/SNR values for the sandbox."""
     audio_value = inputs.get("input_audio")
     if audio_value is None or audio_value == "":
         inputs["_audio_metrics_error"] = "Missing input_audio"
