@@ -39,7 +39,7 @@ export default function VersionBar({ env, envState }) {
                 {versionBar.testSubject}
               </Typography>
               <Typography sx={{ typography: "s2", color: "text.primary", fontWeight: "fontWeightBold" }}>
-                {subject.name}
+                {subject.name || versionBar.unnamedAgent}
               </Typography>
               {subject.active_version && (
                 <Box

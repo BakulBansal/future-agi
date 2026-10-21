@@ -12,6 +12,7 @@ import { getStorage, setStorage } from "src/hooks/use-local-storage";
 import { BUILD_TONES } from "../../buildEnvironment/buildTones";
 import { ClampCell, SubTasksCell, TruncTooltip } from "./ScenarioTableCells";
 import { ROW_HEIGHTS, SCENARIOS_COPY } from "./scenarios.constants";
+import { personaSubline } from "./personaLabels";
 import { GROUP_SHAPE, SCENARIO_SHAPE } from "./scenarios.shapes";
 
 // A seeded-from-template env is read-only until forked; every mutating control
@@ -300,11 +301,7 @@ export default function ScenarioTable({ rows, groups, onEdit, onRemove, onOpen, 
                 const idx = row.number;
                 const p = row.persona;
                 const subTasks = row.subTasks || [];
-                const personaSubline = [
-                  p?.gender && p.gender.charAt(0).toUpperCase() + p.gender.slice(1),
-                  p?.ageGroup,
-                  !p?.gender && !p?.ageGroup && p?.role,
-                ].filter(Boolean).join(" · ");
+                const personaLine = personaSubline(p);
                 const situationText = row.situation || row.task || "";
                 const idealOutcomeText = row.outcome || row.expected || "";
 
@@ -364,8 +361,8 @@ export default function ScenarioTable({ rows, groups, onEdit, onRemove, onOpen, 
                       <TruncTooltip title={p?.name || ""}>
                         <Typography noWrap sx={{ typography: "s2" }}>{p?.name}</Typography>
                       </TruncTooltip>
-                      {personaSubline && (
-                        <Typography noWrap sx={{ typography: "s3", color: "text.subtitle" }}>{personaSubline}</Typography>
+                      {personaLine && (
+                        <Typography noWrap sx={{ typography: "s3", color: "text.subtitle" }}>{personaLine}</Typography>
                       )}
                     </TableCell>
 

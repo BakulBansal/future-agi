@@ -3,6 +3,7 @@ import { Box, Button, Stack, Typography } from "@mui/material";
 import Iconify from "src/components/iconify";
 import SideDrawer from "../../components/SideDrawer";
 import { normaliseSubTasks } from "./scenarioEditor.constants";
+import { personaSubline } from "./personaLabels";
 import { SCENARIO_SHAPE } from "./scenarios.shapes";
 
 // One scenario, opened from its table row, laid out as the designer's
@@ -19,13 +20,6 @@ const VAL_SX = { typography: "s2", color: "text.secondary", lineHeight: 1.6, max
 const SECTION_HEAD = {
   typography: "s3", fontWeight: 700, color: "text.subtitle", textTransform: "uppercase", letterSpacing: 0.5, mb: 1,
 };
-
-// Gender and age group, written as the table's Persona column writes them.
-const personaMeta = (p) =>
-  [
-    p.gender && p.gender.charAt(0).toUpperCase() + p.gender.slice(1),
-    p.ageGroup,
-  ].filter(Boolean);
 
 export default function ScenarioDrawer({ row, onClose, onEdit, locked = false }) {
   return (
@@ -84,7 +78,7 @@ function ScenarioSheet({ row }) {
       <Row key="persona" label="Persona">
         <Typography className="sd-val">
           <Box component="span" sx={{ color: "text.primary", fontWeight: 600 }}>{persona.name}</Box>
-          {personaMeta(persona).map((part) => ` · ${part}`).join("")}
+          {personaSubline(persona) ? ` · ${personaSubline(persona)}` : ""}
         </Typography>
       </Row>
     ),

@@ -462,7 +462,9 @@ export default function EnvironmentWorkspace() {
                 </Button>
               }
             />
-          ) : detailLoading ? null : (
+          ) : detailLoading ? (
+            <LoadingScreen />
+          ) : (
           <WorkspacePanels
             env={displayEnv}
             envState={envState}

@@ -306,6 +306,17 @@ describe("VersionBar", () => {
     expect(screen.queryByText(/^env$/)).toBeNull();
   });
 
+  it("calls an agent with no name on record \"Agent\", as the Overview card does", () => {
+    render(
+      <VersionBar
+        env={{ ...ENV, testSubject: { ...SUBJECT, name: null }, counts: { scenarios: 3 } }}
+        envState={{ scenarios: [1] }}
+      />,
+    );
+    expect(screen.getByText("Agent")).toBeInTheDocument();
+    expect(screen.getByText("v1")).toBeInTheDocument();
+  });
+
   it("counts every scenario the environment has, not just the loaded page", () => {
     render(
       <VersionBar

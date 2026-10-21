@@ -103,7 +103,7 @@ export default function WorkspacePanels({
   const renderBody = () => {
     switch (current.id) {
       case "contract":
-        return <RlContractPanel env={env} envState={envState} patch={patch} onGo={go} locked={locked} onFork={onFork} graphData={graphData} />;
+        return <RlContractPanel env={env} envState={envState} patch={patch} onGo={go} locked={locked} onFork={onFork} graphData={graphData} backed={backed} />;
       case "scenarios":
         return <ScenariosStep env={env} envState={envState} patch={patch} locked={locked} onFork={onFork} onStartRun={onStartRun} canRun={canRun} runBlockedReason={runBlockedReason} />;
       case "evals":

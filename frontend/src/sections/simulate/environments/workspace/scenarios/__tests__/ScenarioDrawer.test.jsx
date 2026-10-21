@@ -55,6 +55,13 @@ describe("ScenarioDrawer", () => {
     expect(screen.queryByText("Conversation flow")).toBeNull();
   });
 
+  it("names a persona by role when it has no gender or age group, as the table does", () => {
+    const row = scenarioFromApi({ ...API_ROW, persona: { name: "Dana Ops" } });
+    row.persona.role = "IT admin";
+    render(<ScenarioDrawer row={row} onClose={vi.fn()} />);
+    expect(screen.getByText(/· IT admin/)).toBeInTheDocument();
+  });
+
   it("drops a row the API left empty instead of filling it in", () => {
     open({ id: "s2", name: "bare", persona: {}, sub_goals: [] });
     expect(screen.queryByText("#")).toBeNull();

@@ -1,11 +1,11 @@
 import { ENV_STATUS } from "../myEnvironments.constants";
 import { WORKSPACE_COPY } from "./workspace.constants";
 
-// The named reason a run is blocked, in the designer's order: an agent first,
-// then scenarios, then evals, then a generic fallback. Only read when the header
-// button is disabled, so it never shows for a runnable environment.
-// Evals are intentionally not a run blocker — canRun needs only an agent and
-// scenarios, so a run without evals is allowed (it just isn't scored).
+// The named reason a run is blocked, first match wins: a run already starting,
+// a built environment that isn't Ready, no agent (client-only environments),
+// no scenarios, a built environment with no linked run, then a generic
+// fallback. Only read when Run is disabled, so it never shows for a runnable
+// environment. Evals don't block a run; a run without them just isn't scored.
 export const blockedReason = (envState, env, backed, starting = false) => {
   if (starting) return WORKSPACE_COPY.runBlocked.starting;
   // A backed env runs only once its job stage is `completed` (Ready), the

@@ -99,7 +99,6 @@ export const WORKSPACE_COPY = {
   runBlocked: {
     agent: "No agent is connected to this environment yet",
     scenarios: "Add scenarios on the Scenarios tab",
-    evals: "Add at least one evaluation on the Evaluations tab",
     generic: "Setup incomplete",
     starting: "Starting a run",
     notReady: "This environment hasn't finished building",
@@ -142,6 +141,8 @@ export const WORKSPACE_COPY = {
   versionBar: {
     envPrefix: "env",
     testSubject: "Test subject",
+    // The agent has no name on record; the Overview agent card says the same.
+    unnamedAgent: "Agent",
     scenariosShared: (n) => `${n} scenarios, shared across agent versions`,
     subjectTooltip:
       "The agent version runs are scored against. Other agents can run against this environment too, and the environment stays the same.",

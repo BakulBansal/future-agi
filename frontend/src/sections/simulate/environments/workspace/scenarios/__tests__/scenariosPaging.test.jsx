@@ -220,6 +220,19 @@ describe("ScenariosStep — keyboard and drawer", () => {
     expect(screen.getByText("scenario selected")).toBeInTheDocument();
   });
 
+  it("keeps the selection when Escape is meant for an open drawer", async () => {
+    renderStep();
+    await screen.findByText(/Showing 1–25 of 60/);
+    fireEvent.click(screen.getAllByRole("checkbox")[1]);
+    const first = PAGING_ROWS.find((r) => screen.queryAllByText(r.name).length);
+    fireEvent.click(screen.getAllByText(first.name)[0]);
+    await screen.findByRole("button", { name: "Edit" });
+    // Sent to the page, not into the drawer, so only this screen's own guard
+    // stands between the key and the selection.
+    fireEvent.keyDown(document.body, { key: "Escape" });
+    expect(screen.getByText("scenario selected")).toBeInTheDocument();
+  });
+
   it("lets Escape close a popover without clearing the selection", async () => {
     renderStep();
     await screen.findByText(/Showing 1–25 of 60/);

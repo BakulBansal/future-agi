@@ -8,6 +8,7 @@ import SectionCard from "../../components/SectionCard";
 // import ActorsPanel from "./ActorsPanel";
 import CapabilityGraph from "../overview/CapabilityGraph";
 import WorldInternalsSection from "./WorldInternalsSection";
+import { CONTRACT_COPY } from "./contract.constants";
 
 // Map the real §6 `end_conditions` onto the episode-card shape. Returns null when
 // the environment carries no end conditions yet, and the card says so.
@@ -53,7 +54,7 @@ function realEpisode(env) {
  * Twin-backed envs are out of scope in this integration, so the world is always
  * the capability graph (the designer's TwinSandboxSection branch is omitted).
  */
-export default function RlContractPanel({ env, envState, patch, locked = false, graphData }) {
+export default function RlContractPanel({ env, envState, patch, locked = false, graphData, backed = false }) {
   // The real §6 `end_conditions`, mapped into the terminate/truncate/clock shape
   // the card renders: `ended_reasons` are the ways a run terminates,
   // `max_turns`/`max_duration_seconds` are the truncation ceilings, `clock` is
@@ -76,15 +77,19 @@ export default function RlContractPanel({ env, envState, patch, locked = false, 
 
       {/* ── run end conditions ────────────────────────────────────────── */}
       <SectionCard
-        title="Run end conditions"
-        subtitle="When a run is over, and which kind of over it was"
+        title={CONTRACT_COPY.endConditions.title}
+        subtitle={CONTRACT_COPY.endConditions.subtitle}
         sx={{ mb: 2 }}
       >
         {!episode ? (
           <Box sx={{ px: 2.5, py: 2.25 }}>
-            <Typography sx={{ typography: "s2", fontWeight: 600 }}>Not authored yet</Typography>
+            <Typography sx={{ typography: "s2", fontWeight: 600 }}>
+              {CONTRACT_COPY.endConditions.notAuthored}
+            </Typography>
             <Typography sx={{ typography: "s3", color: "text.subtitle" }}>
-              The build writes these once it has read how a run of this agent ends.
+              {backed
+                ? CONTRACT_COPY.endConditions.notAuthoredBuilt
+                : CONTRACT_COPY.endConditions.notAuthoredUnbuilt}
             </Typography>
           </Box>
         ) : (
@@ -174,6 +179,8 @@ RlContractPanel.propTypes = {
   // Real §6 capability-graph data for a backed env (tools/flows/personas/
   // guardrails); undefined for a non-backed env (fixture derivation).
   graphData: PropTypes.object,
+  // A built (harness) environment; a template or fork is never built.
+  backed: PropTypes.bool,
 };
 
 function Label({ children }) {

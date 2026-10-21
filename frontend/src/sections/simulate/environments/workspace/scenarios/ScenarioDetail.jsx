@@ -7,6 +7,7 @@ import Iconify from "src/components/iconify";
 import { BUILD_TONES } from "../../buildEnvironment/buildTones";
 import { SCENARIO_SHAPE } from "./scenarios.shapes";
 import { normaliseSubTasks } from "./scenarioEditor.constants";
+import { genderLabel } from "./personaLabels";
 
 // A scenario, in full — the expanded body of a list-view row.
 //
@@ -70,7 +71,7 @@ export default function ScenarioDetail({ row, defaultOpen = false }) {
 // The persona facts the API serves, in reading order; each shows only when set.
 const PERSONA_ROWS = [
   ["Name", (p) => p.name],
-  ["Gender", (p) => p.gender && p.gender.charAt(0).toUpperCase() + p.gender.slice(1)],
+  ["Gender", (p) => genderLabel(p.gender)],
   ["Age group", (p) => p.ageGroup],
   ["Occupation", (p) => p.occupation],
   ["Location", (p) => p.location],

@@ -328,12 +328,27 @@ describe("EnvironmentWorkspace route shell", () => {
       /\/harness-environments\/job-done\/$/.test(url) ? new Promise(() => {}) : base(url),
     );
 
+    // A revisit: this environment's agent and scenarios are already in the
+    // client store, so Run would be ready on its own; only the missing detail
+    // holds it back.
+    useEnvironmentsStore.setState({
+      byEnv: {
+        "job-done": {
+          ...emptyEnvState(),
+          agent: { typeId: "livekit", via: "endpoint", values: {} },
+          scenarios: [{ id: "scenario-a", name: "scenario-a" }],
+        },
+      },
+    });
+
     renderWorkspace("/dashboard/simulate/environments/job-done");
 
     const runButton = await screen.findByRole("button", { name: /Run simulation/ });
     expect(runButton).toBeDisabled();
     expect(screen.queryByRole("tab", { name: /Overview/ })).toBeNull();
     expect(screen.queryByText(/scenarios, shared across agent versions/)).toBeNull();
+    // The tab area shows the loader rather than an empty pane.
+    expect(screen.getAllByRole("status").length).toBeGreaterThan(0);
   });
 
   it("resolves a harness job: Run enabled, runs listed, row opens the detail", async () => {

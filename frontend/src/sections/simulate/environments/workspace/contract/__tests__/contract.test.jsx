@@ -70,8 +70,16 @@ describe("RlContractPanel", () => {
     expect(screen.queryByText("Deterministic seed")).toBeNull();
   });
 
-  it("says the end conditions are not authored yet instead of showing sample ones", () => {
+  it("says a template or fork has no end conditions because it was never built", () => {
     renderPanel({ env: { ...voiceEnv, endConditions: null } });
+    expect(screen.getByText("Not authored yet")).toBeInTheDocument();
+    expect(screen.getByText("This environment hasn't been built, so it has none.")).toBeInTheDocument();
+    expect(screen.queryByText(/The build writes these/)).toBeNull();
+  });
+
+  it("says the end conditions are not authored yet instead of showing sample ones", () => {
+    renderPanel({ env: { ...voiceEnv, endConditions: null }, backed: true });
+    expect(screen.getByText(/The build writes these once it has read how a run of this agent ends/)).toBeInTheDocument();
     expect(screen.getByText("Run end conditions")).toBeInTheDocument();
     expect(screen.getByText("Not authored yet")).toBeInTheDocument();
     expect(screen.queryByText("Terminate")).toBeNull();

@@ -185,6 +185,32 @@ describe("harnessDetailToEnvironment", () => {
     expect(env.evalPreset).toEqual(["cs_policy"]);
   });
 
+  it("reads direction, source and mode from settings when the contract has no direction", () => {
+    const { env } = harnessDetailToEnvironment({
+      ...DETAIL,
+      contract: { ...DETAIL.contract, call_direction: undefined },
+      settings: {
+        ...DETAIL.settings,
+        source: { kind: "github", repository: "acme/ride-agent", ref: "main" },
+        agent: { ...DETAIL.settings?.agent, call_direction: "outbound", mode: "connect_only" },
+      },
+    });
+    expect(env.callDirection).toBe("outbound");
+    expect(env.source).toEqual({ kind: "github", repository: "acme/ride-agent", ref: "main" });
+    expect(env.agentMode).toBe("connect_only");
+  });
+
+  it("leaves direction, source and mode empty when nothing sends them", () => {
+    const { env } = harnessDetailToEnvironment({
+      ...DETAIL,
+      contract: { ...DETAIL.contract, call_direction: undefined },
+      settings: {},
+    });
+    expect(env.callDirection).toBeNull();
+    expect(env.source).toBeNull();
+    expect(env.agentMode).toBeNull();
+  });
+
   it("flattens world.stores into seed tables and keeps the raw stores", () => {
     const { env } = harnessDetailToEnvironment(DETAIL);
     expect(env.seed.tables).toEqual([
