@@ -73,6 +73,7 @@ from tracer.services.observability_providers import (
 )
 from tracer.services.observability_switch import (
     ObservabilityRefused,
+    observability_is_on,
     refusal_body,
     set_agent_observability,
 )
@@ -808,6 +809,24 @@ class EditAgentDefinitionView(APIView):
                         organization=agent.organization,
                         workspace=agent.workspace,
                     )
+                    # The form saves from the latest copy; the active one may be older.
+                    state = observability_is_on(agent)
+                    pks = {
+                        v.pk
+                        for v in (agent.active_version, agent.latest_version)
+                        if v is not None
+                    }
+                    locked = (
+                        AgentVersion.no_workspace_objects.select_for_update()
+                        .filter(pk__in=pks)
+                        .order_by("pk")
+                    )
+                    for pk, raw in locked.values_list("pk", "configuration_snapshot"):
+                        snapshot = dict(raw) if isinstance(raw, dict) else {}
+                        snapshot["observability_enabled"] = state
+                        AgentVersion.no_workspace_objects.filter(pk=pk).update(
+                            configuration_snapshot=snapshot
+                        )
             updated_agent = agent
 
             response_data = {
