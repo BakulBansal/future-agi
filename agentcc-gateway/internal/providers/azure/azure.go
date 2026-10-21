@@ -199,7 +199,7 @@ func (p *Provider) ChatCompletion(ctx context.Context, req *models.ChatCompletio
 
 	respBody, err := io.ReadAll(io.LimitReader(resp.Body, 10*1024*1024))
 	if err != nil {
-		return nil, models.ErrUpstreamProvider(resp.StatusCode, fmt.Sprintf("reading provider response: %v", err))
+		return nil, common.ReadError(err, resp.StatusCode, "reading provider response")
 	}
 
 	if resp.StatusCode != http.StatusOK {
@@ -305,7 +305,7 @@ func (p *Provider) StreamChatCompletion(ctx context.Context, req *models.ChatCom
 
 		if err := scanner.Err(); err != nil {
 			if ctx.Err() == nil {
-				errs <- models.ErrUpstreamProvider(0, fmt.Sprintf("stream read error: %v", err))
+				errs <- common.ReadError(err, 0, "stream read")
 			}
 		}
 	}()
@@ -374,7 +374,7 @@ func (p *Provider) CreateEmbedding(ctx context.Context, req *models.EmbeddingReq
 
 	respBody, err := io.ReadAll(io.LimitReader(resp.Body, 10*1024*1024))
 	if err != nil {
-		return nil, models.ErrUpstreamProvider(resp.StatusCode, fmt.Sprintf("reading embedding response: %v", err))
+		return nil, common.ReadError(err, resp.StatusCode, "reading embedding response")
 	}
 
 	if resp.StatusCode != http.StatusOK {
@@ -423,7 +423,7 @@ func (p *Provider) CreateImage(ctx context.Context, req *models.ImageRequest) (*
 
 	respBody, err := io.ReadAll(io.LimitReader(resp.Body, 10*1024*1024))
 	if err != nil {
-		return nil, models.ErrUpstreamProvider(resp.StatusCode, fmt.Sprintf("reading image response: %v", err))
+		return nil, common.ReadError(err, resp.StatusCode, "reading image response")
 	}
 
 	if resp.StatusCode != http.StatusOK {
@@ -574,7 +574,7 @@ func (p *Provider) CreateTranscription(ctx context.Context, req *models.Transcri
 
 	respBody, err := io.ReadAll(io.LimitReader(resp.Body, 10*1024*1024))
 	if err != nil {
-		return nil, models.ErrUpstreamProvider(resp.StatusCode, fmt.Sprintf("reading transcription response: %v", err))
+		return nil, common.ReadError(err, resp.StatusCode, "reading transcription response")
 	}
 
 	if resp.StatusCode != http.StatusOK {

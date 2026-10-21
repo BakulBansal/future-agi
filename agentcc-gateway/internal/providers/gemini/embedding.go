@@ -9,6 +9,7 @@ import (
 	"net/http"
 
 	"github.com/futureagi/agentcc-gateway/internal/models"
+	"github.com/futureagi/agentcc-gateway/internal/providers/common"
 )
 
 // --- Gemini embedding native types ---
@@ -105,7 +106,7 @@ func (p *Provider) doSingleEmbed(ctx context.Context, model string, text string,
 
 	respBody, err := io.ReadAll(io.LimitReader(resp.Body, 10*1024*1024))
 	if err != nil {
-		return nil, models.ErrUpstreamProvider(resp.StatusCode, fmt.Sprintf("gemini: reading embed response: %v", err))
+		return nil, common.ReadError(err, resp.StatusCode, "gemini: reading embed response")
 	}
 
 	if resp.StatusCode != http.StatusOK {
@@ -164,7 +165,7 @@ func (p *Provider) doBatchEmbed(ctx context.Context, model string, texts []strin
 
 	respBody, err := io.ReadAll(io.LimitReader(resp.Body, 10*1024*1024))
 	if err != nil {
-		return nil, models.ErrUpstreamProvider(resp.StatusCode, fmt.Sprintf("gemini: reading batch embed response: %v", err))
+		return nil, common.ReadError(err, resp.StatusCode, "gemini: reading batch embed response")
 	}
 
 	if resp.StatusCode != http.StatusOK {

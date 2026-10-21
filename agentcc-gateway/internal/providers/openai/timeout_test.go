@@ -124,3 +124,77 @@ func TestChatCompletion_RequestDeadlineIsStillAGatewayTimeout(t *testing.T) {
 		t.Errorf("status = %d (%s), want %d", apiErr.Status, apiErr.Code, http.StatusGatewayTimeout)
 	}
 }
+
+// stalledProvider answers with headers and then withholds the body, so the
+// call fails while reading rather than while waiting for headers.
+func stalledProvider(t *testing.T, clientTimeout time.Duration, stream bool) *Provider {
+	t.Helper()
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if stream {
+			w.Header().Set("Content-Type", "text/event-stream")
+		} else {
+			w.Header().Set("Content-Type", "application/json")
+			w.Header().Set("Content-Length", "4096") // promise a body that never comes
+		}
+		w.WriteHeader(http.StatusOK)
+		if f, ok := w.(http.Flusher); ok {
+			f.Flush()
+		}
+		time.Sleep(2 * time.Second) // outlast the client timeout
+	}))
+	t.Cleanup(ts.Close)
+
+	p, err := New("test-openai", config.ProviderConfig{
+		BaseURL:        ts.URL,
+		APIKey:         "test-key",
+		DefaultTimeout: clientTimeout,
+	})
+	if err != nil {
+		t.Fatalf("New() error: %v", err)
+	}
+	return p
+}
+
+// A body that stalls after the headers arrive is still a timeout. The
+// classification at the request boundary never sees it, because that call
+// returned successfully — so this used to answer 502 and be retried.
+func TestChatCompletion_StalledBodyIsAGatewayTimeout(t *testing.T) {
+	p := stalledProvider(t, 100*time.Millisecond, false)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	_, err := p.ChatCompletion(ctx, &models.ChatCompletionRequest{Model: "gpt-4o"})
+
+	apiErr := apiError(t, err)
+	if apiErr.Status != http.StatusGatewayTimeout {
+		t.Errorf("status = %d (%s / %s), want %d",
+			apiErr.Status, apiErr.Type, apiErr.Code, http.StatusGatewayTimeout)
+	}
+}
+
+// The same for a stream whose first chunk never arrives.
+func TestStreamChatCompletion_StalledFirstChunkIsAGatewayTimeout(t *testing.T) {
+	p := stalledProvider(t, 100*time.Millisecond, true)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	chunks, errs := p.StreamChatCompletion(ctx, &models.ChatCompletionRequest{Model: "gpt-4o", Stream: true})
+
+	for {
+		select {
+		case _, ok := <-chunks:
+			if !ok {
+				chunks = nil
+			}
+		case err := <-errs:
+			if apiErr := apiError(t, err); apiErr.Status != http.StatusGatewayTimeout {
+				t.Errorf("status = %d (%s), want %d", apiErr.Status, apiErr.Code, http.StatusGatewayTimeout)
+			}
+			return
+		case <-time.After(10 * time.Second):
+			t.Fatal("no error arrived on the stream error channel")
+		}
+	}
+}

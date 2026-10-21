@@ -173,7 +173,7 @@ func (p *Provider) OCR(ctx context.Context, req *models.OCRRequest) (*models.OCR
 
 	respBody, err := io.ReadAll(io.LimitReader(resp.Body, 25*1024*1024))
 	if err != nil {
-		return nil, models.ErrUpstreamProvider(resp.StatusCode, fmt.Sprintf("reading provider response: %v", err))
+		return nil, common.ReadError(err, resp.StatusCode, "reading provider response")
 	}
 	if resp.StatusCode != http.StatusOK {
 		return nil, parseProviderError(resp.StatusCode, respBody)
@@ -225,7 +225,7 @@ func (p *Provider) TextCompletion(ctx context.Context, req *models.CompletionReq
 
 	respBody, err := io.ReadAll(io.LimitReader(resp.Body, 10*1024*1024))
 	if err != nil {
-		return nil, models.ErrUpstreamProvider(resp.StatusCode, fmt.Sprintf("reading provider response: %v", err))
+		return nil, common.ReadError(err, resp.StatusCode, "reading provider response")
 	}
 	if resp.StatusCode != http.StatusOK {
 		return nil, parseProviderError(resp.StatusCode, respBody)
@@ -280,7 +280,7 @@ func (p *Provider) ChatCompletion(ctx context.Context, req *models.ChatCompletio
 
 	respBody, err := io.ReadAll(io.LimitReader(resp.Body, 10*1024*1024)) // 10MB limit
 	if err != nil {
-		return nil, models.ErrUpstreamProvider(resp.StatusCode, fmt.Sprintf("reading provider response: %v", err))
+		return nil, common.ReadError(err, resp.StatusCode, "reading provider response")
 	}
 
 	if resp.StatusCode != http.StatusOK {
@@ -395,7 +395,7 @@ func (p *Provider) StreamChatCompletion(ctx context.Context, req *models.ChatCom
 
 		if err := scanner.Err(); err != nil {
 			if ctx.Err() == nil {
-				errs <- models.ErrUpstreamProvider(0, fmt.Sprintf("stream read error: %v", err))
+				errs <- common.ReadError(err, 0, "stream read")
 			}
 		}
 	}()
@@ -468,7 +468,7 @@ func (p *Provider) CreateImage(ctx context.Context, req *models.ImageRequest) (*
 
 	respBody, err := io.ReadAll(io.LimitReader(resp.Body, 10*1024*1024))
 	if err != nil {
-		return nil, models.ErrUpstreamProvider(resp.StatusCode, fmt.Sprintf("reading image response: %v", err))
+		return nil, common.ReadError(err, resp.StatusCode, "reading image response")
 	}
 
 	if resp.StatusCode != http.StatusOK {
@@ -620,7 +620,7 @@ func (p *Provider) CreateTranscription(ctx context.Context, req *models.Transcri
 
 	respBody, err := io.ReadAll(io.LimitReader(resp.Body, 10*1024*1024))
 	if err != nil {
-		return nil, models.ErrUpstreamProvider(resp.StatusCode, fmt.Sprintf("reading transcription response: %v", err))
+		return nil, common.ReadError(err, resp.StatusCode, "reading transcription response")
 	}
 
 	if resp.StatusCode != http.StatusOK {
@@ -662,7 +662,7 @@ func (p *Provider) CreateResponse(ctx context.Context, reqBody []byte) ([]byte, 
 
 	respBody, err := io.ReadAll(io.LimitReader(resp.Body, 10*1024*1024))
 	if err != nil {
-		return nil, resp.StatusCode, models.ErrUpstreamProvider(resp.StatusCode, fmt.Sprintf("reading responses body: %v", err))
+		return nil, resp.StatusCode, common.ReadError(err, resp.StatusCode, "reading responses body")
 	}
 
 	if resp.StatusCode != http.StatusOK {
@@ -777,7 +777,7 @@ func (p *Provider) CreateTranslation(ctx context.Context, req *models.Translatio
 
 	respBody, err := io.ReadAll(io.LimitReader(resp.Body, 10*1024*1024))
 	if err != nil {
-		return nil, models.ErrUpstreamProvider(resp.StatusCode, fmt.Sprintf("reading translation response: %v", err))
+		return nil, common.ReadError(err, resp.StatusCode, "reading translation response")
 	}
 
 	if resp.StatusCode != http.StatusOK {
@@ -827,7 +827,7 @@ func (p *Provider) CreateEmbedding(ctx context.Context, req *models.EmbeddingReq
 
 	respBody, err := io.ReadAll(io.LimitReader(resp.Body, 10*1024*1024))
 	if err != nil {
-		return nil, models.ErrUpstreamProvider(resp.StatusCode, fmt.Sprintf("reading embedding response: %v", err))
+		return nil, common.ReadError(err, resp.StatusCode, "reading embedding response")
 	}
 
 	if resp.StatusCode != http.StatusOK {
@@ -881,7 +881,7 @@ func (p *Provider) ProxyAssistantsRequest(ctx context.Context, method string, pa
 
 	respBody, err := io.ReadAll(io.LimitReader(resp.Body, 10*1024*1024))
 	if err != nil {
-		return nil, resp.StatusCode, nil, models.ErrUpstreamProvider(resp.StatusCode, fmt.Sprintf("reading assistants response: %v", err))
+		return nil, resp.StatusCode, nil, common.ReadError(err, resp.StatusCode, "reading assistants response")
 	}
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
@@ -998,7 +998,7 @@ func (p *Provider) ProxyVectorStoresRequest(ctx context.Context, method string, 
 
 	respBody, err := io.ReadAll(io.LimitReader(resp.Body, 10*1024*1024))
 	if err != nil {
-		return nil, resp.StatusCode, nil, models.ErrUpstreamProvider(resp.StatusCode, fmt.Sprintf("reading vector stores response: %v", err))
+		return nil, resp.StatusCode, nil, common.ReadError(err, resp.StatusCode, "reading vector stores response")
 	}
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {

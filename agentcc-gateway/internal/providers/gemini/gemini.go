@@ -171,7 +171,7 @@ func (p *Provider) ChatCompletion(ctx context.Context, req *models.ChatCompletio
 
 	respBody, err := io.ReadAll(io.LimitReader(resp.Body, 10*1024*1024))
 	if err != nil {
-		return nil, models.ErrUpstreamProvider(resp.StatusCode, fmt.Sprintf("gemini: reading response: %v", err))
+		return nil, common.ReadError(err, resp.StatusCode, "gemini: reading response")
 	}
 
 	if resp.StatusCode != http.StatusOK {
@@ -310,7 +310,7 @@ func (p *Provider) StreamChatCompletion(ctx context.Context, req *models.ChatCom
 
 		if err := scanner.Err(); err != nil {
 			if ctx.Err() == nil {
-				errs <- models.ErrUpstreamProvider(0, fmt.Sprintf("gemini: stream read error: %v", err))
+				errs <- common.ReadError(err, 0, "gemini: stream read")
 			}
 		}
 	}()
@@ -404,7 +404,7 @@ func (p *Provider) doGenAIRequest(ctx context.Context, model string, action stri
 
 	respBody, err := io.ReadAll(io.LimitReader(resp.Body, 10*1024*1024))
 	if err != nil {
-		return nil, resp.StatusCode, models.ErrUpstreamProvider(resp.StatusCode, fmt.Sprintf("gemini: reading native response: %v", err))
+		return nil, resp.StatusCode, common.ReadError(err, resp.StatusCode, "gemini: reading native response")
 	}
 
 	return respBody, resp.StatusCode, nil
