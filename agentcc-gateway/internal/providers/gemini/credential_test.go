@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 
@@ -200,5 +201,59 @@ func TestCredential_HTTPSDowngradeRedirectIsRefused(t *testing.T) {
 	var apiErr *models.APIError
 	if errorsAs(callErr, &apiErr) && strings.Contains(apiErr.Message, testKey) {
 		t.Errorf("the refusal message carries the credential: %s", apiErr.Message)
+	}
+}
+
+// Go rebuilds each redirected request from the original, so a header dropped
+// on one hop comes back on the next. Judging a hop against the one before it
+// therefore let A -> B -> B restore the credential at B: the second hop looked
+// like it stayed put. Every hop is judged against the configured origin.
+func TestCredential_IsNotRestoredOnALaterHop(t *testing.T) {
+	var mu sync.Mutex
+	var sawKeyOnHop []int
+	hop := 0
+
+	var elsewhereURL string
+	elsewhere := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		hop++
+		n := hop
+		if r.Header.Get("x-goog-api-key") != "" {
+			sawKeyOnHop = append(sawKeyOnHop, n)
+		}
+		mu.Unlock()
+
+		if n == 1 {
+			// A second hop inside the same foreign origin.
+			http.Redirect(w, r, elsewhereURL+r.URL.Path+"?hop=2", http.StatusTemporaryRedirect)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"candidates":[{"content":{"parts":[{"text":"ok"}]},"finishReason":"STOP"}]}`))
+	}))
+	defer elsewhere.Close()
+	elsewhereURL = elsewhere.URL
+
+	configured := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, elsewhereURL+r.URL.Path, http.StatusTemporaryRedirect)
+	}))
+	defer configured.Close()
+
+	p, err := New("g", config.ProviderConfig{BaseURL: configured.URL, APIKey: testKey})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	p.ChatCompletion(context.Background(), &models.ChatCompletionRequest{
+		Model:    "gemini-3-flash-preview",
+		Messages: []models.Message{{Role: "user", Content: json.RawMessage(`"hi"`)}},
+	})
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(sawKeyOnHop) > 0 {
+		t.Errorf("the credential reached a foreign origin on hop(s) %v of %d", sawKeyOnHop, hop)
+	}
+	if hop < 2 {
+		t.Fatalf("only %d hops ran; the multi-hop path was not exercised", hop)
 	}
 }

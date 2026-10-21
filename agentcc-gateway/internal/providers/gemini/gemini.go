@@ -122,18 +122,25 @@ const maxRedirects = 10
 // Go carries a custom header through every redirect and only strips the ones
 // it knows, Authorization and Cookie among them. Putting the key in
 // x-goog-api-key therefore made it follow a redirect anywhere the upstream
-// pointed, including to plaintext. A downgrade is refused outright; a move to
-// another origin keeps going without the credential, so the request fails on
-// authentication rather than handing the key to whoever answered.
+// pointed, including to plaintext. A downgrade is refused outright; a move
+// away from the configured origin keeps going without the credential, so the
+// request fails on authentication rather than handing the key to whoever
+// answered.
+//
+// Every hop is judged against via[0], the origin the operator configured and
+// trusted with the key — not against the hop before it. Go rebuilds each
+// redirected request from the original, so a header dropped on one hop comes
+// back on the next: comparing neighbours let A -> B -> B restore the
+// credential at B, because the second hop looked like it stayed put.
 func keepCredentialInOrigin(req *http.Request, via []*http.Request) error {
 	if len(via) >= maxRedirects {
 		return fmt.Errorf("stopped after %d redirects", maxRedirects)
 	}
-	prev := via[len(via)-1].URL
-	if prev.Scheme == "https" && req.URL.Scheme != "https" {
+	origin := via[0].URL
+	if origin.Scheme == "https" && req.URL.Scheme != "https" {
 		return fmt.Errorf("refusing a redirect from https to %s: it would send the provider credential in plaintext", req.URL.Scheme)
 	}
-	if req.URL.Scheme != prev.Scheme || req.URL.Host != prev.Host {
+	if req.URL.Scheme != origin.Scheme || req.URL.Host != origin.Host {
 		req.Header.Del("x-goog-api-key")
 		req.Header.Del("Authorization")
 	}
