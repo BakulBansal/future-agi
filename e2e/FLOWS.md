@@ -1813,8 +1813,8 @@
 
 ### SIM-E2E-001 — Simulate opens on Environments and an org from before the cutoff keeps every page
 
-**Goal:** A developer opening Simulate lands on Environments, old Harness, Simulator Agent and template links go somewhere sensible, and an org from before the cutoff still reaches every Simulate page (the restricted side for new orgs is not claimed: the harness cannot create an org dated after a cutoff)  
-**Spec:** `flows/simulate/environments-only-routing.spec.ts:43`  
+**Goal:** A developer opening Simulate lands on Environments, old Harness, Simulator Agent, Personas and template links go somewhere sensible, Personas opens as a tab on Environments, and an org from before the cutoff still reaches every other Simulate page (the restricted side for new orgs is not claimed: the harness cannot create an org dated after a cutoff)  
+**Spec:** `flows/simulate/environments-only-routing.spec.ts:42`  
 **Tags:** —
 
 **User steps:**
@@ -1822,9 +1822,11 @@
 1. open /dashboard/simulate
 2. open the old Harness list, new and job links
 3. open the old Simulator Agent link
-4. open the Prebuilt template links
-5. read the Simulate menu
-6. open Agent Definition, Scenarios, Personas and Run Simulation from the menu
+4. open the old Personas link
+5. open the Personas tab
+6. open the Prebuilt template links
+7. read the Simulate menu
+8. open Agent Definition, Scenarios and Run Simulation from the menu
 
 **Backend state verified:**
 
@@ -1835,6 +1837,8 @@
 - /dashboard/simulate lands on Environments
 - harness lands on Environments, harness/new on the Build tab, harness/<id> on environments/<id>
 - simulator-agent lands on Environments
+- personas lands on the Environments Personas tab
+- the Personas tab is selected and shows the persona search
 - both template URLs stay on their URL and open their page by title
-- the Simulate menu is exactly Environment, Agent Definition, Scenarios, Personas, Run Simulation
-- each of those four items opens its page by URL and title, never /404
+- the Simulate menu is exactly Environment, Agent Definition, Scenarios, Run Simulation
+- each of those three items opens its page by URL and title, never /404

@@ -9,7 +9,7 @@ const SIMULATE = '/dashboard/simulate';
 const ENVIRONMENTS = `${SIMULATE}/environments`;
 
 // Pinned off the pages' <Helmet> titles: AgentDefinitions.jsx, Scenarios.jsx,
-// Personas.jsx, RunTests.jsx, and environments/PrebuiltEnvironments.jsx and
+// RunTests.jsx, and environments/PrebuiltEnvironments.jsx and
 // environments/UseTemplate.jsx for the templates.
 
 // Each Prebuilt template URL and its page title. The template id comes from
@@ -21,13 +21,12 @@ const TEMPLATE_PAGES = [
 
 // The Simulate menu for an org created before the cutoff, in order
 // (frontend/src/layouts/dashboard/config-navigation.jsx, Simulate section).
-const SIMULATE_MENU = ['Environment', 'Agent Definition', 'Scenarios', 'Personas', 'Run Simulation'];
+const SIMULATE_MENU = ['Environment', 'Agent Definition', 'Scenarios', 'Run Simulation'];
 
 // Each non-Environment menu item and the page it must open.
 const LEGACY_PAGES = [
   { item: 'Agent Definition', path: `${SIMULATE}/agent-definitions`, title: 'Agent Definitions' },
   { item: 'Scenarios', path: `${SIMULATE}/scenarios`, title: 'Scenarios' },
-  { item: 'Personas', path: `${SIMULATE}/personas`, title: 'Personas' },
   { item: 'Run Simulation', path: `${SIMULATE}/test`, title: 'Run Tests | Dashboard' },
 ];
 
@@ -44,26 +43,29 @@ test('SIM-E2E-001: Simulate opens on Environments and an org from before the cut
   tag: ['@flow'],
   annotation: flowAnnotation({
     id: 'SIM-E2E-001', area: 'simulate',
-    userGoal: 'A developer opening Simulate lands on Environments, old Harness, Simulator Agent and '
-      + 'template links go somewhere sensible, and an org from before the cutoff still reaches every '
-      + 'Simulate page (the restricted side for new orgs is not claimed: the harness cannot create an '
+    userGoal: 'A developer opening Simulate lands on Environments, old Harness, Simulator Agent, Personas and '
+      + 'template links go somewhere sensible, Personas opens as a tab on Environments, and an org from before '
+      + 'the cutoff still reaches every other Simulate page (the restricted side for new orgs is not claimed: the harness cannot create an '
       + 'org dated after a cutoff)',
     steps: ['open /dashboard/simulate', 'open the old Harness list, new and job links',
-            'open the old Simulator Agent link', 'open the Prebuilt template links',
-            'read the Simulate menu', 'open Agent Definition, Scenarios, Personas and Run Simulation from the menu'],
+            'open the old Simulator Agent link', 'open the old Personas link', 'open the Personas tab',
+            'open the Prebuilt template links', 'read the Simulate menu',
+            'open Agent Definition, Scenarios and Run Simulation from the menu'],
     backendChecks: ["user-info for the actor's org does not report restrict_simulate_to_environments: true "
                     + '(false, or absent on a backend from before the flag)'],
     browserChecks: ['/dashboard/simulate lands on Environments',
                     'harness lands on Environments, harness/new on the Build tab, harness/<id> on environments/<id>',
                     'simulator-agent lands on Environments',
+                    'personas lands on the Environments Personas tab',
+                    'the Personas tab is selected and shows the persona search',
                     'both template URLs stay on their URL and open their page by title',
-                    'the Simulate menu is exactly Environment, Agent Definition, Scenarios, Personas, Run Simulation',
-                    'each of those four items opens its page by URL and title, never /404'],
+                    'the Simulate menu is exactly Environment, Agent Definition, Scenarios, Run Simulation',
+                    'each of those three items opens its page by URL and title, never /404'],
   }),
 }, async ({ page, actor }, testInfo) => {
-  // 12 browser actions, each its own UI_READY step: 12 × 60s = 720s, plus
+  // 13 browser actions, each its own UI_READY step: 13 × 60s = 780s, plus
   // 60s headroom so a slow run fails on the step that ran out.
-  test.setTimeout(780_000);
+  test.setTimeout(840_000);
   const jobId = `e2e-sim1-${testInfo.workerIndex}-${Date.now().toString(36)}`;
   await testInfo.attach('seeded', {
     body: JSON.stringify({ organizationId: actor.organizationId, jobId }),
@@ -87,6 +89,7 @@ test('SIM-E2E-001: Simulate opens on Environments and an org from before the cut
     [`${SIMULATE}/harness/new`, `${ENVIRONMENTS}?tab=build`],
     [`${SIMULATE}/harness/${jobId}`, `${ENVIRONMENTS}/${jobId}`],
     [`${SIMULATE}/simulator-agent`, ENVIRONMENTS],
+    [`${SIMULATE}/personas`, `${ENVIRONMENTS}?tab=personas`],
   ];
   for (const [from, to] of redirects) {
     await test.step(`ui: ${from} lands on ${to}`, async () => {
@@ -94,6 +97,14 @@ test('SIM-E2E-001: Simulate opens on Environments and an org from before the cut
       await expect(page).toHaveURL(exactPath(to), { timeout: UI_READY });
     }, { timeout: UI_READY });
   }
+
+  await test.step('ui: the Personas tab lists personas', async () => {
+    await page.goto(`${ENVIRONMENTS}?tab=personas`);
+    await expect(page.getByRole('tab', { name: 'Personas' }))
+      .toHaveAttribute('aria-selected', 'true', { timeout: UI_READY });
+    // PersonaListView's search field.
+    await expect(page.getByPlaceholder('Search personas')).toBeVisible({ timeout: UI_READY });
+  }, { timeout: UI_READY });
 
   for (const template of TEMPLATE_PAGES) {
     await test.step(`ui: ${template.path} opens its template page`, async () => {
