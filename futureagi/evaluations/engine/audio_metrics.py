@@ -44,6 +44,10 @@ def analyze_audio(audio_bytes: bytes) -> AudioMetrics:
     if np.max(np.abs(samples)) < 1e-8:
         return AudioMetrics(None, None)
 
+    # Fixed-duration windows keep pitch and energy measurements comparable.
+    samples = librosa.resample(samples, orig_sr=sample_rate, target_sr=16000)
+    sample_rate = 16000
+
     pitch = None
     try:
         frame_length = 2048
