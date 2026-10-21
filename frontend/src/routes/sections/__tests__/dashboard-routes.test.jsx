@@ -67,8 +67,6 @@ const HIDDEN_SIMULATE_URLS = [
   `${SIMULATE}/scenarios`,
   `${SIMULATE}/scenarios/create`,
   `${SIMULATE}/scenarios/scenario-1`,
-  // Personas
-  `${SIMULATE}/personas`,
   // Run Simulation
   `${SIMULATE}/test`,
   `${SIMULATE}/test/test-1`,
@@ -111,6 +109,7 @@ const ALWAYS_REDIRECTED = [
   [`${SIMULATE}/harness/new`, `${SIMULATE}/environments?tab=build`],
   [`${SIMULATE}/harness/job-1/old`, `${SIMULATE}/environments`],
   [`${SIMULATE}/simulator-agent`, `${SIMULATE}/environments`],
+  [`${SIMULATE}/personas`, `${SIMULATE}/environments?tab=personas`],
 ];
 
 describe("Simulate routes for an org restricted to Environments", () => {

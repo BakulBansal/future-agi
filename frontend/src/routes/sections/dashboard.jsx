@@ -289,9 +289,6 @@ const CreatePrompt = lazyWithRetry(
 const Scenarios = lazyWithRetry(
   () => import("src/pages/dashboard/scenarios/Scenarios"),
 );
-const Personas = lazyWithRetry(
-  () => import("src/pages/dashboard/personas/Personas"),
-);
 const CreateScenario = lazyWithRetry(
   () => import("src/pages/dashboard/scenarios/CreateScenario"),
 );
@@ -1456,6 +1453,16 @@ export const dashboardRoutes = (
             <Navigate to={paths.dashboard.simulate.environments.root} replace />
           ),
         },
+        // Personas is a tab on Environments.
+        {
+          path: "personas",
+          element: (
+            <Navigate
+              to={`${paths.dashboard.simulate.environments.root}?tab=personas`}
+              replace
+            />
+          ),
+        },
         ...(restrictSimulateToEnvironments
           ? []
           : [
@@ -1487,10 +1494,6 @@ export const dashboardRoutes = (
               {
                 path: "scenarios/:scenarioId",
                 element: <ScenarioDatasetView />,
-              },
-              {
-                path: "personas",
-                element: <Personas />,
               },
               {
                 path: "test",

@@ -55,7 +55,6 @@ const ICONS = {
   simulatorAgent: icon("ic_optimize"),
   test: icon("ic_evaluate"),
   feed: icon("ic_feed"),
-  persona: icon("ic_persona"),
   agents: icon("ic_agents"),
 };
 
@@ -235,16 +234,6 @@ export function useNavData() {
                   icon: ICONS.scenarios,
                   eventTrigger: () => {
                     trackEvent(Events.navigationScenariosClicked, {
-                      [PropertyName.click]: true,
-                    });
-                  },
-                },
-                {
-                  title: "Personas",
-                  path: paths.dashboard.simulate.personas,
-                  icon: ICONS.persona,
-                  eventTrigger: () => {
-                    trackEvent(Events.navigationPersonasClicked, {
                       [PropertyName.click]: true,
                     });
                   },

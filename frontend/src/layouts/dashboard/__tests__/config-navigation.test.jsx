@@ -37,7 +37,6 @@ describe("Simulate menu", () => {
         "Environment",
         "Agent Definition",
         "Scenarios",
-        "Personas",
         "Run Simulation",
       ]);
     },
