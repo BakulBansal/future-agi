@@ -17,6 +17,7 @@ def _evaluate():
 def test_definition_is_visible_audio_code_eval():
     definition, _ = _evaluate()
     assert definition["visible_ui"] is True
+    assert definition["offered_in_environments"] is True
     assert definition["config"]["eval_type_id"] == "CustomCodeEval"
     assert definition["config"]["required_keys"] == ["input_audio"]
     assert definition["config"]["param_modalities"]["input_audio"] == ["AUDIO"]

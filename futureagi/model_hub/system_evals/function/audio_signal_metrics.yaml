@@ -6,6 +6,7 @@ eval_tags:
 - Audio
 - Quality
 visible_ui: true
+offered_in_environments: true
 permissions:
   allow_edit: false
   allow_copy: true
