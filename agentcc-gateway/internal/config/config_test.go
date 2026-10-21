@@ -1,13 +1,16 @@
 package config
 
 import (
+	"bytes"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/x509"
 	"encoding/json"
 	"encoding/pem"
+	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -543,6 +546,52 @@ func TestLoad_MaxRequestTimeoutIsHeldAtTheWriteTimeout(t *testing.T) {
 	}
 	if cfg.Server.MaxRequestTimeout != 300*time.Second {
 		t.Errorf("max_request_timeout = %v, want 300s (the write timeout)", cfg.Server.MaxRequestTimeout)
+	}
+}
+
+// In a YAML flow mapping, "input_per_token:1e-07" (no space after the colon)
+// is one key with no value. The gateway reads no such key, so the price stays
+// unset and the model's requests carry no cost. Load must name the key, and
+// must not print the secret a mistyped key would otherwise carry.
+func TestLoad_WarnsAboutKeysTheGatewayDoesNotRead(t *testing.T) {
+	var logs bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+	t.Setenv("AGENTCC_TEST_PORT", "8080")
+	t.Setenv("AGENTCC_TEST_TOKEN", "do-not-log-me")
+
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	body := `server:
+  port: ${AGENTCC_TEST_PORT}
+admin: { token:${AGENTCC_TEST_TOKEN} }
+model_database:
+  overrides:
+    "vendor/model":
+      pricing: { input_per_token:1e-07, output_per_token: 2e-07 }
+`
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatalf("writing config: %v", err)
+	}
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got := cfg.ModelDatabase.Overrides["vendor/model"].Pricing.InputPerToken; got != nil {
+		t.Fatalf("input_per_token = %v, want unset", *got)
+	}
+	out := logs.String()
+	for _, key := range []string{"input_per_token:1e-07", "token:$AGENTCC_TEST_TOKEN"} {
+		if !strings.Contains(out, key) {
+			t.Errorf("log does not name the unread key %q:\n%s", key, out)
+		}
+	}
+	if strings.Contains(out, "do-not-log-me") {
+		t.Errorf("log carries the token's value:\n%s", out)
+	}
+	if strings.Contains(out, "cannot unmarshal") {
+		t.Errorf("log flags the unexpanded ${AGENTCC_TEST_PORT}, which is not a key:\n%s", out)
 	}
 }
 

@@ -2349,3 +2349,70 @@ func TestProviderPrefixRouting(t *testing.T) {
 		t.Fatalf("status = %d, want 200. Body: %s", w.Code, string(body))
 	}
 }
+
+// A routing target's model_override is the model the provider receives. An
+// alias has one target, and is often listed as a model too so that
+// /v1/models shows it; neither may drop the override.
+func TestChatCompletionSendsTargetModelOverrideUpstream(t *testing.T) {
+	const alias, upstreamModel = "openrouter/deepseek/deepseek-v4.1-flash", "deepseek/deepseek-v4.1-flash"
+
+	for _, tc := range []struct {
+		name      string
+		listAlias bool
+		stream    bool
+	}{
+		{name: "alias listed as a model", listAlias: true},
+		{name: "alias not listed", listAlias: false},
+		{name: "alias listed, streamed", listAlias: true, stream: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var sent atomic.Value
+			mock := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				var req models.ChatCompletionRequest
+				if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+					w.WriteHeader(http.StatusBadRequest)
+					return
+				}
+				sent.Store(req.Model)
+				if req.Stream {
+					w.Header().Set("Content-Type", "text/event-stream")
+					fmt.Fprintf(w, "data: {\"id\":\"c\",\"object\":\"chat.completion.chunk\",\"model\":%q,\"choices\":[{\"index\":0,\"delta\":{\"content\":\"ok\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n", req.Model)
+					return
+				}
+				w.Header().Set("Content-Type", "application/json")
+				fmt.Fprintf(w, `{"id":"c","object":"chat.completion","model":%q,"choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`, req.Model)
+			}))
+			defer mock.Close()
+
+			cfg := config.DefaultConfig()
+			providerModels := []string{upstreamModel}
+			if tc.listAlias {
+				providerModels = append(providerModels, alias)
+			}
+			cfg.Providers["openrouter"] = config.ProviderConfig{BaseURL: mock.URL, APIFormat: "openai", Models: providerModels}
+			cfg.Routing.Targets = map[string][]config.RoutingTargetConfig{
+				alias: {{Provider: "openrouter", ModelOverride: upstreamModel}},
+			}
+			cfg.Routing.Failover = config.FailoverConfig{Enabled: true, MaxAttempts: 5}
+
+			registry, err := providers.NewRegistry(cfg)
+			if err != nil {
+				t.Fatalf("creating registry: %v", err)
+			}
+			srv := New(cfg, "", registry, pipeline.NewEngine(), nil, nil, nil, nil, testModelDBPtr(), nil, nil)
+			srv.ready.Store(true)
+
+			reqBody := fmt.Sprintf(`{"model":%q,"stream":%t,"messages":[{"role":"user","content":"Hello"}]}`, alias, tc.stream)
+			req := httptest.NewRequest("POST", "/v1/chat/completions", bytes.NewBufferString(reqBody))
+			w := httptest.NewRecorder()
+			srv.httpServer.Handler.ServeHTTP(w, req)
+
+			if w.Code != http.StatusOK {
+				t.Fatalf("status = %d, want 200. Body: %s", w.Code, w.Body.String())
+			}
+			if got, _ := sent.Load().(string); got != upstreamModel {
+				t.Fatalf("upstream model = %q, want the target's model_override %q", got, upstreamModel)
+			}
+		})
+	}
+}

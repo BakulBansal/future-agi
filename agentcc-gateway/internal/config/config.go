@@ -5,6 +5,7 @@ import (
 	"crypto/rsa"
 	"crypto/x509"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
@@ -1090,9 +1091,37 @@ func loadFromFile(cfg *Config, path string) error {
 	if err != nil {
 		return err
 	}
+	warnUnreadKeys(data)
 	// Expand ${VAR} and $VAR references from environment variables.
 	expanded := os.ExpandEnv(string(data))
 	return yaml.Unmarshal([]byte(expanded), cfg)
+}
+
+// warnUnreadKeys logs the keys in a config file that no field reads, which
+// the decoder otherwise drops in silence. A typo makes one: in a flow mapping,
+// "input_per_token:1e-07" with no space is a key, and the price stays unset.
+// Deployed configs still carry keys the gateway no longer reads, so this warns
+// and does not fail.
+func warnUnreadKeys(data []byte) {
+	// $NAME stands in for each ${NAME}, not its value: a mistyped key then
+	// cannot carry a secret into the log, and no brace breaks a flow mapping.
+	// The type errors the stand-ins cause are not unread keys; they are left out.
+	text := os.Expand(string(data), func(name string) string { return "$" + name })
+	dec := yaml.NewDecoder(strings.NewReader(text))
+	dec.KnownFields(true)
+	var typeErr *yaml.TypeError
+	if !errors.As(dec.Decode(DefaultConfig()), &typeErr) {
+		return
+	}
+	var unread []string
+	for _, e := range typeErr.Errors {
+		if strings.Contains(e, "not found in type") {
+			unread = append(unread, e)
+		}
+	}
+	if len(unread) > 0 {
+		slog.Warn("config: keys the gateway does not read were ignored", "keys", unread)
+	}
 }
 
 // authKeyConfigured reports whether an auth key with the given raw value is
