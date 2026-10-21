@@ -14,6 +14,7 @@ import (
 
 	"github.com/futureagi/agentcc-gateway/internal/config"
 	"github.com/futureagi/agentcc-gateway/internal/models"
+	"github.com/futureagi/agentcc-gateway/internal/providers/common"
 	"github.com/futureagi/agentcc-gateway/internal/providers/gauth"
 )
 
@@ -201,7 +202,7 @@ func (p *Provider) ChatCompletion(ctx context.Context, req *models.ChatCompletio
 
 	resp, err := p.httpClient.Do(httpReq)
 	if err != nil {
-		if ctx.Err() != nil {
+		if common.TimedOut(ctx, err) {
 			return nil, models.ErrGatewayTimeout("gemini: request timed out")
 		}
 		return nil, models.ErrUpstreamProvider(0, fmt.Sprintf("gemini: request failed: %v", err))
@@ -210,7 +211,7 @@ func (p *Provider) ChatCompletion(ctx context.Context, req *models.ChatCompletio
 
 	respBody, err := io.ReadAll(io.LimitReader(resp.Body, 10*1024*1024))
 	if err != nil {
-		return nil, models.ErrUpstreamProvider(resp.StatusCode, fmt.Sprintf("gemini: reading response: %v", err))
+		return nil, common.ReadError(err, resp.StatusCode, "gemini: reading response")
 	}
 
 	if resp.StatusCode != http.StatusOK {
@@ -270,7 +271,7 @@ func (p *Provider) StreamChatCompletion(ctx context.Context, req *models.ChatCom
 
 		resp, err := p.httpClient.Do(httpReq)
 		if err != nil {
-			if ctx.Err() != nil {
+			if common.TimedOut(ctx, err) {
 				errs <- models.ErrGatewayTimeout("gemini: request timed out")
 				return
 			}
@@ -341,7 +342,7 @@ func (p *Provider) StreamChatCompletion(ctx context.Context, req *models.ChatCom
 
 		if err := scanner.Err(); err != nil {
 			if ctx.Err() == nil {
-				errs <- models.ErrUpstreamProvider(0, fmt.Sprintf("gemini: stream read error: %v", err))
+				errs <- common.ReadError(err, 0, "gemini: stream read")
 			}
 		}
 	}()
@@ -392,7 +393,7 @@ func (p *Provider) StreamGenerateContent(ctx context.Context, model string, reqB
 	resp, err := p.httpClient.Do(httpReq)
 	if err != nil {
 		p.releaseSemaphore()
-		if ctx.Err() != nil {
+		if common.TimedOut(ctx, err) {
 			return nil, 0, models.ErrGatewayTimeout("gemini: streaming request timed out")
 		}
 		return nil, 502, models.ErrUpstreamProvider(0, fmt.Sprintf("gemini: streaming request failed: %v", err))
@@ -426,7 +427,7 @@ func (p *Provider) doGenAIRequest(ctx context.Context, model string, action stri
 
 	resp, err := p.httpClient.Do(httpReq)
 	if err != nil {
-		if ctx.Err() != nil {
+		if common.TimedOut(ctx, err) {
 			return nil, 0, models.ErrGatewayTimeout("gemini: native request timed out")
 		}
 		return nil, 502, models.ErrUpstreamProvider(0, fmt.Sprintf("gemini: native request failed: %v", err))
@@ -435,7 +436,7 @@ func (p *Provider) doGenAIRequest(ctx context.Context, model string, action stri
 
 	respBody, err := io.ReadAll(io.LimitReader(resp.Body, 10*1024*1024))
 	if err != nil {
-		return nil, resp.StatusCode, models.ErrUpstreamProvider(resp.StatusCode, fmt.Sprintf("gemini: reading native response: %v", err))
+		return nil, resp.StatusCode, common.ReadError(err, resp.StatusCode, "gemini: reading native response")
 	}
 
 	return respBody, resp.StatusCode, nil

@@ -530,7 +530,11 @@ func TestLoad_MaxRequestTimeoutDefaultsToWriteTimeout(t *testing.T) {
 
 // A ceiling above the write timeout is one no response can reach, so Load
 // lowers it rather than refusing to start.
-func TestLoad_MaxRequestTimeoutIsHeldAtTheWriteTimeout(t *testing.T) {
+// A ceiling above write_timeout is kept. The timeout middleware holds the
+// response write deadline at the ceiling, so write_timeout no longer decides
+// how long a request may take — and lowering the ceiling to it would truncate
+// the operator's own setting silently.
+func TestLoad_MaxRequestTimeoutAboveTheWriteTimeoutIsKept(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.yaml")
 	body := "server:\n  write_timeout: 300s\n  max_request_timeout: 600s\n"
 	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
@@ -541,8 +545,8 @@ func TestLoad_MaxRequestTimeoutIsHeldAtTheWriteTimeout(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if cfg.Server.MaxRequestTimeout != 300*time.Second {
-		t.Errorf("max_request_timeout = %v, want 300s (the write timeout)", cfg.Server.MaxRequestTimeout)
+	if cfg.Server.MaxRequestTimeout != 600*time.Second {
+		t.Errorf("max_request_timeout = %v, want 600s (the configured ceiling)", cfg.Server.MaxRequestTimeout)
 	}
 }
 
