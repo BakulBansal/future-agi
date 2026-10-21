@@ -69,9 +69,6 @@ func (p *Provider) CreateSpeech(ctx context.Context, req *models.SpeechRequest) 
 	}
 
 	url := buildURL(p.baseURL, model, false)
-	if !p.vertexAI && p.apiKey != "" {
-		url += "?key=" + p.apiKey
-	}
 
 	httpReq, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(body))
 	if err != nil {
@@ -79,11 +76,7 @@ func (p *Provider) CreateSpeech(ctx context.Context, req *models.SpeechRequest) 
 	}
 
 	httpReq.Header.Set("Content-Type", "application/json")
-	if p.vertexAI {
-		if tok := p.bearerToken(); tok != "" {
-			httpReq.Header.Set("Authorization", "Bearer "+tok)
-		}
-	}
+	p.setAPIKey(httpReq)
 	for k, v := range p.headers {
 		httpReq.Header.Set(k, v)
 	}
