@@ -3,8 +3,10 @@ package models
 import (
 	"net/http"
 	"net/http/httptest"
+	"runtime"
 	"strings"
 	"testing"
+	"time"
 )
 
 const liveKey = "AIzaSyD-ThisIsTheShapeOfARealGoogleKey_123456"
@@ -100,5 +102,65 @@ func TestWriteError_Redacts(t *testing.T) {
 	}
 	if strings.Contains(w.Body.String(), liveKey) {
 		t.Errorf("the key reached the response body: %s", w.Body.String())
+	}
+}
+
+// The text handed to the redactor is a caller's. An unknown model name of
+// "https://host/" followed by a hundred thousand brackets reaches here through
+// an unknown-model error, and trimming that suffix a byte at a time allocated
+// gigabytes for one request.
+func TestRedactCredentials_HostileTrailingPunctuation(t *testing.T) {
+	hostile := "model https://host/v1?key=" + liveKey + strings.Repeat(")", 131072) + " not found"
+
+	var before, after runtime.MemStats
+	runtime.GC()
+	runtime.ReadMemStats(&before)
+
+	start := time.Now()
+	got := RedactCredentials(hostile)
+	elapsed := time.Since(start)
+
+	runtime.ReadMemStats(&after)
+	allocated := after.TotalAlloc - before.TotalAlloc
+
+	if strings.Contains(got, liveKey) {
+		t.Error("the credential survived redaction")
+	}
+	// The quadratic version allocated ~9 GB and took ~0.8s for this input.
+	// A linear one needs a small multiple of the input, which is 128 KiB.
+	if limit := uint64(32 << 20); allocated > limit {
+		t.Errorf("allocated %d bytes for a %d byte input, want under %d — the trim is not linear",
+			allocated, len(hostile), limit)
+	}
+	if elapsed > 2*time.Second {
+		t.Errorf("took %s, want well under 2s", elapsed)
+	}
+}
+
+// 78 sites build an APIError directly rather than through the constructors —
+// a provider parsing an upstream error body among them. Those never reach
+// newAPIError, so redaction also happens where the response is written.
+func TestWriteError_RedactsADirectlyConstructedError(t *testing.T) {
+	// The shape parseGeminiError produces: the upstream's own message, which
+	// can echo back a URL carrying the key.
+	upstreamEcho := &APIError{
+		Status:  http.StatusBadRequest,
+		Type:    ErrTypeInvalidRequest,
+		Code:    "provider_400",
+		Message: "gemini error (HTTP 400): API key not valid: https://provider.invalid/v1?key=" + liveKey,
+	}
+
+	w := httptest.NewRecorder()
+	WriteError(w, upstreamEcho)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusBadRequest)
+	}
+	if strings.Contains(w.Body.String(), liveKey) {
+		t.Errorf("the credential reached the response body:\n%s", w.Body.String())
+	}
+	// The diagnosis still has to survive.
+	if !strings.Contains(w.Body.String(), "API key not valid") {
+		t.Errorf("the upstream's message was lost:\n%s", w.Body.String())
 	}
 }

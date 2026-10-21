@@ -69,8 +69,9 @@ func New(id string, cfg config.ProviderConfig) (*Provider, error) {
 		apiKey:   cfg.APIKey,
 		vertexAI: vertexAI,
 		httpClient: &http.Client{
-			Transport: transport,
-			Timeout:   timeout,
+			Transport:     transport,
+			Timeout:       timeout,
+			CheckRedirect: keepCredentialInOrigin,
 		},
 		semaphore: make(chan struct{}, maxConcurrent),
 		headers:   cfg.Headers,
@@ -110,6 +111,33 @@ func (p *Provider) bearerToken() string {
 // sentToken is the access token a request carried, so a rejection invalidates only that token.
 func sentToken(req *http.Request) string {
 	return strings.TrimPrefix(req.Header.Get("Authorization"), "Bearer ")
+}
+
+// maxRedirects is what net/http's own default policy allows.
+const maxRedirects = 10
+
+// keepCredentialInOrigin decides what happens to this provider's credential
+// when the upstream redirects.
+//
+// Go carries a custom header through every redirect and only strips the ones
+// it knows, Authorization and Cookie among them. Putting the key in
+// x-goog-api-key therefore made it follow a redirect anywhere the upstream
+// pointed, including to plaintext. A downgrade is refused outright; a move to
+// another origin keeps going without the credential, so the request fails on
+// authentication rather than handing the key to whoever answered.
+func keepCredentialInOrigin(req *http.Request, via []*http.Request) error {
+	if len(via) >= maxRedirects {
+		return fmt.Errorf("stopped after %d redirects", maxRedirects)
+	}
+	prev := via[len(via)-1].URL
+	if prev.Scheme == "https" && req.URL.Scheme != "https" {
+		return fmt.Errorf("refusing a redirect from https to %s: it would send the provider credential in plaintext", req.URL.Scheme)
+	}
+	if req.URL.Scheme != prev.Scheme || req.URL.Host != prev.Host {
+		req.Header.Del("x-goog-api-key")
+		req.Header.Del("Authorization")
+	}
+	return nil
 }
 
 // setAPIKey puts this provider's credential on the request.

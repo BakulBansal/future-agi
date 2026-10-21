@@ -75,11 +75,15 @@ func isURLTerminator(b byte) bool {
 
 // redactURL rewrites one URL with its credentials removed.
 func redactURL(raw string) string {
-	trailing := ""
-	for len(raw) > 0 && strings.IndexByte(trailingPunctuation, raw[len(raw)-1]) >= 0 {
-		trailing = raw[len(raw)-1:] + trailing
-		raw = raw[:len(raw)-1]
+	// Find the boundary first, then slice once. Growing a string a byte at a
+	// time is quadratic, and the input is a caller's: a model name of
+	// "https://host/" followed by a hundred thousand brackets reaches here
+	// through an unknown-model error.
+	end := len(raw)
+	for end > 0 && strings.IndexByte(trailingPunctuation, raw[end-1]) >= 0 {
+		end--
 	}
+	raw, trailing := raw[:end], raw[end:]
 
 	u, err := url.Parse(raw)
 	if err != nil {

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/futureagi/agentcc-gateway/internal/config"
@@ -133,5 +134,71 @@ func TestCredential_IsAbsentFromAFailedCallsError(t *testing.T) {
 	}
 	if strings.Contains(apiErr.Error(), testKey) {
 		t.Fatalf("the key reached Error():\n%s", apiErr.Error())
+	}
+}
+
+// Go carries a custom header through every redirect, stripping only the ones
+// it knows. Moving the key into x-goog-api-key therefore made it follow the
+// upstream wherever it pointed.
+func TestCredential_IsNotForwardedAcrossARedirect(t *testing.T) {
+	var elsewhereSawKey atomic.Bool
+	elsewhere := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("x-goog-api-key") != "" {
+			elsewhereSawKey.Store(true)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"candidates":[{"content":{"parts":[{"text":"ok"}]},"finishReason":"STOP"}]}`))
+	}))
+	defer elsewhere.Close()
+
+	redirector := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, elsewhere.URL+r.URL.Path, http.StatusTemporaryRedirect)
+	}))
+	defer redirector.Close()
+
+	p, err := New("g", config.ProviderConfig{BaseURL: redirector.URL, APIKey: testKey})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	// The call may succeed or fail; what matters is where the key went.
+	p.ChatCompletion(context.Background(), &models.ChatCompletionRequest{
+		Model:    "gemini-3-flash-preview",
+		Messages: []models.Message{{Role: "user", Content: json.RawMessage(`"hi"`)}},
+	})
+
+	if elsewhereSawKey.Load() {
+		t.Error("the credential was forwarded to another origin across a redirect")
+	}
+}
+
+// A redirect from https to plaintext is refused rather than followed, so the
+// credential is never put on the wire in the clear.
+func TestCredential_HTTPSDowngradeRedirectIsRefused(t *testing.T) {
+	plain := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{}`))
+	}))
+	defer plain.Close()
+
+	tlsUpstream := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, plain.URL+r.URL.Path, http.StatusTemporaryRedirect)
+	}))
+	defer tlsUpstream.Close()
+
+	p, err := New("g", config.ProviderConfig{BaseURL: tlsUpstream.URL, APIKey: testKey, SkipTLS: true})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	_, callErr := p.ChatCompletion(context.Background(), &models.ChatCompletionRequest{
+		Model:    "gemini-3-flash-preview",
+		Messages: []models.Message{{Role: "user", Content: json.RawMessage(`"hi"`)}},
+	})
+	if callErr == nil {
+		t.Fatal("the downgrade redirect was followed")
+	}
+	var apiErr *models.APIError
+	if errorsAs(callErr, &apiErr) && strings.Contains(apiErr.Message, testKey) {
+		t.Errorf("the refusal message carries the credential: %s", apiErr.Message)
 	}
 }

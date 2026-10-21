@@ -102,10 +102,16 @@ func ErrGuardrailBlocked(code, message string) *APIError {
 }
 
 // WriteError writes an OpenAI-compatible error JSON response.
+//
+// The message is redacted here as well as at construction. Most of this
+// package's errors are built by the constructors above, but 78 sites build an
+// APIError directly — a provider parsing an upstream error body, for one — and
+// those never pass through newAPIError. Redacting at the boundary every
+// response leaves through needs no site to remember.
 func WriteError(w http.ResponseWriter, err *APIError) {
 	resp := ErrorResponse{
 		Error: ErrorDetail{
-			Message: err.Message,
+			Message: RedactCredentials(err.Message),
 			Type:    err.Type,
 			Code:    err.Code,
 			Param:   err.Param,
