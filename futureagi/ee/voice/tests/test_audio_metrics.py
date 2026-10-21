@@ -1,10 +1,12 @@
 """Regression tests for provider-independent audio metrics."""
 
 from io import BytesIO
+from math import gcd
 
 import numpy as np
 import pytest
 import soundfile as sf
+from scipy.signal import resample_poly
 
 from ee.voice.services.audio_metrics import analyze_audio
 
@@ -76,3 +78,28 @@ def test_short_audio_returns_missing_metrics_without_raising():
 
     assert result.average_pitch_hz is None
     assert result.estimated_snr_db is None
+
+
+@pytest.mark.parametrize("sample_rate", [8000, 16000, 48000, 192000])
+def test_equivalent_recordings_keep_pitch_and_snr_verdict(sample_rate):
+    source_rate = 48000
+    time = np.arange(source_rate) / source_rate
+    rng = np.random.default_rng(42)
+    samples = 0.3 * np.sin(2 * np.pi * 220 * time)
+    samples += rng.normal(0, 0.005, samples.shape)
+    samples[: source_rate // 4] = rng.normal(0, 0.005, source_rate // 4)
+    source_buffer = BytesIO()
+    sf.write(source_buffer, samples, source_rate, format="WAV")
+    reference = analyze_audio(source_buffer.getvalue())
+
+    divisor = gcd(source_rate, sample_rate)
+    converted = resample_poly(samples, sample_rate // divisor, source_rate // divisor)
+    buffer = BytesIO()
+    sf.write(buffer, converted, sample_rate, format="WAV")
+    result = analyze_audio(buffer.getvalue())
+
+    assert result.average_pitch_hz == pytest.approx(220, rel=0.05)
+    assert result.estimated_snr_db is not None
+    assert result.estimated_snr_db >= 6
+    # Downsampling changes noise bandwidth, so the estimate need not be identical.
+    assert result.estimated_snr_db == pytest.approx(reference.estimated_snr_db, abs=4)
