@@ -14,6 +14,7 @@ import (
 
 	"github.com/futureagi/agentcc-gateway/internal/config"
 	"github.com/futureagi/agentcc-gateway/internal/models"
+	"github.com/futureagi/agentcc-gateway/internal/providers/common"
 )
 
 const defaultAnthropicVersion = "2023-06-01"
@@ -122,7 +123,7 @@ func (p *Provider) ChatCompletion(ctx context.Context, req *models.ChatCompletio
 
 	resp, err := p.httpClient.Do(httpReq)
 	if err != nil {
-		if ctx.Err() != nil {
+		if common.TimedOut(ctx, err) {
 			return nil, models.ErrGatewayTimeout("anthropic: request timed out")
 		}
 		return nil, models.ErrUpstreamProvider(0, fmt.Sprintf("anthropic: request failed: %v", err))
@@ -185,7 +186,7 @@ func (p *Provider) StreamChatCompletion(ctx context.Context, req *models.ChatCom
 
 		resp, err := p.httpClient.Do(httpReq)
 		if err != nil {
-			if ctx.Err() != nil {
+			if common.TimedOut(ctx, err) {
 				errs <- models.ErrGatewayTimeout("anthropic: request timed out")
 				return
 			}
@@ -280,7 +281,7 @@ func (p *Provider) CreateAnthropicMessage(ctx context.Context, reqBody []byte, h
 
 	resp, err := p.httpClient.Do(httpReq)
 	if err != nil {
-		if ctx.Err() != nil {
+		if common.TimedOut(ctx, err) {
 			return nil, 0, models.ErrGatewayTimeout("anthropic request timed out")
 		}
 		return nil, 502, models.ErrUpstreamProvider(0, fmt.Sprintf("anthropic request failed: %v", err))
@@ -311,7 +312,7 @@ func (p *Provider) CountAnthropicTokens(ctx context.Context, reqBody []byte, hea
 
 	resp, err := p.httpClient.Do(httpReq)
 	if err != nil {
-		if ctx.Err() != nil {
+		if common.TimedOut(ctx, err) {
 			return nil, 0, models.ErrGatewayTimeout("anthropic count_tokens request timed out")
 		}
 		return nil, 502, models.ErrUpstreamProvider(0, fmt.Sprintf("anthropic count_tokens request failed: %v", err))
@@ -344,7 +345,7 @@ func (p *Provider) StreamAnthropicMessage(ctx context.Context, reqBody []byte, h
 	resp, err := p.httpClient.Do(httpReq)
 	if err != nil {
 		p.releaseSemaphore()
-		if ctx.Err() != nil {
+		if common.TimedOut(ctx, err) {
 			return nil, 0, models.ErrGatewayTimeout("streaming anthropic request timed out")
 		}
 		return nil, 502, models.ErrUpstreamProvider(0, fmt.Sprintf("streaming anthropic request failed: %v", err))

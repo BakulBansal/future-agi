@@ -14,6 +14,7 @@ import (
 
 	"github.com/futureagi/agentcc-gateway/internal/config"
 	"github.com/futureagi/agentcc-gateway/internal/models"
+	"github.com/futureagi/agentcc-gateway/internal/providers/common"
 )
 
 // Provider implements the Provider interface for the Cohere v2 Chat API.
@@ -110,7 +111,7 @@ func (p *Provider) ChatCompletion(ctx context.Context, req *models.ChatCompletio
 
 	resp, err := p.httpClient.Do(httpReq)
 	if err != nil {
-		if ctx.Err() != nil {
+		if common.TimedOut(ctx, err) {
 			return nil, models.ErrGatewayTimeout("cohere: request timed out")
 		}
 		return nil, models.ErrUpstreamProvider(0, fmt.Sprintf("cohere: request failed: %v", err))
@@ -170,7 +171,7 @@ func (p *Provider) StreamChatCompletion(ctx context.Context, req *models.ChatCom
 
 		resp, err := p.httpClient.Do(httpReq)
 		if err != nil {
-			if ctx.Err() != nil {
+			if common.TimedOut(ctx, err) {
 				errs <- models.ErrGatewayTimeout("cohere: request timed out")
 				return
 			}
@@ -270,7 +271,7 @@ func (p *Provider) CreateEmbedding(ctx context.Context, req *models.EmbeddingReq
 
 	resp, err := p.httpClient.Do(httpReq)
 	if err != nil {
-		if ctx.Err() != nil {
+		if common.TimedOut(ctx, err) {
 			return nil, models.ErrGatewayTimeout("cohere: embed request timed out")
 		}
 		return nil, models.ErrUpstreamProvider(0, fmt.Sprintf("cohere: embed request failed: %v", err))
@@ -317,7 +318,7 @@ func (p *Provider) Rerank(ctx context.Context, req *models.RerankRequest) (*mode
 
 	resp, err := p.httpClient.Do(httpReq)
 	if err != nil {
-		if ctx.Err() != nil {
+		if common.TimedOut(ctx, err) {
 			return nil, models.ErrGatewayTimeout("cohere: rerank request timed out")
 		}
 		return nil, models.ErrUpstreamProvider(0, fmt.Sprintf("cohere: rerank request failed: %v", err))

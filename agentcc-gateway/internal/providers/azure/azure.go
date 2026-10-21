@@ -16,6 +16,7 @@ import (
 
 	"github.com/futureagi/agentcc-gateway/internal/config"
 	"github.com/futureagi/agentcc-gateway/internal/models"
+	"github.com/futureagi/agentcc-gateway/internal/providers/common"
 )
 
 const (
@@ -189,7 +190,7 @@ func (p *Provider) ChatCompletion(ctx context.Context, req *models.ChatCompletio
 
 	resp, err := p.httpClient.Do(httpReq)
 	if err != nil {
-		if ctx.Err() != nil {
+		if common.TimedOut(ctx, err) {
 			return nil, models.ErrGatewayTimeout("provider request timed out")
 		}
 		return nil, models.ErrUpstreamProvider(0, fmt.Sprintf("provider request failed: %v", err))
@@ -252,7 +253,7 @@ func (p *Provider) StreamChatCompletion(ctx context.Context, req *models.ChatCom
 
 		resp, err := p.httpClient.Do(httpReq)
 		if err != nil {
-			if ctx.Err() != nil {
+			if common.TimedOut(ctx, err) {
 				errs <- models.ErrGatewayTimeout("provider request timed out")
 				return
 			}
@@ -364,7 +365,7 @@ func (p *Provider) CreateEmbedding(ctx context.Context, req *models.EmbeddingReq
 
 	resp, err := p.httpClient.Do(httpReq)
 	if err != nil {
-		if ctx.Err() != nil {
+		if common.TimedOut(ctx, err) {
 			return nil, models.ErrGatewayTimeout("embedding request timed out")
 		}
 		return nil, models.ErrUpstreamProvider(0, fmt.Sprintf("embedding request failed: %v", err))
@@ -413,7 +414,7 @@ func (p *Provider) CreateImage(ctx context.Context, req *models.ImageRequest) (*
 
 	resp, err := p.httpClient.Do(httpReq)
 	if err != nil {
-		if ctx.Err() != nil {
+		if common.TimedOut(ctx, err) {
 			return nil, models.ErrGatewayTimeout("image request timed out")
 		}
 		return nil, models.ErrUpstreamProvider(0, fmt.Sprintf("image request failed: %v", err))
@@ -465,7 +466,7 @@ func (p *Provider) CreateSpeech(ctx context.Context, req *models.SpeechRequest) 
 	resp, err := p.httpClient.Do(httpReq)
 	if err != nil {
 		p.releaseSemaphore()
-		if ctx.Err() != nil {
+		if common.TimedOut(ctx, err) {
 			return nil, "", models.ErrGatewayTimeout("speech request timed out")
 		}
 		return nil, "", models.ErrUpstreamProvider(0, fmt.Sprintf("speech request failed: %v", err))
@@ -564,7 +565,7 @@ func (p *Provider) CreateTranscription(ctx context.Context, req *models.Transcri
 
 	resp, err := p.httpClient.Do(httpReq)
 	if err != nil {
-		if ctx.Err() != nil {
+		if common.TimedOut(ctx, err) {
 			return nil, models.ErrGatewayTimeout("transcription request timed out")
 		}
 		return nil, models.ErrUpstreamProvider(0, fmt.Sprintf("transcription request failed: %v", err))
