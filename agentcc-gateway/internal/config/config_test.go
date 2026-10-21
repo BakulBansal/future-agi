@@ -582,14 +582,18 @@ model_database:
 		t.Fatalf("input_per_token = %v, want unset", *got)
 	}
 	out := logs.String()
-	// The value a missing space pulled into the key is dropped unless it is an
-	// environment stand-in: the warning cannot tell a price from a credential,
-	// and the key with its line number already finds the typo. A ${VAR} is
-	// kept, because it names the reference rather than its contents.
-	for _, key := range []string{"input_per_token:<value omitted>", "token:$AGENTCC_TEST_TOKEN"} {
+	// Every value a missing space pulled into a key is dropped, a ${VAR}
+	// stand-in included: a reference and a literal compose, so
+	// {token:${EMPTY_VAR}sk-live-...} would otherwise carry the secret whole.
+	// The key with its line number is what finds the typo.
+	for _, key := range []string{"input_per_token:<value omitted>", "token:<value omitted>"} {
 		if !strings.Contains(out, key) {
 			t.Errorf("log does not name the unread key %q:\n%s", key, out)
 		}
+	}
+	// The variable's value must never appear either way.
+	if strings.Contains(out, "do-not-log-me") {
+		t.Errorf("the environment variable's value reached the log:\n%s", out)
 	}
 	if strings.Contains(out, "do-not-log-me") {
 		t.Errorf("log carries the token's value:\n%s", out)
@@ -697,5 +701,44 @@ func TestWarnUnreadKeys_ReportsAnOrdinaryUnreadKey(t *testing.T) {
 
 	if out := logged.String(); !strings.Contains(out, "unknown_thing") {
 		t.Errorf("the unread key was not named:\n%s", out)
+	}
+}
+
+// A ${VAR} reference and a literal compose into one key. The stand-in made the
+// whole value look like a variable name, so keeping it published the literal
+// suffix in full.
+func TestWarnUnreadKeys_ComposedReferenceAndLiteral(t *testing.T) {
+	const secret = "sk-live-COMPOSED-SENTINEL-0123456789"
+
+	for _, tc := range []struct{ name, env, body string }{
+		{
+			name: "an empty reference followed by a literal",
+			env:  "",
+			body: "admin: { token:${AGENTCC_TEST_PREFIX}" + secret + " }\n",
+		},
+		{
+			name: "a set reference followed by a literal",
+			env:  "prefix-",
+			body: "admin: { token:${AGENTCC_TEST_PREFIX}" + secret + " }\n",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("AGENTCC_TEST_PREFIX", tc.env)
+
+			var logged strings.Builder
+			restore := slog.Default()
+			slog.SetDefault(slog.New(slog.NewTextHandler(&logged, &slog.HandlerOptions{Level: slog.LevelWarn})))
+			defer slog.SetDefault(restore)
+
+			warnUnreadKeys([]byte(tc.body))
+
+			out := logged.String()
+			if strings.Contains(out, secret) {
+				t.Fatalf("the literal credential reached the log:\n%s", out)
+			}
+			if !strings.Contains(out, "token") {
+				t.Errorf("the key is missing, so the operator cannot find the typo:\n%s", out)
+			}
+		})
 	}
 }

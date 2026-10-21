@@ -1133,11 +1133,14 @@ func warnUnreadKeys(data []byte) {
 // is exactly where a literal credential turns up, and the warning would
 // publish it to every log that reads the gateway's output.
 //
-// A value left by the ${VAR} stand-ins above is kept: it is the name of an
-// environment variable, never its contents, and naming it is what tells an
-// operator which reference they mistyped. Any other value is dropped, because
-// a diagnostic cannot tell a price from a key — and the key name with its line
-// number is already enough to find the typo.
+// Every colon-attached value is dropped, including one that begins with a
+// ${VAR} stand-in. Keeping those looked safe — a stand-in names a variable
+// rather than its contents — but a reference and a literal compose:
+// {token:${EMPTY_VAR}sk-live-...} expands to a key starting with "$" whose
+// remainder is the secret in full. Deciding which bytes after a colon are a
+// variable name and which are a credential is not a judgement a startup
+// diagnostic should be making, and the key name with its line number already
+// finds the typo.
 func withoutKeyValue(e string) string {
 	const prefix, suffix = "field ", " not found in type "
 	at := strings.Index(e, prefix)
@@ -1148,8 +1151,8 @@ func withoutKeyValue(e string) string {
 	if !found {
 		return e
 	}
-	key, value, split := strings.Cut(name, ":")
-	if !split || strings.HasPrefix(value, "$") {
+	key, _, split := strings.Cut(name, ":")
+	if !split {
 		return e
 	}
 	return e[:at+len(prefix)] + key + ":<value omitted>" + suffix + rest
