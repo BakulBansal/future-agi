@@ -174,6 +174,17 @@ func (p *Plugin) ProcessResponse(_ context.Context, rc *models.RequestContext) p
 	if !p.cfg.Enabled {
 		return pipeline.ResultContinue()
 	}
+
+	// A served cache hit carries the usage of the provider call that filled
+	// the cache, and no new tokens were spent. Charging it again exhausts the
+	// window on repeated identical requests and refuses the next real one.
+	//
+	// The flag is what to read, not the pipeline's SkipOnCacheHit interface:
+	// the engine only applies that to cache_status == "hit_exact", so a
+	// conditional or semantic hit would still be charged.
+	if rc.Flags.CacheHit {
+		return pipeline.ResultContinue()
+	}
 	keyID := rc.Metadata["auth_key_id"]
 	if keyID == "" {
 		keyID = "global"

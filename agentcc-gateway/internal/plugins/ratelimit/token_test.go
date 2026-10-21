@@ -210,3 +210,43 @@ func TestLimiter_TokenWindowIsSeparateFromTheRequestWindow(t *testing.T) {
 var _ TokenLimiter = (*RateLimiter)(nil)
 
 var _ pipeline.Plugin = (*Plugin)(nil)
+
+// A served cache hit spends no upstream tokens, so it must not be charged.
+// Charging it exhausts the window on repeated identical requests and then
+// refuses the next real one — a 429 for a budget that was never spent.
+func TestTokenLimit_ACacheHitIsNotCharged(t *testing.T) {
+	ks, keyID := newKeyStoreWithTokenLimit("sk-tpm-cache", 100)
+	p := New(config.RateLimitConfig{Enabled: true}, ks, NewRateLimiter())
+	defer p.limiter.Stop()
+
+	// A real provider call that costs 60 tokens.
+	first := newRequestContext(keyID)
+	defer first.Release()
+	if res := p.ProcessRequest(context.Background(), first); res.Error != nil {
+		t.Fatalf("first request refused: %v", res.Error)
+	}
+	answered(first, 40, 20)
+	p.ProcessResponse(context.Background(), first)
+
+	// The same request again, served from cache. Every hit kind must be free,
+	// not only the exact one the pipeline's skip interface covers.
+	for _, status := range []string{"hit_exact", "hit_conditional", "hit_semantic"} {
+		cached := newRequestContext(keyID)
+		if res := p.ProcessRequest(context.Background(), cached); res.Error != nil {
+			t.Fatalf("%s: a cached request was refused with 60 of 100 spent: %v", status, res.Error)
+		}
+		answered(cached, 40, 20) // the cached response still reports its usage
+		cached.Flags.CacheHit = true
+		cached.Metadata["cache_status"] = status
+		p.ProcessResponse(context.Background(), cached)
+		cached.Release()
+	}
+
+	// Only the one real call counts, so a new request still has budget.
+	next := newRequestContext(keyID)
+	defer next.Release()
+	if res := p.ProcessRequest(context.Background(), next); res.Error != nil {
+		t.Fatalf("a new request was refused after three free cache hits: %v", res.Error)
+	}
+	assertMetadata(t, next, "ratelimit_tokens_remaining", "40")
+}
