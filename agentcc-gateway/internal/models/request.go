@@ -261,9 +261,38 @@ func (t Tool) Capability() string {
 		return CanonicalCapability(t.Type)
 	}
 	if t.Function.Name != "" {
-		return CanonicalCapability(t.Function.Name)
+		// An application's own function name, exactly as written. Resolving it
+		// through the alias table would make a custom function called
+		// "codeExecution" the same identity as the built-in code_execution,
+		// and a policy naming either would then cover both.
+		return t.Function.Name
 	}
 	return CanonicalCapability(t.rawKey())
+}
+
+// NamesBuiltinCapability reports whether this entry asks for a tool the
+// provider runs itself, rather than an application function.
+//
+// Alias equivalence applies to those and only to those: two spellings of
+// google_search are one capability, while two spellings of a function name are
+// two different functions.
+func (t Tool) NamesBuiltinCapability() bool {
+	if t.IsFunction() {
+		return false
+	}
+	name := t.Type
+	if name == "" || name == "function" {
+		name = t.rawKey()
+	}
+	_, known := builtinCapabilityAliases[name]
+	return known
+}
+
+// IsBuiltinCapability reports whether a name is a recognized spelling of a
+// tool the provider runs itself.
+func IsBuiltinCapability(name string) bool {
+	_, known := builtinCapabilityAliases[name]
+	return known
 }
 
 // IsFunction reports whether the entry declares a plain function, which is

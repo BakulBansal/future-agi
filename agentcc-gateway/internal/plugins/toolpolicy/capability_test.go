@@ -228,3 +228,104 @@ func TestPolicy_AllowsACapabilityInEitherSpelling(t *testing.T) {
 		}
 	}
 }
+
+// Alias equivalence belongs to provider-executed tools and nowhere else. Two
+// spellings of google_search are one capability; two spellings of a function
+// name are two different functions, and an application may legitimately call
+// one of its own functions "codeExecution".
+func TestPolicy_AliasEquivalenceDoesNotReachCustomFunctions(t *testing.T) {
+	custom := func(name string) string {
+		return `[{"type":"function","function":{"name":"` + name + `"}}]`
+	}
+
+	tests := []struct {
+		name    string
+		allow   []string
+		deny    []string
+		tools   string
+		refused bool
+	}{
+		{
+			name:    "an allowlist for the built-in does not admit a custom function spelled the other way",
+			allow:   []string{"code_execution"},
+			tools:   custom("codeExecution"),
+			refused: true,
+		},
+		{
+			name:    "nor the other direction",
+			allow:   []string{"codeExecution"},
+			tools:   custom("code_execution"),
+			refused: true,
+		},
+		{
+			name:    "a denylist for the built-in does not block a custom function spelled the other way",
+			deny:    []string{"code_execution"},
+			tools:   custom("codeExecution"),
+			refused: false,
+		},
+		{
+			name:    "nor the other direction",
+			deny:    []string{"codeExecution"},
+			tools:   custom("code_execution"),
+			refused: false,
+		},
+		{
+			name:    "a custom function named exactly as configured is still matched",
+			deny:    []string{"codeExecution"},
+			tools:   custom("codeExecution"),
+			refused: true,
+		},
+		{
+			name:    "and an allowlist naming it exactly still admits it",
+			allow:   []string{"codeExecution"},
+			tools:   custom("codeExecution"),
+			refused: false,
+		},
+		{
+			name:    "the built-in itself is still denied under either spelling",
+			deny:    []string{"code_execution"},
+			tools:   `[{"codeExecution":{}}]`,
+			refused: true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			p := New(config.ToolPolicyConfig{
+				Enabled:       true,
+				DefaultAction: "reject",
+				Allow:         tc.allow,
+				Deny:          tc.deny,
+			}, nil)
+
+			rc := requestWithTools(t, tc.tools)
+			defer rc.Release()
+
+			res := p.ProcessRequest(context.Background(), rc)
+			if tc.refused && res.Error == nil {
+				t.Errorf("the request passed, want it refused")
+			}
+			if !tc.refused && res.Error != nil {
+				t.Errorf("the request was refused: %s", res.Error.Message)
+			}
+		})
+	}
+}
+
+// A custom function keeps the exact name the caller wrote, so the provider
+// receives what the application asked for.
+func TestToolCapability_KeepsACustomFunctionNameExactly(t *testing.T) {
+	for _, name := range []string{"codeExecution", "code_execution", "googleSearch", "get_weather"} {
+		t.Run(name, func(t *testing.T) {
+			rc := requestWithTools(t, `[{"type":"function","function":{"name":"`+name+`"}}]`)
+			defer rc.Release()
+			tool := rc.Request.Tools[0]
+			if got := tool.Capability(); got != name {
+				t.Errorf("Capability() = %q, want %q unchanged", got, name)
+			}
+			if tool.NamesBuiltinCapability() {
+				t.Error("a function was reported as a provider-executed capability")
+			}
+		})
+	}
+}
