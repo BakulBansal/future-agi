@@ -1593,7 +1593,7 @@ class TestRecordingSlotAvailability:
         assert ec.status == StatusType.FAILED.value
         call_execution.refresh_from_db()
         reason = call_execution.eval_outputs[str(ec.id)]["reason"]
-        assert "call.voice_recording" in reason  # actionable hint for the FE
+        assert "Available recordings: voice_recording" in reason
 
     @patch("simulate.services.test_executor.run_eval_func")
     def test_present_combined_recording_resolves_and_runs(
@@ -3186,8 +3186,20 @@ def test_a_call_whose_grader_could_not_be_started_does_not_hold_the_run(
 @pytest.mark.parametrize("runner", [_run, _run_xl])
 @pytest.mark.parametrize("source", ["voice_recording", "call.voice_recording"])
 def test_audio_signal_metrics_uses_agent_recording(
-    runner, source, run_test, call_execution, transcript_data, eval_template
+    runner,
+    source,
+    run_test,
+    call_execution,
+    transcript_data,
+    eval_template,
+    monkeypatch,
 ):
+    monkeypatch.setattr(
+        "simulate.services.test_executor.close_old_connections", lambda: None
+    )
+    monkeypatch.setattr(
+        "simulate.temporal.activities.xl.close_old_connections", lambda: None
+    )
     eval_template.name = "audio_signal_metrics"
     eval_template.owner = "system"
     eval_template.save()
@@ -3199,7 +3211,10 @@ def test_audio_signal_metrics_uses_agent_recording(
     )
     with patch(target, return_value=_SUCCESS_STUB) as evaluate:
         runner(ec, call_execution, transcript_data)
-    assert evaluate.call_args.kwargs["mappings"]["input_audio"] == transcript_data["assistant_recording"]
+    assert (
+        evaluate.call_args.kwargs["mappings"]["input_audio"]
+        == transcript_data["assistant_recording"]
+    )
     ec.refresh_from_db()
     assert ec.mapping == {"input_audio": source}
 
@@ -3207,8 +3222,14 @@ def test_audio_signal_metrics_uses_agent_recording(
 @pytest.mark.django_db
 @pytest.mark.parametrize("runner", [_run, _run_xl])
 def test_audio_signal_metrics_does_not_fall_back_to_combined_audio(
-    runner, run_test, call_execution, transcript_data, eval_template
+    runner, run_test, call_execution, transcript_data, eval_template, monkeypatch
 ):
+    monkeypatch.setattr(
+        "simulate.services.test_executor.close_old_connections", lambda: None
+    )
+    monkeypatch.setattr(
+        "simulate.temporal.activities.xl.close_old_connections", lambda: None
+    )
     eval_template.name = "audio_signal_metrics"
     eval_template.owner = "system"
     eval_template.save()
@@ -3226,19 +3247,35 @@ def test_audio_signal_metrics_does_not_fall_back_to_combined_audio(
     assert "Map it to call.voice_recording" not in str(error.value)
 
 
-@pytest.mark.parametrize("owner,name,source,expected", [
-    ("system", "audio_signal_metrics", "voice_recording", "assistant_recording"),
-    ("system", "audio_signal_metrics", "call.voice_recording", "assistant_recording"),
-    ("user", "audio_signal_metrics", "voice_recording", "voice_recording"),
-    ("system", "other_audio_eval", "voice_recording", "voice_recording"),
-    ("system", "audio_signal_metrics", "customer_recording", "customer_recording"),
-])
+@pytest.mark.parametrize(
+    "owner,name,source,expected",
+    [
+        ("system", "audio_signal_metrics", "voice_recording", "assistant_recording"),
+        (
+            "system",
+            "audio_signal_metrics",
+            "call.voice_recording",
+            "assistant_recording",
+        ),
+        ("user", "audio_signal_metrics", "voice_recording", "voice_recording"),
+        ("system", "other_audio_eval", "voice_recording", "voice_recording"),
+        ("system", "audio_signal_metrics", "customer_recording", "customer_recording"),
+    ],
+)
 def test_audio_signal_metrics_mapping_surfaces(owner, name, source, expected):
-    from simulate.services.harness_evals import eval_entry, regrade_mapping, resolve_eval_mapping
+    from simulate.services.harness_evals import (
+        eval_entry,
+        regrade_mapping,
+        resolve_eval_mapping,
+    )
 
-    template = SimpleNamespace(owner=owner, name=name, config={"required_keys": ["input_audio"]})
+    template = SimpleNamespace(
+        owner=owner, name=name, config={"required_keys": ["input_audio"]}
+    )
     mapping = {"input_audio": source}
-    assert regrade_mapping(SimpleNamespace(eval_template=template, mapping=mapping)) == {"input_audio": expected}
+    assert regrade_mapping(
+        SimpleNamespace(eval_template=template, mapping=mapping)
+    ) == {"input_audio": expected}
     assert mapping == {"input_audio": source}
     if source == "voice_recording":
         assert resolve_eval_mapping(template, "voice") == {"input_audio": expected}
@@ -3264,5 +3301,38 @@ def test_audio_signal_metrics_reads_hosted_agent_track(call_execution, assistant
     }
     executor = TestExecutor()
     executor.voice_service_manager = None
-    assert executor._get_call_transcript_data(call_execution, url_save_only=True)["assistant_recording"] == assistant_url
-    assert _build_transcript_data(call_execution)["assistant_recording"] == assistant_url
+    assert (
+        executor._get_call_transcript_data(call_execution, url_save_only=True)[
+            "assistant_recording"
+        ]
+        == assistant_url
+    )
+    assert (
+        _build_transcript_data(call_execution)["assistant_recording"] == assistant_url
+    )
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize(
+    "owner,expected", [("system", "assistant_recording"), ("user", "voice_recording")]
+)
+def test_audio_signal_metrics_saved_mapping_responses(
+    run_test, eval_template, organization, owner, expected
+):
+    from simulate.serializers.run_test import SimulateEvalConfigSimpleSerializer
+    from simulate.views.run_test import GetEvalConfigStructureView
+
+    eval_template.name = "audio_signal_metrics"
+    eval_template.owner = owner
+    eval_template.config = {"required_keys": ["input_audio"]}
+    eval_template.save()
+    ec = _make_eval({"input_audio": "voice_recording"}, run_test, eval_template)
+    data = SimulateEvalConfigSimpleSerializer(ec).data
+    assert data["mapping"] == {"input_audio": expected}
+    response = GetEvalConfigStructureView()._get_previously_configured_structure(
+        ec, organization
+    )
+    assert response.status_code == 200
+    assert response.data["result"]["eval"]["mapping"] == {"input_audio": expected}
+    ec.refresh_from_db()
+    assert ec.mapping == {"input_audio": "voice_recording"}

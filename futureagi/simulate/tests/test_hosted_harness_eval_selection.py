@@ -482,6 +482,7 @@ def test_every_table_source_has_a_label():
         assert missing == [], missing
     assert set(_LABEL_BY_SOURCE.values()) == {
         "Call recording",
+        "Agent recording",
         "Transcript",
         "Agent instructions",
         "Scenario situation",
