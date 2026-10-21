@@ -23,6 +23,8 @@ from simulate.models.agent_definition import ProviderCredentials
 from simulate.views import agent_definition as agent_definition_views
 from tracer.services import observability_switch
 from tracer.tests.test_observability_switch import (
+    _agent,
+    _agent_with_row,
     _created,
     _statements,
     _stored_agent,
@@ -1560,3 +1562,184 @@ class TestCreateAgentDefinitionObservability:
         assert "PROJECT CREATION LIMIT REACHED" in str(response.json())
         assert not AgentDefinition.no_workspace_objects.filter(agent_name=name).exists()
         assert _created() == created
+
+
+# ============================================================================
+# TestEditAgentDefinitionObservabilitySnapshot
+# ============================================================================
+
+
+@pytest.mark.integration
+@pytest.mark.api
+class TestEditAgentDefinitionObservabilitySnapshot:
+    """The edit view writes the switch's final state into the stored version copies."""
+
+    def _version(self, agent, organization, workspace, number, status_, snapshot):
+        return AgentVersion.objects.create(
+            agent_definition=agent,
+            organization=organization,
+            workspace=workspace,
+            version_number=number,
+            status=status_,
+            configuration_snapshot=snapshot,
+            commit_message="v",
+        )
+
+    def _stored(self, version):
+        return AgentVersion.objects.get(pk=version.pk).configuration_snapshot
+
+    def _put(self, auth_client, agent, payload):
+        return auth_client.put(
+            f"/simulate/agent-definitions/{agent.id}/edit/", payload, format="json"
+        )
+
+    def test_toggle_on_writes_the_active_versions_snapshot(
+        self, auth_client, organization, workspace
+    ):
+        agent = _agent(organization, workspace)
+        before = {
+            "agent_name": "x",
+            "description": "keep",
+            "observability_enabled": False,
+        }
+        v1 = self._version(
+            agent, organization, workspace, 1, AgentVersion.StatusChoices.ACTIVE, before
+        )
+
+        with seams(make_summary(agent_definition_id=agent.id)):
+            response = self._put(auth_client, agent, {"observability_enabled": True})
+
+        assert response.status_code == status.HTTP_200_OK
+        assert self._stored(v1) == {**before, "observability_enabled": True}
+
+    def test_toggle_off_writes_the_active_versions_snapshot(
+        self, auth_client, organization, workspace
+    ):
+        agent = _agent_with_row(organization, workspace, enabled=True)
+        before = {
+            "agent_name": "x",
+            "description": "keep",
+            "language": "en",
+            "observability_enabled": True,
+        }
+        v1 = self._version(
+            agent, organization, workspace, 1, AgentVersion.StatusChoices.ACTIVE, before
+        )
+
+        response = self._put(auth_client, agent, {"observability_enabled": False})
+
+        assert response.status_code == status.HTTP_200_OK
+        assert self._stored(v1) == {**before, "observability_enabled": False}
+
+    def test_edit_without_the_field_leaves_switch_and_snapshot(
+        self, auth_client, organization, workspace
+    ):
+        agent = _agent_with_row(organization, workspace, enabled=True)
+        before = {"agent_name": "x", "observability_enabled": False}
+        v1 = self._version(
+            agent, organization, workspace, 1, AgentVersion.StatusChoices.ACTIVE, before
+        )
+
+        with patch.object(
+            agent_definition_views, "set_agent_observability"
+        ) as switch_call:
+            response = self._put(auth_client, agent, {"description": "Edited"})
+
+        assert response.status_code == status.HTTP_200_OK
+        switch_call.assert_not_called()
+        assert self._stored(v1) == before
+        assert _stored_agent(agent).observability_provider.enabled is True
+
+    def test_active_and_latest_versions_are_written(
+        self, auth_client, organization, workspace
+    ):
+        choices = AgentVersion.StatusChoices
+        off = {"agent_name": "x", "observability_enabled": False}
+
+        # The active version is older than the newest one.
+        agent = _agent(organization, workspace)
+        v1 = self._version(agent, organization, workspace, 1, choices.ARCHIVED, off)
+        v2 = self._version(agent, organization, workspace, 2, choices.ACTIVE, off)
+        v3 = self._version(agent, organization, workspace, 3, choices.ARCHIVED, off)
+        with seams(make_summary(agent_definition_id=agent.id)):
+            response = self._put(auth_client, agent, {"observability_enabled": True})
+        assert response.status_code == status.HTTP_200_OK
+        assert self._stored(v2) == {**off, "observability_enabled": True}
+        assert self._stored(v3) == {**off, "observability_enabled": True}
+        assert self._stored(v1) == off
+
+        # No active version: the newest one is written.
+        drafts = _agent(organization, workspace)
+        d1 = self._version(drafts, organization, workspace, 1, choices.DRAFT, off)
+        d2 = self._version(drafts, organization, workspace, 2, choices.DRAFT, off)
+        with seams(make_summary(agent_definition_id=drafts.id)):
+            response = self._put(auth_client, drafts, {"observability_enabled": True})
+        assert response.status_code == status.HTTP_200_OK
+        assert self._stored(d2) == {**off, "observability_enabled": True}
+        assert self._stored(d1) == off
+
+        # Active and newest are the same version.
+        single = _agent(organization, workspace)
+        s1 = self._version(single, organization, workspace, 1, choices.ACTIVE, off)
+        with seams(make_summary(agent_definition_id=single.id)):
+            response = self._put(auth_client, single, {"observability_enabled": True})
+        assert response.status_code == status.HTTP_200_OK
+        assert self._stored(s1) == {**off, "observability_enabled": True}
+
+    def test_refused_turn_on_writes_nothing(self, auth_client, organization, workspace):
+        agent = _agent(organization, workspace)
+        before = {"agent_name": "x", "observability_enabled": False}
+        v1 = self._version(
+            agent, organization, workspace, 1, AgentVersion.StatusChoices.ACTIVE, before
+        )
+
+        with seams(make_summary(missing=("credential", "provider_agent_id"))):
+            response = self._put(auth_client, agent, {"observability_enabled": True})
+
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert self._stored(v1) == before
+
+    def test_form_save_after_the_toggle_keeps_the_switch_on(
+        self, auth_client, organization, workspace
+    ):
+        agent = _agent(organization, workspace)
+        v1 = self._version(
+            agent,
+            organization,
+            workspace,
+            1,
+            AgentVersion.StatusChoices.ACTIVE,
+            {"agent_name": "x", "observability_enabled": False},
+        )
+
+        with seams(make_summary(agent_definition_id=agent.id)):
+            toggled = self._put(auth_client, agent, {"observability_enabled": True})
+            assert toggled.status_code == status.HTTP_200_OK
+
+            # What the config form fills itself from, then what it sends back.
+            detail = auth_client.get(
+                f"/simulate/agent-definitions/{agent.id}/versions/{v1.id}/"
+            )
+            assert detail.status_code == status.HTTP_200_OK
+            shown = detail.json()["configuration_snapshot"]["observability_enabled"]
+            saved = auth_client.post(
+                f"/simulate/agent-definitions/{agent.id}/versions/create/",
+                {
+                    "commit_message": "form",
+                    "description": "unrelated",
+                    "observability_enabled": shown,
+                },
+                format="json",
+            )
+
+        assert shown is True
+        assert saved.status_code == status.HTTP_201_CREATED
+        row = _stored_agent(agent).observability_provider
+        assert row.enabled is True
+        newest = (
+            AgentVersion.objects.filter(agent_definition=agent)
+            .order_by("-version_number")
+            .first()
+        )
+        assert newest.pk != v1.pk
+        assert newest.configuration_snapshot["observability_enabled"] is True
