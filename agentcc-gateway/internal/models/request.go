@@ -1,6 +1,9 @@
 package models
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"slices"
+)
 
 // ChatCompletionRequest represents an OpenAI-compatible chat completion request.
 type ChatCompletionRequest struct {
@@ -173,6 +176,73 @@ func (t *Tool) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
+// builtinCapabilityAliases maps every spelling of a provider-executed tool to
+// the one name it is known by.
+//
+// The Google SDKs write these in camelCase and the OpenAI-compatible clients
+// in snake_case, and a provider treats both as the same capability. So a
+// policy must too: with only the supplied spelling to go on, deny:
+// [code_execution] let {"codeExecution":{}} straight through to the upstream.
+var builtinCapabilityAliases = map[string]string{
+	"google_search":           "google_search",
+	"googleSearch":            "google_search",
+	"google_search_retrieval": "google_search_retrieval",
+	"googleSearchRetrieval":   "google_search_retrieval",
+	"url_context":             "url_context",
+	"urlContext":              "url_context",
+	"code_execution":          "code_execution",
+	"codeExecution":           "code_execution",
+}
+
+// CanonicalCapability returns the one name a built-in capability is known by.
+//
+// Every side of an authorization decision must call this: the identity read
+// off a request, and each entry of an allow or deny list an operator wrote.
+// Normalizing one side alone leaves the other spelling unmatched, which is a
+// bypass rather than a cosmetic inconsistency. A name it does not recognize —
+// an ordinary function, a server tool belonging to another provider — is
+// returned unchanged, so function-name semantics are untouched.
+func CanonicalCapability(name string) string {
+	if canonical, ok := builtinCapabilityAliases[name]; ok {
+		return canonical
+	}
+	return name
+}
+
+// CapabilitySpellings returns every name a capability is written as, its
+// canonical one first.
+//
+// For a matcher that takes glob patterns rather than exact names, canonicalizing
+// alone is not enough: an operator who denied "*Execution" would stop matching
+// once the name became code_execution. Testing each spelling keeps a pattern
+// written either way working, and a denylist fails closed on any of them.
+func CapabilitySpellings(name string) []string {
+	canonical := CanonicalCapability(name)
+	spellings := []string{canonical}
+	for spelling, c := range builtinCapabilityAliases {
+		if c == canonical && spelling != canonical {
+			spellings = append(spellings, spelling)
+		}
+	}
+	if name != canonical {
+		// The name as supplied, when it is not one of the known aliases.
+		if !slices.Contains(spellings, name) {
+			spellings = append(spellings, name)
+		}
+	}
+	return spellings
+}
+
+// CanonicalCapabilities normalizes a policy list in place of the caller
+// writing the loop.
+func CanonicalCapabilities(names []string) []string {
+	out := make([]string, 0, len(names))
+	for _, name := range names {
+		out = append(out, CanonicalCapability(name))
+	}
+	return out
+}
+
 // Capability reports the one thing a tools entry asks the provider to do: the
 // function it declares, or the provider-executed tool it names.
 //
@@ -188,12 +258,12 @@ func (t *Tool) UnmarshalJSON(data []byte) error {
 // forwards. ContradictsItsType reports the entry that declares both.
 func (t Tool) Capability() string {
 	if t.Type != "" && t.Type != "function" {
-		return t.Type
+		return CanonicalCapability(t.Type)
 	}
 	if t.Function.Name != "" {
-		return t.Function.Name
+		return CanonicalCapability(t.Function.Name)
 	}
-	return t.rawKey()
+	return CanonicalCapability(t.rawKey())
 }
 
 // IsFunction reports whether the entry declares a plain function, which is

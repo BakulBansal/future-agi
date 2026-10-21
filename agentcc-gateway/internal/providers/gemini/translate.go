@@ -152,15 +152,14 @@ type geminiToolDeclarations struct {
 // entry to the field Gemini expects. Both spellings are accepted: the Google
 // SDKs use camelCase and the OpenAI-compatible clients use snake_case, and a
 // caller moving between them should not have to care.
+// Keyed by the canonical name models.Tool.Capability returns, so the spelling
+// a caller used is already resolved before this is consulted — and the policy
+// that approved the request resolved it the same way.
 var geminiServerTools = map[string]func(*geminiToolDeclarations, json.RawMessage){
 	"google_search":           func(d *geminiToolDeclarations, v json.RawMessage) { d.GoogleSearch = v },
-	"googleSearch":            func(d *geminiToolDeclarations, v json.RawMessage) { d.GoogleSearch = v },
 	"google_search_retrieval": func(d *geminiToolDeclarations, v json.RawMessage) { d.GoogleSearchRetrieval = v },
-	"googleSearchRetrieval":   func(d *geminiToolDeclarations, v json.RawMessage) { d.GoogleSearchRetrieval = v },
 	"url_context":             func(d *geminiToolDeclarations, v json.RawMessage) { d.URLContext = v },
-	"urlContext":              func(d *geminiToolDeclarations, v json.RawMessage) { d.URLContext = v },
 	"code_execution":          func(d *geminiToolDeclarations, v json.RawMessage) { d.CodeExecution = v },
-	"codeExecution":           func(d *geminiToolDeclarations, v json.RawMessage) { d.CodeExecution = v },
 }
 
 // emptyToolConfig is what a tool named by type alone carries: the caller asked
@@ -181,8 +180,12 @@ func serverTool(tool models.Tool) (key string, config json.RawMessage, ok bool) 
 	if len(tool.Raw) > 0 {
 		var fields map[string]json.RawMessage
 		if json.Unmarshal(tool.Raw, &fields) == nil {
-			if v, carried := fields[key]; carried {
-				config = v
+			// The caller wrote one spelling; key is the canonical one.
+			for field, v := range fields {
+				if models.CanonicalCapability(field) == key {
+					config = v
+					break
+				}
 			}
 		}
 	}

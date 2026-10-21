@@ -3,6 +3,7 @@ package toolpolicy
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"testing"
 
@@ -133,7 +134,7 @@ func TestToolCapability_IsTheForwardedIdentity(t *testing.T) {
 		{`[{"type":"function","function":{"name":"get_weather"}}]`, "get_weather"},
 		{`[{"function":{"name":"get_weather"}}]`, "get_weather"},
 		{`[{"google_search":{}}]`, "google_search"},
-		{`[{"googleSearch":{}}]`, "googleSearch"},
+		{`[{"googleSearch":{}}]`, "google_search"}, // canonicalized: one identity per capability
 		{`[{"type":"code_execution"}]`, "code_execution"},
 		{`[{"type":"web_search_20250305","max_uses":5}]`, "web_search_20250305"},
 		{`[{"type":"code_execution","function":{"name":"get_weather"}}]`, "code_execution"},
@@ -147,5 +148,83 @@ func TestToolCapability_IsTheForwardedIdentity(t *testing.T) {
 				t.Errorf("Capability() = %q, want %q", got, tc.want)
 			}
 		})
+	}
+}
+
+// A built-in capability has two accepted spellings and a provider treats them
+// as one. A policy must too: with only the supplied spelling to go on,
+// deny: [code_execution] let {"codeExecution":{}} through to the upstream.
+func TestPolicy_DeniesACapabilityInEitherSpelling(t *testing.T) {
+	pairs := [][2]string{
+		{"google_search", "googleSearch"},
+		{"google_search_retrieval", "googleSearchRetrieval"},
+		{"url_context", "urlContext"},
+		{"code_execution", "codeExecution"},
+	}
+
+	for _, pair := range pairs {
+		for _, configured := range pair {
+			for _, requested := range pair {
+				for _, shape := range []string{"bare", "typed"} {
+					for _, action := range []string{"reject", "strip"} {
+						name := fmt.Sprintf("deny %s / send %s / %s / %s", configured, requested, shape, action)
+						t.Run(name, func(t *testing.T) {
+							tools := `[{"` + requested + `":{}}]`
+							if shape == "typed" {
+								tools = `[{"type":"` + requested + `"}]`
+							}
+
+							p := New(config.ToolPolicyConfig{
+								Enabled:       true,
+								DefaultAction: action,
+								Deny:          []string{configured},
+							}, nil)
+
+							rc := requestWithTools(t, tools)
+							defer rc.Release()
+
+							res := p.ProcessRequest(context.Background(), rc)
+
+							if action == "reject" {
+								if res.Error == nil {
+									t.Fatalf("the denied capability passed the policy")
+								}
+								return
+							}
+							// strip: the entry must not survive to the provider.
+							if res.Error != nil {
+								return
+							}
+							if len(rc.Request.Tools) != 0 {
+								t.Errorf("the denied capability survived stripping: %d tools left", len(rc.Request.Tools))
+							}
+						})
+					}
+				}
+			}
+		}
+	}
+}
+
+// An allowlist naming one spelling admits the other, since they are the same
+// capability.
+func TestPolicy_AllowsACapabilityInEitherSpelling(t *testing.T) {
+	for _, configured := range []string{"code_execution", "codeExecution"} {
+		for _, requested := range []string{"code_execution", "codeExecution"} {
+			t.Run(configured+"/"+requested, func(t *testing.T) {
+				p := New(config.ToolPolicyConfig{
+					Enabled:       true,
+					DefaultAction: "reject",
+					Allow:         []string{configured},
+				}, nil)
+
+				rc := requestWithTools(t, `[{"`+requested+`":{}}]`)
+				defer rc.Release()
+
+				if res := p.ProcessRequest(context.Background(), rc); res.Error != nil {
+					t.Fatalf("an allowed capability was refused: %s", res.Error.Message)
+				}
+			})
+		}
 	}
 }

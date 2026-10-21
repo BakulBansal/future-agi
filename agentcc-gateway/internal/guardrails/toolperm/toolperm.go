@@ -13,6 +13,22 @@ import (
 	"github.com/futureagi/agentcc-gateway/internal/models"
 )
 
+// matchesCapability reports whether a pattern covers this tool under any
+// spelling of the same built-in capability.
+//
+// The patterns are globs, so canonicalizing the name alone would stop a
+// pattern written in the other spelling from matching — "*Execution" would
+// miss code_execution. Testing every spelling keeps a pattern written either
+// way working, and leaves a denylist failing closed.
+func (g *ToolPermGuardrail) matchesCapability(name string) bool {
+	for _, spelling := range models.CapabilitySpellings(name) {
+		if g.matchesAny(spelling) {
+			return true
+		}
+	}
+	return false
+}
+
 // ToolPermGuardrail enforces tool permission policies.
 type ToolPermGuardrail struct {
 	name     string
@@ -54,7 +70,7 @@ func New(name string, cfg map[string]interface{}) *ToolPermGuardrail {
 	return g
 }
 
-func (g *ToolPermGuardrail) Name() string           { return g.name }
+func (g *ToolPermGuardrail) Name() string            { return g.name }
 func (g *ToolPermGuardrail) Stage() guardrails.Stage { return guardrails.StagePre }
 
 // IsToolPermConfig returns true if the config specifies a tool permission guardrail.
@@ -77,7 +93,11 @@ func (g *ToolPermGuardrail) Check(ctx context.Context, input *guardrails.CheckIn
 	// Collect tool names from request (pre-stage).
 	if (g.applyTo == "request" || g.applyTo == "both") && input.Request != nil {
 		for _, tool := range input.Request.Tools {
-			toolNames = append(toolNames, tool.Function.Name)
+			// The capability the provider will forward, not the function name
+			// beside it. An entry naming one capability in its type and another
+			// in its function passed a denylist for the first and was sent
+			// anyway, and a bare {"google_search":{}} names no function at all.
+			toolNames = append(toolNames, tool.Capability())
 		}
 	}
 
@@ -95,13 +115,13 @@ func (g *ToolPermGuardrail) Check(ctx context.Context, input *guardrails.CheckIn
 	switch g.mode {
 	case "allowlist":
 		for _, name := range toolNames {
-			if !g.matchesAny(name) {
+			if !g.matchesCapability(name) {
 				violations = append(violations, name)
 			}
 		}
 	case "denylist":
 		for _, name := range toolNames {
-			if g.matchesAny(name) {
+			if g.matchesCapability(name) {
 				violations = append(violations, name)
 			}
 		}
@@ -109,7 +129,7 @@ func (g *ToolPermGuardrail) Check(ctx context.Context, input *guardrails.CheckIn
 		// In audit mode, flag matches but always pass.
 		var matched []string
 		for _, name := range toolNames {
-			if g.matchesAny(name) {
+			if g.matchesCapability(name) {
 				matched = append(matched, name)
 			}
 		}

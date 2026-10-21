@@ -36,10 +36,12 @@ func New(cfg config.ToolPolicyConfig, tenantStore *tenant.Store) *Plugin {
 	if p.defaultAction == "" {
 		p.defaultAction = "strip"
 	}
-	for _, name := range cfg.Allow {
+	// Every list is canonicalized, and so is the identity read off a request.
+	// Normalizing one side alone leaves the other spelling unmatched.
+	for _, name := range models.CanonicalCapabilities(cfg.Allow) {
 		p.allow[name] = true
 	}
-	for _, name := range cfg.Deny {
+	for _, name := range models.CanonicalCapabilities(cfg.Deny) {
 		p.deny[name] = true
 	}
 	return p
@@ -74,13 +76,13 @@ func (p *Plugin) ProcessRequest(ctx context.Context, rc *models.RequestContext) 
 				if len(orgCfg.ToolPolicy.Allow) > 0 {
 					orgAllow = make(map[string]bool, len(orgCfg.ToolPolicy.Allow))
 					for _, name := range orgCfg.ToolPolicy.Allow {
-						orgAllow[name] = true
+						orgAllow[models.CanonicalCapability(name)] = true
 					}
 				}
 				if len(orgCfg.ToolPolicy.Deny) > 0 {
 					orgDeny = make(map[string]bool, len(orgCfg.ToolPolicy.Deny))
 					for _, name := range orgCfg.ToolPolicy.Deny {
-						orgDeny[name] = true
+						orgDeny[models.CanonicalCapability(name)] = true
 					}
 				}
 			}
@@ -222,7 +224,7 @@ func parseCSV(s string) map[string]bool {
 	m := make(map[string]bool, len(parts))
 	for _, p := range parts {
 		if t := strings.TrimSpace(p); t != "" {
-			m[t] = true
+			m[models.CanonicalCapability(t)] = true
 		}
 	}
 	return m
