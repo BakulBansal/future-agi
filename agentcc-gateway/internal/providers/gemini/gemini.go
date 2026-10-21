@@ -127,6 +127,10 @@ func (p *Provider) releaseSemaphore() {
 
 // ChatCompletion sends a non-streaming request to Gemini.
 func (p *Provider) ChatCompletion(ctx context.Context, req *models.ChatCompletionRequest) (*models.ChatCompletionResponse, error) {
+	if err := RejectUnsupportedTools(req.Tools); err != nil {
+		return nil, err
+	}
+
 	if err := p.acquireSemaphore(ctx); err != nil {
 		return nil, models.ErrGatewayTimeout("gemini: concurrency limit reached")
 	}
@@ -196,6 +200,11 @@ func (p *Provider) StreamChatCompletion(ctx context.Context, req *models.ChatCom
 	go func() {
 		defer close(chunks)
 		defer close(errs)
+
+		if err := RejectUnsupportedTools(req.Tools); err != nil {
+			errs <- err
+			return
+		}
 
 		if err := p.acquireSemaphore(ctx); err != nil {
 			errs <- models.ErrGatewayTimeout("gemini: concurrency limit reached")

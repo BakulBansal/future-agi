@@ -161,7 +161,13 @@ func (t *Tool) UnmarshalJSON(data []byte) error {
 		return err
 	}
 	*t = Tool(a)
-	if t.Type != "" && t.Type != "function" {
+	// Keep the caller's bytes for anything that is not a plain function tool.
+	// A declared non-function type is one such entry. So is an entry that
+	// names no function at all: Gemini's provider-executed tools are written
+	// as a bare {"google_search": {}}, with no type to declare, and without
+	// its own bytes an entry like that reaches the provider as an empty
+	// function and is dropped.
+	if (t.Type != "" && t.Type != "function") || t.Function.Name == "" {
 		t.Raw = append(json.RawMessage(nil), data...)
 	}
 	return nil
