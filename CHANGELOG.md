@@ -1,5 +1,29 @@
 # Changelog
 
+## [1.53.0](https://github.com/future-agi/future-agi/compare/v1.52.0...v1.53.0) (2026-10-21)
+
+
+### Features
+
+* **simulate:** agent layer and voice observability, phase 1, into main (TH-7957) ([ffa6fd2](https://github.com/future-agi/future-agi/commit/ffa6fd21cd11b98cce7f30610197c02709854940))
+
+
+### Bug Fixes
+
+* **fi-collector:** give the default project config dev's target_type field (TH-7957) ([528c88b](https://github.com/future-agi/future-agi/commit/528c88b8ae63504bd213aa1aead1044bcff4496a))
+* **gateway:** answer 504 on a provider timeout, and keep the error writable ([f904189](https://github.com/future-agi/future-agi/commit/f904189b52d5a51e22c2afb616aa9e3e380174b5))
+* **gateway:** enforce the token rate limit instead of only accepting it ([d872f7b](https://github.com/future-agi/future-agi/commit/d872f7bd2d0c2e79c568937a4833262fc8acd04d))
+* **gateway:** judge every redirect hop against the configured origin ([06554b1](https://github.com/future-agi/future-agi/commit/06554b1e7e23cbddfdf227c0b51d624ad1ab330f))
+* **gateway:** keep the Gemini API key out of URLs and error messages ([635f0ad](https://github.com/future-agi/future-agi/commit/635f0ad51e3c4c6ee69235c286a467017f31f25e))
+* **gateway:** send a routing alias's model_override upstream; warn on unread config keys ([e9190c5](https://github.com/future-agi/future-agi/commit/e9190c5b24a446d94a22d2d2d845883f21cf152a))
+* **gateway:** stop dropping caller tools and provider response fields ([d727ba0](https://github.com/future-agi/future-agi/commit/d727ba018a865888bd72a6c17ed40df67620d6e9))
+* **gateway:** timeout classification, credential handling and token limits ([e9e0d3a](https://github.com/future-agi/future-agi/commit/e9e0d3a137600950c1791edeb3496b67f9cf8e48))
+* **simulate:** the observability toggle also updates the version copies the config form reads (TH-8683) ([d0cb2d7](https://github.com/future-agi/future-agi/commit/d0cb2d77224704a7b98a11b18f6a25c3b780fc1d))
+* **simulate:** the observability toggle also updates the version copies the config form reads (TH-8683) ([728a068](https://github.com/future-agi/future-agi/commit/728a06878c8ac19b767aabe14ed56fe2359b8929))
+* **tests:** bring the branch's tests in line with dev (TH-7957) ([4bf61b5](https://github.com/future-agi/future-agi/commit/4bf61b58329bf5b7ccebfcb8245eda0b3528f15b))
+* **tests:** the gateway's fake job carries dev's environment link (TH-7957) ([1560164](https://github.com/future-agi/future-agi/commit/15601644a6347a9d9710f24698b5fa5fdd65589c))
+* **tests:** two more gateway fakes return dev's plain simulator config (TH-7957) ([ac97da7](https://github.com/future-agi/future-agi/commit/ac97da7847c7fadf5eba3b48b1a48ab8dc708e11))
+
 ## [1.52.0](https://github.com/future-agi/future-agi/compare/v1.51.0...v1.52.0) (2026-10-19)
 
 
