@@ -582,7 +582,11 @@ model_database:
 		t.Fatalf("input_per_token = %v, want unset", *got)
 	}
 	out := logs.String()
-	for _, key := range []string{"input_per_token:1e-07", "token:$AGENTCC_TEST_TOKEN"} {
+	// The value a missing space pulled into the key is dropped unless it is an
+	// environment stand-in: the warning cannot tell a price from a credential,
+	// and the key with its line number already finds the typo. A ${VAR} is
+	// kept, because it names the reference rather than its contents.
+	for _, key := range []string{"input_per_token:<value omitted>", "token:$AGENTCC_TEST_TOKEN"} {
 		if !strings.Contains(out, key) {
 			t.Errorf("log does not name the unread key %q:\n%s", key, out)
 		}
@@ -634,5 +638,64 @@ func TestLoadFromEnv_DurationWithoutAUnitKeepsTheConfiguredValue(t *testing.T) {
 				t.Errorf("default_request_timeout = %v, want %v", cfg.Server.DefaultRequestTimeout, tt.want)
 			}
 		})
+	}
+}
+
+// The typo this warning exists to catch is what pulls a value into a key name,
+// so the error text is exactly where a literal credential turns up. The ${VAR}
+// stand-ins cover a credential referenced from the environment; this covers one
+// written into the file.
+func TestWarnUnreadKeys_DoesNotLogALiteralCredential(t *testing.T) {
+	const secret = "sk-live-FAKE-SENTINEL-0123456789"
+
+	tests := []struct {
+		name string
+		body string
+		key  string // the key name an operator needs in order to find the typo
+	}{
+		{
+			name: "a provider api_key in a flow mapping",
+			body: "providers:\n  demo: {api_key:" + secret + ", api_format: openai}\n",
+			key:  "api_key",
+		},
+		{
+			name: "an admin token in a flow mapping",
+			body: "admin: {token:" + secret + "}\n",
+			key:  "token",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var logged strings.Builder
+			restore := slog.Default()
+			slog.SetDefault(slog.New(slog.NewTextHandler(&logged, &slog.HandlerOptions{Level: slog.LevelWarn})))
+			defer slog.SetDefault(restore)
+
+			warnUnreadKeys([]byte(tc.body))
+
+			out := logged.String()
+			if strings.Contains(out, secret) {
+				t.Fatalf("the credential reached the log:\n%s", out)
+			}
+			if !strings.Contains(out, tc.key) {
+				t.Errorf("the key %q is missing, so the operator cannot find the typo:\n%s", tc.key, out)
+			}
+		})
+	}
+}
+
+// An ordinary unread key is still reported in full: it carries no value, and
+// the whole point of the warning is to name it.
+func TestWarnUnreadKeys_ReportsAnOrdinaryUnreadKey(t *testing.T) {
+	var logged strings.Builder
+	restore := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logged, &slog.HandlerOptions{Level: slog.LevelWarn})))
+	defer slog.SetDefault(restore)
+
+	warnUnreadKeys([]byte("server:\n  unknown_thing: 5\n"))
+
+	if out := logged.String(); !strings.Contains(out, "unknown_thing") {
+		t.Errorf("the unread key was not named:\n%s", out)
 	}
 }

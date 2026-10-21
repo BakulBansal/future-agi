@@ -1116,12 +1116,43 @@ func warnUnreadKeys(data []byte) {
 	var unread []string
 	for _, e := range typeErr.Errors {
 		if strings.Contains(e, "not found in type") {
-			unread = append(unread, e)
+			unread = append(unread, withoutKeyValue(e))
 		}
 	}
 	if len(unread) > 0 {
 		slog.Warn("config: keys the gateway does not read were ignored", "keys", unread)
 	}
+}
+
+// withoutKeyValue removes a literal value that a missing space pulled into a
+// key name.
+//
+// The typo this warning exists to catch is what makes one. In a flow mapping,
+// {api_key:sk-live-...} is a single key named "api_key:sk-live-...", and the
+// decoder repeats it whole; the same holds for {token:...}. So the error text
+// is exactly where a literal credential turns up, and the warning would
+// publish it to every log that reads the gateway's output.
+//
+// A value left by the ${VAR} stand-ins above is kept: it is the name of an
+// environment variable, never its contents, and naming it is what tells an
+// operator which reference they mistyped. Any other value is dropped, because
+// a diagnostic cannot tell a price from a key — and the key name with its line
+// number is already enough to find the typo.
+func withoutKeyValue(e string) string {
+	const prefix, suffix = "field ", " not found in type "
+	at := strings.Index(e, prefix)
+	if at < 0 {
+		return e
+	}
+	name, rest, found := strings.Cut(e[at+len(prefix):], suffix)
+	if !found {
+		return e
+	}
+	key, value, split := strings.Cut(name, ":")
+	if !split || strings.HasPrefix(value, "$") {
+		return e
+	}
+	return e[:at+len(prefix)] + key + ":<value omitted>" + suffix + rest
 }
 
 // authKeyConfigured reports whether an auth key with the given raw value is
