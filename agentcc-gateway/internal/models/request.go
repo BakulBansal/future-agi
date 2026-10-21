@@ -173,6 +173,63 @@ func (t *Tool) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
+// Capability reports the one thing a tools entry asks the provider to do: the
+// function it declares, or the provider-executed tool it names.
+//
+// Policy and provider must read a tool's identity from here, and only from
+// here. They used to disagree: the tool-policy plugin read Function.Name while
+// a provider chose what to forward from Type, so an entry declaring
+// {"type": "code_execution", "function": {"name": "get_weather"}} passed a
+// policy that allowed get_weather and then forwarded code_execution. An entry
+// written as a bare {"google_search": {}} names no function at all, so a
+// policy denying google_search never matched it.
+//
+// A declared type that is not "function" wins, because that is what a provider
+// forwards. ContradictsItsType reports the entry that declares both.
+func (t Tool) Capability() string {
+	if t.Type != "" && t.Type != "function" {
+		return t.Type
+	}
+	if t.Function.Name != "" {
+		return t.Function.Name
+	}
+	return t.rawKey()
+}
+
+// IsFunction reports whether the entry declares a plain function, which is
+// the one shape the canonical struct describes in full.
+func (t Tool) IsFunction() bool {
+	return (t.Type == "function" || t.Type == "") && t.Function.Name != ""
+}
+
+// rawKey reads the capability out of an entry that names it as its only key,
+// which is how Gemini's own tools are written.
+func (t Tool) rawKey() string {
+	if len(t.Raw) == 0 {
+		return ""
+	}
+	var fields map[string]json.RawMessage
+	if json.Unmarshal(t.Raw, &fields) != nil {
+		return ""
+	}
+	// A single-key object names its capability. More than one key, and there
+	// is nothing to pick, so the entry has no identity to enforce against.
+	if len(fields) != 1 {
+		return ""
+	}
+	for name := range fields {
+		return name
+	}
+	return ""
+}
+
+// ContradictsItsType reports an entry that declares a non-function capability
+// and a function name at the same time. Such an entry asks for two different
+// things, and whichever one a reader picks, the other is silently ignored.
+func (t Tool) ContradictsItsType() bool {
+	return t.Type != "" && t.Type != "function" && t.Function.Name != ""
+}
+
 // MarshalJSON replays those bytes, so a server tool survives the round trip
 // through the canonical struct on every provider path.
 func (t Tool) MarshalJSON() ([]byte, error) {

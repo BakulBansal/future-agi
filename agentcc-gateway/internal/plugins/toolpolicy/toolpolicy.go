@@ -120,7 +120,21 @@ func (p *Plugin) ProcessRequest(ctx context.Context, rc *models.RequestContext) 
 	// Filter tools: global deny → org deny → per-key deny → global allow → org allow → per-key allow.
 	filtered := make([]models.Tool, 0, len(rc.Request.Tools))
 	for _, tool := range rc.Request.Tools {
-		name := tool.Function.Name
+		// An entry that declares a non-function type and a function name asks
+		// for two things at once. Enforcing either one would leave the other
+		// unchecked, so it is refused rather than resolved.
+		if tool.ContradictsItsType() {
+			return pipeline.ResultError(models.ErrBadRequest(
+				"contradictory_tool",
+				fmt.Sprintf("tool declares type %q and function %q; a tools entry may name only one capability",
+					tool.Type, tool.Function.Name),
+			))
+		}
+
+		// The capability the provider will actually forward. Reading
+		// Function.Name here instead let a policy approve one capability while
+		// the provider sent another.
+		name := tool.Capability()
 
 		// Check global deny list first (highest precedence).
 		if p.enabled && p.deny[name] {

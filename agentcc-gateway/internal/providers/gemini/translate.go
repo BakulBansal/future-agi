@@ -167,45 +167,26 @@ var geminiServerTools = map[string]func(*geminiToolDeclarations, json.RawMessage
 // for the tool and configured nothing.
 var emptyToolConfig = json.RawMessage(`{}`)
 
-// serverTool reads a provider-executed tool out of one tools entry and reports
-// the key it was written under. Two shapes reach us: Gemini's own
-// {"google_search": {}}, and the OpenAI convention of naming it in type.
+// serverTool reads a provider-executed tool out of one tools entry.
+//
+// The entry's identity comes from models.Tool.Capability, the same answer the
+// tool-policy plugin enforces against. Deriving it here instead is how a
+// policy came to approve one capability while this forwarded another.
 func serverTool(tool models.Tool) (key string, config json.RawMessage, ok bool) {
-	if _, named := geminiServerTools[tool.Type]; named {
-		config = emptyToolConfig
-		if len(tool.Raw) > 0 {
-			var fields map[string]json.RawMessage
-			if json.Unmarshal(tool.Raw, &fields) == nil {
-				if v, carried := fields[tool.Type]; carried {
-					config = v
-				}
+	key = tool.Capability()
+	if _, named := geminiServerTools[key]; !named {
+		return "", nil, false
+	}
+	config = emptyToolConfig
+	if len(tool.Raw) > 0 {
+		var fields map[string]json.RawMessage
+		if json.Unmarshal(tool.Raw, &fields) == nil {
+			if v, carried := fields[key]; carried {
+				config = v
 			}
 		}
-		return tool.Type, config, true
 	}
-	if len(tool.Raw) == 0 {
-		return "", nil, false
-	}
-	var fields map[string]json.RawMessage
-	if err := json.Unmarshal(tool.Raw, &fields); err != nil {
-		return "", nil, false
-	}
-	for name, v := range fields {
-		if _, named := geminiServerTools[name]; named {
-			return name, v, true
-		}
-	}
-	return "", nil, false
-}
-
-// isFunctionTool reports whether a tools entry declares a plain function.
-//
-// A declared type other than "function" is taken at its word, even when the
-// entry also names a function. OpenAI's older assistants types do that —
-// {"type": "retrieval", "function": {"name": "..."}} — and declaring one to
-// the model as callable would have it call a function nobody implements.
-func isFunctionTool(tool models.Tool) bool {
-	return (tool.Type == "function" || tool.Type == "") && tool.Function.Name != ""
+	return key, config, true
 }
 
 // UnsupportedToolError names a tool entry this provider cannot serve.
@@ -258,7 +239,7 @@ func RejectUnsupportedTools(tools []models.Tool) *models.APIError {
 	var unsupported []models.Tool
 	served := 0
 	for _, tool := range tools {
-		if isFunctionTool(tool) {
+		if tool.IsFunction() {
 			served++
 			continue
 		}
@@ -515,7 +496,7 @@ func translateRequest(req *models.ChatCompletionRequest) (*geminiRequest, string
 		var decls []geminiFuncDecl
 		var serverTools []geminiToolDeclarations
 		for _, t := range req.Tools {
-			if isFunctionTool(t) {
+			if t.IsFunction() {
 				decls = append(decls, geminiFuncDecl{
 					Name:                 t.Function.Name,
 					Description:          t.Function.Description,
