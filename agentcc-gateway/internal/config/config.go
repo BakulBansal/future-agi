@@ -327,8 +327,10 @@ type ServerConfig struct {
 
 	// MaxRequestTimeout is the longest a request may run, whatever a client
 	// asks for in x-agentcc-timeout or a per-model timeout states. Unset, it
-	// becomes WriteTimeout: the response write fails there regardless, so a
-	// larger ceiling would be one the gateway cannot honour.
+	// becomes WriteTimeout, which is the bound a request used to get anyway.
+	// It may be set above WriteTimeout: the middleware holds the response
+	// write deadline at this ceiling, so WriteTimeout no longer decides when
+	// a request the gateway resolved a deadline for can still answer.
 	MaxRequestTimeout time.Duration `yaml:"max_request_timeout" json:"max_request_timeout"`
 }
 
@@ -1063,16 +1065,11 @@ func Load(path string) (*Config, error) {
 		cfg.ControlPlane.AdminToken = cfg.Admin.Token
 	}
 
-	// The response write fails at write_timeout, so a ceiling above it is one
-	// the gateway cannot keep. Unset, it is that value; above it, it becomes
-	// that value and the operator hears why.
-	switch {
-	case cfg.Server.MaxRequestTimeout <= 0:
-		cfg.Server.MaxRequestTimeout = cfg.Server.WriteTimeout
-	case cfg.Server.MaxRequestTimeout > cfg.Server.WriteTimeout:
-		slog.Warn("server.max_request_timeout is above server.write_timeout and was lowered to it",
-			"max_request_timeout", cfg.Server.MaxRequestTimeout.String(),
-			"write_timeout", cfg.Server.WriteTimeout.String())
+	// Unset, the ceiling is write_timeout, the bound a request got anyway. A
+	// ceiling above it is kept: middleware.Timeout holds the response write
+	// deadline at the ceiling, so write_timeout is a default for a client that
+	// reads slowly, not a limit on how long a request may take.
+	if cfg.Server.MaxRequestTimeout <= 0 {
 		cfg.Server.MaxRequestTimeout = cfg.Server.WriteTimeout
 	}
 
@@ -1237,8 +1234,8 @@ func (c *Config) Validate() error {
 	if c.Server.DefaultRequestTimeout <= 0 {
 		return fmt.Errorf("server.default_request_timeout must be positive")
 	}
-	// Load lowers the ceiling to write_timeout, so a default above it here is
-	// a request the gateway could never serve, not something to normalize.
+	// A default above the ceiling is a request the gateway would clamp on every
+	// call, so it is a configuration mistake rather than something to normalize.
 	if c.Server.MaxRequestTimeout > 0 && c.Server.MaxRequestTimeout < c.Server.DefaultRequestTimeout {
 		return fmt.Errorf("server.default_request_timeout (%s) is above the ceiling server.max_request_timeout (%s)",
 			c.Server.DefaultRequestTimeout, c.Server.MaxRequestTimeout)
