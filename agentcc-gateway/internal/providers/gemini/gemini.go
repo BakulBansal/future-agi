@@ -112,6 +112,25 @@ func sentToken(req *http.Request) string {
 	return strings.TrimPrefix(req.Header.Get("Authorization"), "Bearer ")
 }
 
+// setAPIKey puts this provider's credential on the request.
+//
+// The key goes in a header, never in the URL. A failed call surfaces as a
+// *url.Error carrying the whole URL, and that error reaches the client's 502
+// body and the request log — so a key in the query string is a key published
+// to anyone who can read either. The native pass-through path has always used
+// this header; everything else used to append ?key= and leak it.
+func (p *Provider) setAPIKey(req *http.Request) {
+	if p.vertexAI {
+		if tok := p.bearerToken(); tok != "" {
+			req.Header.Set("Authorization", "Bearer "+tok)
+		}
+		return
+	}
+	if p.apiKey != "" {
+		req.Header.Set("x-goog-api-key", p.apiKey)
+	}
+}
+
 func (p *Provider) acquireSemaphore(ctx context.Context) error {
 	select {
 	case p.semaphore <- struct{}{}:
@@ -140,9 +159,6 @@ func (p *Provider) ChatCompletion(ctx context.Context, req *models.ChatCompletio
 	}
 
 	url := buildURL(p.baseURL, model, false)
-	if !p.vertexAI && p.apiKey != "" {
-		url += "?key=" + p.apiKey
-	}
 
 	httpReq, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(body))
 	if err != nil {
@@ -150,11 +166,7 @@ func (p *Provider) ChatCompletion(ctx context.Context, req *models.ChatCompletio
 	}
 
 	httpReq.Header.Set("Content-Type", "application/json")
-	if p.vertexAI {
-		if tok := p.bearerToken(); tok != "" {
-			httpReq.Header.Set("Authorization", "Bearer "+tok)
-		}
-	}
+	p.setAPIKey(httpReq)
 	for k, v := range p.headers {
 		httpReq.Header.Set(k, v)
 	}
@@ -212,10 +224,6 @@ func (p *Provider) StreamChatCompletion(ctx context.Context, req *models.ChatCom
 		}
 
 		url := buildURL(p.baseURL, model, true)
-		if !p.vertexAI && p.apiKey != "" {
-			// streamGenerateContent already has ?alt=sse, append key.
-			url += "&key=" + p.apiKey
-		}
 
 		upstreamCtx, cancelUpstream := context.WithCancel(ctx)
 		defer cancelUpstream()
@@ -227,11 +235,7 @@ func (p *Provider) StreamChatCompletion(ctx context.Context, req *models.ChatCom
 
 		httpReq.Header.Set("Content-Type", "application/json")
 		httpReq.Header.Set("Accept", "text/event-stream")
-		if p.vertexAI {
-			if tok := p.bearerToken(); tok != "" {
-				httpReq.Header.Set("Authorization", "Bearer "+tok)
-			}
-		}
+		p.setAPIKey(httpReq)
 		for k, v := range p.headers {
 			httpReq.Header.Set(k, v)
 		}

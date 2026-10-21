@@ -1,0 +1,137 @@
+package gemini
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+
+	"github.com/futureagi/agentcc-gateway/internal/config"
+	"github.com/futureagi/agentcc-gateway/internal/models"
+)
+
+func errorsAs(err error, target **models.APIError) bool { return errors.As(err, target) }
+
+const testKey = "AIzaSyD-ThisIsTheShapeOfARealGoogleKey_123456"
+
+// seenRequest records how a request reached the upstream.
+type seenRequest struct {
+	rawQuery string
+	fullURL  string
+	header   string
+}
+
+// callWith runs one call against a recording server and reports what the
+// upstream saw.
+func callWith(t *testing.T, call func(p *Provider) error) seenRequest {
+	t.Helper()
+	var seen seenRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seen.rawQuery = r.URL.RawQuery
+		seen.fullURL = r.URL.String()
+		seen.header = r.Header.Get("x-goog-api-key")
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"candidates":[{"content":{"parts":[{"text":"ok"}]},"finishReason":"STOP"}],"embeddings":[{"values":[0.1]}]}`))
+	}))
+	defer server.Close()
+
+	p, err := New("g", config.ProviderConfig{BaseURL: server.URL, APIKey: testKey})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	if err := call(p); err != nil {
+		t.Fatalf("call: %v", err)
+	}
+	return seen
+}
+
+// The key must travel in a header. In the URL it ends up in every *url.Error,
+// and from there in the caller's 502 body and the request log.
+func TestCredential_TravelsInAHeaderNotTheURL(t *testing.T) {
+	chat := &models.ChatCompletionRequest{
+		Model:    "gemini-3-flash-preview",
+		Messages: []models.Message{{Role: "user", Content: json.RawMessage(`"hi"`)}},
+	}
+
+	tests := []struct {
+		name string
+		call func(p *Provider) error
+	}{
+		{"chat completion", func(p *Provider) error {
+			_, err := p.ChatCompletion(context.Background(), chat)
+			return err
+		}},
+		{"streaming chat completion", func(p *Provider) error {
+			chunks, errs := p.StreamChatCompletion(context.Background(), chat)
+			for {
+				select {
+				case _, ok := <-chunks:
+					if !ok {
+						return nil
+					}
+				case err := <-errs:
+					return err
+				}
+			}
+		}},
+		{"embedding", func(p *Provider) error {
+			_, err := p.CreateEmbedding(context.Background(), &models.EmbeddingRequest{
+				Model: "text-embedding-004", Input: json.RawMessage(`"hi"`),
+			})
+			return err
+		}},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			seen := callWith(t, tc.call)
+
+			if strings.Contains(seen.fullURL, testKey) {
+				t.Errorf("the key was in the URL: %s", seen.fullURL)
+			}
+			if strings.Contains(seen.rawQuery, "key=") {
+				t.Errorf("a key query parameter was sent: %s", seen.rawQuery)
+			}
+			if seen.header != testKey {
+				t.Errorf("x-goog-api-key = %q, want the configured key", seen.header)
+			}
+		})
+	}
+}
+
+// The reported failure: when the call cannot complete, the error reaches the
+// caller and the request log. It must carry no credential.
+func TestCredential_IsAbsentFromAFailedCallsError(t *testing.T) {
+	// A server that is closed at once, so the call fails at the network level
+	// and Go builds a *url.Error carrying the whole URL.
+	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	url := server.URL
+	server.Close()
+
+	p, err := New("g", config.ProviderConfig{BaseURL: url, APIKey: testKey})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	_, callErr := p.ChatCompletion(context.Background(), &models.ChatCompletionRequest{
+		Model:    "gemini-3-flash-preview",
+		Messages: []models.Message{{Role: "user", Content: json.RawMessage(`"hi"`)}},
+	})
+	if callErr == nil {
+		t.Fatal("the call succeeded against a closed server")
+	}
+
+	var apiErr *models.APIError
+	if !errorsAs(callErr, &apiErr) {
+		t.Fatalf("error %v is not an *models.APIError", callErr)
+	}
+	if strings.Contains(apiErr.Message, testKey) {
+		t.Fatalf("the key reached the error message:\n%s", apiErr.Message)
+	}
+	if strings.Contains(apiErr.Error(), testKey) {
+		t.Fatalf("the key reached Error():\n%s", apiErr.Error())
+	}
+}
