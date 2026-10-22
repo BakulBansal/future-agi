@@ -3,6 +3,7 @@
 from unittest import mock
 
 import pytest
+from clickhouse_connect.driver.query import QueryResult
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
@@ -158,7 +159,10 @@ def _http_client():
     http_client = mock.Mock(
         spec=["query", "command", "query_row_block_stream", "timeout"]
     )
-    http_client.query = mock.Mock(return_value=mock.Mock(result_rows=[(1,)]))
+    # Built like the HTTP client does: rows materialize from column blocks.
+    http_client.query = mock.Mock(
+        return_value=QueryResult(block_gen=iter([[[1, 2]]]), column_names=("x",))
+    )
     http_client.command = mock.Mock(return_value="OK")
     stream = mock.MagicMock()
     stream.__enter__.return_value = iter([[(1,)], [(2,)]])
@@ -173,13 +177,15 @@ def _http_client():
 def test_http_application_client_query_produces_span(exporter):
     client = _http_client()
 
-    client.query("SELECT 1", parameters={})
+    result = client.query("SELECT 1", parameters={})
 
     client.query.__wrapped__.assert_called_once_with("SELECT 1", parameters={})
+    assert result.result_rows == [(1,), (2,)]
     (span,) = exporter.get_finished_spans()
     assert span.name == "clickhouse.select"
     assert span.kind is SpanKind.CLIENT
     assert span.attributes["db.system"] == "clickhouse"
+    assert span.attributes["db.rows_returned"] == 2
 
 
 @pytest.mark.unit

@@ -533,6 +533,9 @@ def _record_clickhouse_result(span: Any, result: Any, kwargs: dict) -> None:
         span.set_attribute("db.rows_affected", result)
     elif hasattr(result, "__len__") and not isinstance(result, str):
         span.set_attribute("db.rows_returned", len(result))
+    elif isinstance(getattr(result, "row_count", None), int):
+        # clickhouse-connect QueryResult exposes row_count, not __len__.
+        span.set_attribute("db.rows_returned", result.row_count)
 
 
 def _record_clickhouse_error(span: Any, error: Exception) -> None:
