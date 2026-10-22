@@ -59,8 +59,7 @@ function redirectTarget(route) {
 const SIMULATE = "/dashboard/simulate";
 
 const HIDDEN_SIMULATE_URLS = [
-  // Agent Definition
-  `${SIMULATE}/agent-definitions`,
+  // Agent Definition (its list link opens Connected agents for every org)
   `${SIMULATE}/agent-definitions/create-new-agent-definition`,
   `${SIMULATE}/agent-definitions/agent-1`,
   // Scenarios
@@ -110,6 +109,7 @@ const ALWAYS_REDIRECTED = [
   [`${SIMULATE}/harness/job-1/old`, `${SIMULATE}/environments`],
   [`${SIMULATE}/simulator-agent`, `${SIMULATE}/environments`],
   [`${SIMULATE}/personas`, `${SIMULATE}/environments?tab=personas`],
+  [`${SIMULATE}/agent-definitions`, "/dashboard/agents/connected"],
 ];
 
 describe("Simulate routes for an org restricted to Environments", () => {
@@ -151,5 +151,18 @@ describe.each([
   it("an old harness job link opens that environment", () => {
     const route = leafRoute(user, `${SIMULATE}/harness/job-1`);
     expect(route.element.type).toBe(HarnessToEnvironment);
+  });
+});
+
+describe("old Agent Definition link", () => {
+  it("opens Connected agents, and keeps the old agent pages under it", () => {
+    const [dashboardRoute] = dashboardRoutes(null, null, { isCloud: true });
+    const simulate = findChildRoute(dashboardRoute, "simulate");
+    const list = findChildRoute(simulate, "agent-definitions");
+    expect(list.element.props.to).toBe("/dashboard/agents/connected");
+    expect(list.element.props.replace).toBe(true);
+    expect(
+      findChildRoute(simulate, "agent-definitions/:agentDefinitionId"),
+    ).toBeTruthy();
   });
 });

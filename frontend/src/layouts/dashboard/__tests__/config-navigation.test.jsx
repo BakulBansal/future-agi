@@ -1,4 +1,5 @@
 import { renderHook } from "@testing-library/react";
+import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useNavData } from "../config-navigation";
@@ -14,7 +15,7 @@ vi.mock("src/contexts/WorkspaceContext", () => ({
 }));
 
 function simulateTitles() {
-  const { result } = renderHook(() => useNavData());
+  const { result } = renderHook(() => useNavData(), { wrapper: MemoryRouter });
   const section = result.current.find((s) => s.subheader === "Simulate");
   return section.items.map((item) => item.title);
 }
@@ -35,7 +36,6 @@ describe("Simulate menu", () => {
       authState.user.restrict_simulate_to_environments = flag;
       expect(simulateTitles()).toEqual([
         "Environment",
-        "Agent Definition",
         "Scenarios",
         "Run Simulation",
       ]);

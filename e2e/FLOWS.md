@@ -1814,7 +1814,7 @@
 ### SIM-E2E-001 — Simulate opens on Environments and an org from before the cutoff keeps every page
 
 **Goal:** A developer opening Simulate lands on Environments, old Harness, Simulator Agent, Personas and template links go somewhere sensible, Personas opens as a tab on Environments, and an org from before the cutoff still reaches every other Simulate page (the restricted side for new orgs is not claimed: the harness cannot create an org dated after a cutoff)  
-**Spec:** `flows/simulate/environments-only-routing.spec.ts:42`  
+**Spec:** `flows/simulate/environments-only-routing.spec.ts:41`  
 **Tags:** —
 
 **User steps:**
@@ -1826,7 +1826,8 @@
 5. open the Personas tab
 6. open the Prebuilt template links
 7. read the Simulate menu
-8. open Agent Definition, Scenarios and Run Simulation from the menu
+8. open the old Agent Definition link
+9. open Scenarios and Run Simulation from the menu
 
 **Backend state verified:**
 
@@ -1840,5 +1841,6 @@
 - personas lands on the Environments Personas tab
 - the Personas tab is selected and shows the persona search
 - both template URLs stay on their URL and open their page by title
-- the Simulate menu is exactly Environment, Agent Definition, Scenarios, Run Simulation
-- each of those three items opens its page by URL and title, never /404
+- agent-definitions lands on Connected agents
+- the Simulate menu is exactly Environment, Scenarios, Run Simulation
+- each of those two items opens its page by URL and title, never /404

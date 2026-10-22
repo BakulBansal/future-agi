@@ -8,7 +8,7 @@ const UI_READY = 60_000;
 const SIMULATE = '/dashboard/simulate';
 const ENVIRONMENTS = `${SIMULATE}/environments`;
 
-// Pinned off the pages' <Helmet> titles: AgentDefinitions.jsx, Scenarios.jsx,
+// Pinned off the pages' <Helmet> titles: Scenarios.jsx,
 // RunTests.jsx, and environments/PrebuiltEnvironments.jsx and
 // environments/UseTemplate.jsx for the templates.
 
@@ -21,11 +21,10 @@ const TEMPLATE_PAGES = [
 
 // The Simulate menu for an org created before the cutoff, in order
 // (frontend/src/layouts/dashboard/config-navigation.jsx, Simulate section).
-const SIMULATE_MENU = ['Environment', 'Agent Definition', 'Scenarios', 'Run Simulation'];
+const SIMULATE_MENU = ['Environment', 'Scenarios', 'Run Simulation'];
 
 // Each non-Environment menu item and the page it must open.
 const LEGACY_PAGES = [
-  { item: 'Agent Definition', path: `${SIMULATE}/agent-definitions`, title: 'Agent Definitions' },
   { item: 'Scenarios', path: `${SIMULATE}/scenarios`, title: 'Scenarios' },
   { item: 'Run Simulation', path: `${SIMULATE}/test`, title: 'Run Tests | Dashboard' },
 ];
@@ -50,7 +49,7 @@ test('SIM-E2E-001: Simulate opens on Environments and an org from before the cut
     steps: ['open /dashboard/simulate', 'open the old Harness list, new and job links',
             'open the old Simulator Agent link', 'open the old Personas link', 'open the Personas tab',
             'open the Prebuilt template links', 'read the Simulate menu',
-            'open Agent Definition, Scenarios and Run Simulation from the menu'],
+            'open the old Agent Definition link', 'open Scenarios and Run Simulation from the menu'],
     backendChecks: ["user-info for the actor's org does not report restrict_simulate_to_environments: true "
                     + '(false, or absent on a backend from before the flag)'],
     browserChecks: ['/dashboard/simulate lands on Environments',
@@ -59,8 +58,9 @@ test('SIM-E2E-001: Simulate opens on Environments and an org from before the cut
                     'personas lands on the Environments Personas tab',
                     'the Personas tab is selected and shows the persona search',
                     'both template URLs stay on their URL and open their page by title',
-                    'the Simulate menu is exactly Environment, Agent Definition, Scenarios, Run Simulation',
-                    'each of those three items opens its page by URL and title, never /404'],
+                    'agent-definitions lands on Connected agents',
+                    'the Simulate menu is exactly Environment, Scenarios, Run Simulation',
+                    'each of those two items opens its page by URL and title, never /404'],
   }),
 }, async ({ page, actor }, testInfo) => {
   // 13 browser actions, each its own UI_READY step: 13 × 60s = 780s, plus
@@ -90,6 +90,7 @@ test('SIM-E2E-001: Simulate opens on Environments and an org from before the cut
     [`${SIMULATE}/harness/${jobId}`, `${ENVIRONMENTS}/${jobId}`],
     [`${SIMULATE}/simulator-agent`, ENVIRONMENTS],
     [`${SIMULATE}/personas`, `${ENVIRONMENTS}?tab=personas`],
+    [`${SIMULATE}/agent-definitions`, '/dashboard/agents/connected'],
   ];
   for (const [from, to] of redirects) {
     await test.step(`ui: ${from} lands on ${to}`, async () => {
