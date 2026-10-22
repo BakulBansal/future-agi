@@ -42,3 +42,25 @@ describe("Simulate menu", () => {
     },
   );
 });
+
+describe("Agents menu item", () => {
+  beforeEach(() => {
+    authState.user = { organization_role: "Owner" };
+  });
+
+  it.each([
+    "/dashboard/agents/connected",
+    "/dashboard/agents/playground",
+    "/dashboard/agents/playground/abc/build",
+  ])("opens Connected agents from %s", (url) => {
+    const { result } = renderHook(() => useNavData(), {
+      wrapper: ({ children }) => (
+        <MemoryRouter initialEntries={[url]}>{children}</MemoryRouter>
+      ),
+    });
+    const agents = result.current
+      .flatMap((section) => section.items)
+      .find((item) => item.title === "Agents");
+    expect(agents.path).toBe("/dashboard/agents/connected");
+  });
+});

@@ -6,8 +6,7 @@ import {
   useWorkspacesList,
 } from "src/api/workspaces/list";
 import { paths } from "src/routes/paths";
-import { agentsSidebarPath } from "src/sections/agent-playground/agentsTabs";
-import { usePathname } from "src/routes/hooks";
+import { CONNECTED_AGENTS_PATH } from "src/sections/agent-playground/agentsTabs";
 import { HELP_LINK } from "src/config-global";
 import SvgColor from "src/components/svg-color";
 import Iconify from "src/components/iconify";
@@ -72,7 +71,6 @@ export function useNavData() {
     userOrgRole === "Admin" || effectiveWsRole === "workspace_admin";
   // Orgs created after the cutoff see only Environments in Simulate.
   const restrictSimulateToEnvironments = useRestrictSimulateToEnvironments();
-  const agentsPath = agentsSidebarPath(usePathname());
   const data = useMemo(() => {
     const buildItems = [
       {
@@ -97,7 +95,7 @@ export function useNavData() {
       },
       {
         title: "Agents",
-        path: agentsPath,
+        path: CONNECTED_AGENTS_PATH,
         activePath: paths.dashboard.agents,
         icon: ICONS.agents,
         // eventTrigger: () => {
@@ -271,7 +269,7 @@ export function useNavData() {
     });
 
     return sections;
-  }, [isOwner, isAdmin, agentsPath, restrictSimulateToEnvironments]);
+  }, [isOwner, isAdmin, restrictSimulateToEnvironments]);
   return data;
 }
 

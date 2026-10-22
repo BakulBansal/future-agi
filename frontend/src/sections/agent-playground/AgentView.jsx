@@ -1,4 +1,3 @@
-import PropTypes from "prop-types";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import React, { useEffect } from "react";
 import { useNavigate } from "react-router";
@@ -14,7 +13,7 @@ import {
 } from "./store";
 import { useCreateGraph } from "../../api/agent-playground/agent-playground";
 
-export default function AgentView({ embedded = false }) {
+export default function AgentView() {
   const { data, isLoading } = useQuery({
     queryKey: ["agent-playground", "graphs", { page: 1 }],
     queryFn: () =>
@@ -33,10 +32,8 @@ export default function AgentView({ embedded = false }) {
 
   if (isLoading) return null;
 
-  return hasData ? <AgentListView embedded={embedded} /> : <AgentEmptyState />;
+  return hasData ? <AgentListView /> : <AgentEmptyState />;
 }
-
-AgentView.propTypes = { embedded: PropTypes.bool };
 
 function AgentEmptyState() {
   const navigate = useNavigate();

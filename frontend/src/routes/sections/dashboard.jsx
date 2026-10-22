@@ -468,8 +468,8 @@ const AgentsIndexRedirect = lazyWithRetry(
 const ConnectedAgentsTab = lazyWithRetry(
   () => import("src/sections/agent-playground/ConnectedAgentsTab"),
 );
-const PlaygroundAgentsTab = lazyWithRetry(
-  () => import("src/sections/agent-playground/PlaygroundAgentsTab"),
+const PlaygroundAgentsPage = lazyWithRetry(
+  () => import("src/sections/agent-playground/PlaygroundAgentsPage"),
 );
 const AgentDetailLayout = lazyWithRetry(
   () =>
@@ -1306,9 +1306,11 @@ export const dashboardRoutes = (
           children: [
             { index: true, element: <AgentsIndexRedirect /> },
             { path: "connected", element: <ConnectedAgentsTab /> },
-            { path: "playground", element: <PlaygroundAgentsTab /> },
           ],
         },
+        // No tab for the Playground list: it opens by URL and from the
+        // builder and experiments, as its own page.
+        { path: "playground", element: <PlaygroundAgentsPage /> },
         {
           path: "connected/:agentId",
           element: <AgentDetailLayout />,
