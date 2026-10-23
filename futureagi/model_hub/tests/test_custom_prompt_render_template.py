@@ -185,13 +185,13 @@ class TestRenderTemplateContextMutation:
 
 
 class TestRenderTemplateDefaultBehavior:
-    def test_default_template_format_is_mustache(self):
-        assert DEFAULT_TEMPLATE_FORMAT == "mustache"
+    def test_default_template_format_remains_jinja2(self):
+        assert DEFAULT_TEMPLATE_FORMAT == "jinja2"
 
-    def test_missing_template_format_uses_mustache_rendering(self):
-        # A mustache section is a TemplateSyntaxError under Jinja2, so this
-        # only passes when the missing format really renders as mustache.
-        out = render_template("{{#items}}<{{.}}>{{/items}}", {"items": ["a", "b"]})
+    def test_missing_template_format_preserves_run_prompt_rendering(self):
+        out = render_template(
+            "{% for item in items %}<{{item}}>{% endfor %}", {"items": ["a", "b"]}
+        )
         assert out == "<a><b>"
 
     def test_explicit_jinja2_still_renders_jinja(self):
@@ -203,15 +203,21 @@ class TestRenderTemplateDefaultBehavior:
         assert out == "Hello Karthik"
 
 
-class TestRenderTemplateMustacheInsertsValuesRaw:
-    """The rendered prompt goes to a model, so mustache must not HTML-escape
-    values (JSON or code cells would reach the model as &quot; / &lt;)."""
+class TestRenderTemplateMustacheEscaping:
+    """Experiments opt out of escaping without changing Run Prompt columns."""
 
     VALUE = 'He said "x < y & z"'
 
-    def test_variable_is_not_html_escaped(self):
+    def test_explicit_mustache_preserves_run_prompt_escaping(self):
         out = render_template(
             "In: {{ ctx }}", {"ctx": self.VALUE}, TEMPLATE_FORMAT_MUSTACHE
+        )
+        assert out == "In: He said &quot;x &lt; y &amp; z&quot;"
+
+    def test_experiment_variable_is_not_html_escaped(self):
+        out = render_template(
+            "In: {{ ctx }}", {"ctx": self.VALUE}, TEMPLATE_FORMAT_MUSTACHE,
+            escape_mustache=False,
         )
         assert out == f"In: {self.VALUE}"
 
@@ -225,6 +231,7 @@ class TestRenderTemplateMustacheInsertsValuesRaw:
             "{{#items}}[{{.}}]{{/items}}{{^none}} {{{ctx}}} {{&ctx}}{{/none}}",
             {"items": ["<a>", "b&c"], "none": [], "ctx": self.VALUE},
             TEMPLATE_FORMAT_MUSTACHE,
+            escape_mustache=False,
         )
         assert out == f"[<a>][b&c] {self.VALUE} {self.VALUE}"
 

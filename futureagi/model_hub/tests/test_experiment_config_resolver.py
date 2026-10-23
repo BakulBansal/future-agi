@@ -76,15 +76,15 @@ class TestResolvePromptConfigTemplateFormat:
         epc = _epc(_version(JINJA_TEXT, "jinja"), {"template_format": "mustache"})
         assert _resolved_format(epc) == "mustache"
 
-    def test_no_format_anywhere_leaves_renderer_default(self):
+    def test_no_format_anywhere_uses_experiment_default(self):
         epc = _epc(_version(MUSTACHE_TEXT), LLM_FORM_CONFIGURATION)
-        assert _resolved_format(epc) is None
+        assert _resolved_format(epc) == "mustache"
 
     def test_inline_messages_keep_their_own_format(self):
         assert _resolved_format(_epc(None, {"template_format": "jinja"}, [])) == (
             "jinja"
         )
-        assert _resolved_format(_epc(None, {}, [])) is None
+        assert _resolved_format(_epc(None, {}, [])) == "mustache"
 
     def test_stored_configuration_is_not_mutated(self):
         epc = _epc(_version(JINJA_TEXT, "jinja"), LLM_FORM_CONFIGURATION)
@@ -132,7 +132,8 @@ def _render_like_experiment_run(epc, dataset_row):
         row.id,
         None,
         model_name="gpt-4o",
-        template_format=model_config.get("template_format"),
+        template_format=model_config.get("template_format") or "mustache",
+        escape_mustache=False,
     )
     return "".join(seg.get("text", "") for seg in out[0]["content"])
 
@@ -174,7 +175,7 @@ class TestExperimentRendersInSavedFormat:
         assert _render_like_experiment_run(epc, dataset_row) == "Hi Karthik!"
 
     def test_version_without_format_renders_as_mustache(self, dataset_row):
-        # Versions saved before the format existed use the renderer default.
+        # Versions saved before the format existed use the experiment default.
         epc = _epc(_version(MUSTACHE_TEXT), LLM_FORM_CONFIGURATION)
         assert _render_like_experiment_run(epc, dataset_row) == "Hi Karthik!"
 
@@ -202,3 +203,21 @@ class TestExperimentRendersInSavedFormat:
     def test_agent_prompt_chain_node_without_format_uses_default(self, dataset_row):
         snapshot = _version(MUSTACHE_TEXT).prompt_config_snapshot
         assert _agent_prompt_chain(snapshot, dataset_row) == "user: Hi Karthik!"
+
+    def test_eval_prompt_chain_keeps_mustache_cell_values_raw(self, dataset_row):
+        epc = _epc(_version("In: {{ctx}}", "mustache"), LLM_FORM_CONFIGURATION)
+        assert _prompt_chain(epc, dataset_row) == f"user: In: {JSON_CELL}"
+
+    def test_agent_prompt_chain_keeps_mustache_cell_values_raw(self, dataset_row):
+        snapshot = _version("In: {{ctx}}", "mustache").prompt_config_snapshot
+        assert _agent_prompt_chain(snapshot, dataset_row) == f"user: In: {JSON_CELL}"
+
+    def test_run_prompt_explicit_mustache_still_escapes(self, dataset_row):
+        dataset, row = dataset_row
+        messages = [{"role": "user", "content": "In: {{ctx}}"}]
+        out = populate_placeholders(
+            messages, dataset.id, row.id, None, "gpt-4o", template_format="mustache"
+        )
+        assert out[0]["content"][0]["text"] == (
+            "In: {&quot;q&quot;: &quot;a &lt; b &amp; c&quot;}"
+        )
