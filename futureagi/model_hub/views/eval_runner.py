@@ -588,10 +588,14 @@ def _resolve_special_value(value, row, runner):
             from model_hub.views.run_prompt import populate_placeholders
 
             col_id = runner.column.id if runner.column else None
-            # Extract template_format from experiment prompt config if available
+            # Render in the same format the experiment run used
             tf = None
-            if epc and hasattr(epc, "configuration"):
-                tf = (epc.configuration or {}).get("template_format")
+            if epc:
+                from model_hub.services.experiment_config_resolver import (
+                    resolve_template_format,
+                )
+
+                tf = resolve_template_format(epc)
             populated_messages = populate_placeholders(
                 messages,
                 runner.dataset.id,

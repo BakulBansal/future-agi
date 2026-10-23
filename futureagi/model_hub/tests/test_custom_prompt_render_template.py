@@ -188,8 +188,10 @@ class TestRenderTemplateDefaultBehavior:
         assert DEFAULT_TEMPLATE_FORMAT == "mustache"
 
     def test_missing_template_format_uses_mustache_rendering(self):
-        out = render_template("Hello {{name}}", {"name": "Karthik"})
-        assert out == "Hello Karthik"
+        # A mustache section is a TemplateSyntaxError under Jinja2, so this
+        # only passes when the missing format really renders as mustache.
+        out = render_template("{{#items}}<{{.}}>{{/items}}", {"items": ["a", "b"]})
+        assert out == "<a><b>"
 
     def test_explicit_jinja2_still_renders_jinja(self):
         out = render_template(
