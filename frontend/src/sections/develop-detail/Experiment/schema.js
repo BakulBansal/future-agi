@@ -191,8 +191,7 @@ export const getPromptConfigValidation = (allColumns) =>
           .optional(),
         modelParams: z.record(z.any()).nullable(),
         configuration: z.object({
-          toolChoice: z.string().nullable().optional(),
-          template_format: z.string().optional(),
+          toolChoice: z.string().nullable(),
           tools: z
             .array(z.any())
             .transform((val) => val.map((t) => t?.tool?.value))

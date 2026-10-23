@@ -17,7 +17,6 @@ export default function LLMPrompt({
   handleRemoveMessage,
   allInvalidVariables,
   append,
-  jinjaMode = false,
 }) {
   return (
     <>
@@ -32,7 +31,6 @@ export default function LLMPrompt({
           derivedVariables={derivedVariables}
           onGeneratePrompt={onGeneratePrompt}
           onImprovePrompt={onImprovePrompt}
-          jinjaMode={jinjaMode}
         />
         <Typography
           id={`invalid-variables-message.${index}`}
@@ -83,5 +81,4 @@ LLMPrompt.propTypes = {
   handleRemoveMessage: PropTypes.func.isRequired,
   allInvalidVariables: PropTypes.arrayOf(PropTypes.string),
   append: PropTypes.func.isRequired,
-  jinjaMode: PropTypes.bool,
 };

@@ -65,7 +65,6 @@ const PromptTemplateSection = ({
 
     const configuration = {
       toolChoice: promptConfig?.toolChoice ?? "auto",
-      template_format: promptConfig?.template_format ?? "mustache",
       tools:
         promptConfig?.tools?.length > 0
           ? promptConfig?.tools?.map((t) => ({
