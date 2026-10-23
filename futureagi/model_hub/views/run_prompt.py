@@ -8,6 +8,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any
 
 import chevron
+import chevron.tokenizer
 import litellm
 import structlog
 import yaml
@@ -454,7 +455,14 @@ def render_template(
         return template_str.format(**context)
 
     elif template_format == TEMPLATE_FORMAT_MUSTACHE:
-        return chevron.render(template_str, context)
+        # The prompt goes to a model, not a browser: insert every {{var}} raw,
+        # as {{{var}}} would, instead of chevron's HTML escaping (& < > ").
+        # Jinja2, the Workbench and the agent runtime insert values raw too.
+        tokens = [
+            ("no escape", key) if tag == "variable" else (tag, key)
+            for tag, key in chevron.tokenizer.tokenize(template_str)
+        ]
+        return chevron.render(tokens, context)
 
     elif template_format == TEMPLATE_FORMAT_JINJA2:
         # Pre-process: handle variable names with spaces (Jinja2 doesn't allow them)

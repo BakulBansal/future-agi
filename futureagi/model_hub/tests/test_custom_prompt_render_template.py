@@ -17,6 +17,7 @@ from agentic_eval.core_evals.fi_utils.utils import PreserveUndefined
 from model_hub.views.run_prompt import (
     DEFAULT_TEMPLATE_FORMAT,
     TEMPLATE_FORMAT_JINJA2,
+    TEMPLATE_FORMAT_MUSTACHE,
     render_template,
 )
 
@@ -200,6 +201,32 @@ class TestRenderTemplateDefaultBehavior:
             TEMPLATE_FORMAT_JINJA2,
         )
         assert out == "Hello Karthik"
+
+
+class TestRenderTemplateMustacheInsertsValuesRaw:
+    """The rendered prompt goes to a model, so mustache must not HTML-escape
+    values (JSON or code cells would reach the model as &quot; / &lt;)."""
+
+    VALUE = 'He said "x < y & z"'
+
+    def test_variable_is_not_html_escaped(self):
+        out = render_template(
+            "In: {{ ctx }}", {"ctx": self.VALUE}, TEMPLATE_FORMAT_MUSTACHE
+        )
+        assert out == f"In: {self.VALUE}"
+
+    def test_missing_format_is_not_html_escaped(self):
+        assert render_template("In: {{ctx}}", {"ctx": self.VALUE}) == (
+            f"In: {self.VALUE}"
+        )
+
+    def test_sections_and_unescaped_tags_still_render(self):
+        out = render_template(
+            "{{#items}}[{{.}}]{{/items}}{{^none}} {{{ctx}}} {{&ctx}}{{/none}}",
+            {"items": ["<a>", "b&c"], "none": [], "ctx": self.VALUE},
+            TEMPLATE_FORMAT_MUSTACHE,
+        )
+        assert out == f"[<a>][b&c] {self.VALUE} {self.VALUE}"
 
 
 class TestRenderTemplateSSTIProtection:

@@ -21,6 +21,7 @@ from model_hub.views.run_prompt import populate_placeholders
 
 JINJA_TEXT = "Hi {% if flag %}{{ name }}{% endif %}!"
 MUSTACHE_TEXT = "Hi {{#flag}}{{name}}{{/flag}}!"
+JSON_CELL = '{"q": "a < b & c"}'
 # What the live LLM experiment form sends as configuration.
 LLM_FORM_CONFIGURATION = {"toolChoice": "auto", "tools": []}
 
@@ -104,12 +105,12 @@ def dataset_row(db, organization, user, workspace):
         name: Column.objects.create(
             name=name, data_type="text", dataset=dataset, source="OTHERS"
         )
-        for name in ("name", "flag")
+        for name in ("name", "flag", "ctx")
     }
     dataset.column_order = [str(c.id) for c in columns.values()]
     dataset.save()
     row = Row.objects.create(dataset=dataset, order=0)
-    values = {"name": "Karthik", "flag": "yes"}
+    values = {"name": "Karthik", "flag": "yes", "ctx": JSON_CELL}
     for name, column in columns.items():
         Cell.objects.create(dataset=dataset, column=column, row=row, value=values[name])
     return dataset, row
@@ -162,3 +163,15 @@ class TestExperimentRendersInSavedFormat:
     def test_eval_prompt_chain_uses_saved_jinja_format(self, dataset_row):
         epc = _epc(_version(JINJA_TEXT, "jinja"), LLM_FORM_CONFIGURATION)
         assert _prompt_chain(epc, dataset_row) == "user: Hi Karthik!"
+
+    def test_mustache_saved_prompt_sends_cell_values_raw(self, dataset_row):
+        # The Workbench saves "mustache" by default and sends values raw; an
+        # experiment on that version must not HTML-escape a JSON cell.
+        epc = _epc(_version("In: {{ctx}}", "mustache"), LLM_FORM_CONFIGURATION)
+        assert _render_like_experiment_run(epc, dataset_row) == f"In: {JSON_CELL}"
+
+    def test_inline_mustache_config_sends_cell_values_raw(self, dataset_row):
+        # TTS/image experiment cards save inline messages with "mustache".
+        messages = [{"role": "user", "content": [{"type": "text", "text": "{{ctx}}"}]}]
+        epc = _epc(None, {"template_format": "mustache"}, messages)
+        assert _render_like_experiment_run(epc, dataset_row) == JSON_CELL
