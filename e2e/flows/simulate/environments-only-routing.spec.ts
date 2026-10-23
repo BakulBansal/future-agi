@@ -1,5 +1,6 @@
 import { test, expect } from '../../lib/fixtures';
 import { flowAnnotation } from '../../lib/flow-meta';
+import { exactPath } from '../../lib/url';
 
 // Browser-side waits: one navigation's first paint, not a stage. The local
 // stack slows several-fold beside other workers, so not the 10s expect default.
@@ -22,19 +23,22 @@ const TEMPLATE_PAGES = [
 // (frontend/src/layouts/dashboard/config-navigation.jsx, Simulate section).
 const NEW_ORG_MENU = ['Environment'];
 
-function exactPath(path: string) {
-  return new RegExp(`${path.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`);
-}
+// Pages the router does not register for that org (any agent id will do).
+const HIDDEN_PAGES = [
+  `${SIMULATE}/scenarios`,
+  `${SIMULATE}/test`,
+  `${SIMULATE}/agent-definitions/00000000-0000-0000-0000-000000000000`,
+];
 
 test('SIM-E2E-001: Simulate opens on Environments, and an org from after the cutoff sees only Environments', {
   tag: ['@flow'],
   annotation: flowAnnotation({
     id: 'SIM-E2E-001', area: 'simulate',
-    userGoal: 'A developer opening Simulate lands on Environments, old Harness, Simulator Agent, Personas and template links go somewhere sensible, Personas opens as a tab on Environments, and a new org sees only Environment in the menu and gets not found from a direct Scenarios link',
+    userGoal: 'A developer opening Simulate lands on Environments, old Harness, Simulator Agent, Personas and template links go somewhere sensible, Personas opens as a tab on Environments, and a new org sees only Environment in the menu and gets not found from direct Scenarios, Run Simulation and Agent Definition links',
     steps: ['open /dashboard/simulate', 'open the old Harness list, new and job links',
             'open the old Simulator Agent link', 'open the old Personas link', 'open the Personas tab',
             'open the Prebuilt template links', 'read the Simulate menu',
-            'open the old Agent Definition link', 'open the Scenarios link directly'],
+            'open the old Agent Definition link', 'open the Scenarios, Run Simulation and Agent Definition links directly'],
     browserChecks: ['/dashboard/simulate lands on Environments',
                     'harness lands on Environments, harness/new on the Build tab, harness/<id> on environments/<id>',
                     'simulator-agent lands on Environments',
@@ -43,12 +47,12 @@ test('SIM-E2E-001: Simulate opens on Environments, and an org from after the cut
                     'both template URLs stay on their URL and open their page by title',
                     'agent-definitions lands on Connected agents',
                     'the Simulate menu is exactly Environment',
-                    '/dashboard/simulate/scenarios lands on /404'],
+                    '/dashboard/simulate/scenarios, /test and /agent-definitions/<id> land on /404'],
   }),
 }, async ({ page, actor }, testInfo) => {
-  // 12 browser actions, each its own UI_READY step: 12 × 60s = 720s, plus
+  // 14 browser actions, each its own UI_READY step: 14 × 60s = 840s, plus
   // 60s headroom so a slow run fails on the step that ran out.
-  test.setTimeout(780_000);
+  test.setTimeout(900_000);
   const jobId = `e2e-sim1-${testInfo.workerIndex}-${Date.now().toString(36)}`;
   await testInfo.attach('seeded', {
     body: JSON.stringify({ organizationId: actor.organizationId, jobId }),
@@ -97,8 +101,10 @@ test('SIM-E2E-001: Simulate opens on Environments, and an org from after the cut
     await expect(menu).toHaveText(NEW_ORG_MENU, { timeout: UI_READY });
   }, { timeout: UI_READY });
 
-  await test.step('ui: a direct Scenarios link lands on /404', async () => {
-    await page.goto(`${SIMULATE}/scenarios`);
-    await expect(page).toHaveURL(exactPath('/404'), { timeout: UI_READY });
-  }, { timeout: UI_READY });
+  for (const hidden of HIDDEN_PAGES) {
+    await test.step(`ui: a direct ${hidden} link lands on /404`, async () => {
+      await page.goto(hidden);
+      await expect(page).toHaveURL(exactPath('/404'), { timeout: UI_READY });
+    }, { timeout: UI_READY });
+  }
 });

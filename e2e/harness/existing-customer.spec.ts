@@ -1,9 +1,8 @@
 import { test, expect, EXISTING_CUSTOMER_CREATED_AT } from '../lib/existing-customer';
+import type { UserInfo } from '../lib/provisioning';
 
 // One browser action's first-paint budget (see README "UI_READY").
 const UI_READY = 60_000;
-
-interface UserInfo { organization: { id: string }; restrict_simulate_to_environments?: boolean }
 
 test('the existing-customer actor is an org dated before the Simulate cutoff, and the signed-in page is that org', async ({ page, actor, probe }, testInfo) => {
   await testInfo.attach('existing-customer', { contentType: 'application/json', body: JSON.stringify({ email: actor.email, organizationId: actor.organizationId, workspaceId: actor.workspaceId }) });

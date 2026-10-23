@@ -1,5 +1,7 @@
 import { test, expect } from '../../lib/existing-customer';
 import { flowAnnotation } from '../../lib/flow-meta';
+import type { UserInfo } from '../../lib/provisioning';
+import { exactPath } from '../../lib/url';
 
 // One navigation's first paint, not a stage (as environments-only-routing.spec.ts).
 const UI_READY = 60_000;
@@ -16,11 +18,6 @@ const LEGACY_PAGES = [
   { item: 'Run Simulation', path: `${SIMULATE}/test`, title: 'Run Tests | Dashboard' },
 ];
 
-interface UserInfo { organization: { id: string }; restrict_simulate_to_environments?: boolean }
-
-function exactPath(path: string) {
-  return new RegExp(`${path.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`);
-}
 
 test('SIM-E2E-002: an org from before the Simulate cutoff keeps Scenarios and Run Simulation', {
   tag: ['@flow'],

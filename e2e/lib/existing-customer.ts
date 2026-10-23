@@ -14,7 +14,12 @@ export const EXISTING_CUSTOMER_CREATED_AT = '2026-09-30T00:00:00.000Z';
  * stored value the UPDATE returns matches, so a wrong id or a wrong
  * E2E_PG_URL (attach mode) is loud. */
 export async function backdateToExistingCustomer(organizationId: string): Promise<void> {
-  const where = new URL(E2E.pgUrl).host; // host:port only, never the credentials
+  let where: string; // host:port only, never the credentials
+  try {
+    where = new URL(E2E.pgUrl).host;
+  } catch {
+    throw new Error('existing customer: E2E_PG_URL is missing or not a URL (is E2E_PG_URL the stack\'s database?)');
+  }
   const client = new pg.Client({ connectionString: E2E.pgUrl });
   try {
     await client.connect();

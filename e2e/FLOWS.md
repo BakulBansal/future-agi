@@ -1813,8 +1813,8 @@
 
 ### SIM-E2E-001 — Simulate opens on Environments, and an org from after the cutoff sees only Environments
 
-**Goal:** A developer opening Simulate lands on Environments, old Harness, Simulator Agent, Personas and template links go somewhere sensible, Personas opens as a tab on Environments, and a new org sees only Environment in the menu and gets not found from a direct Scenarios link  
-**Spec:** `flows/simulate/environments-only-routing.spec.ts:29`  
+**Goal:** A developer opening Simulate lands on Environments, old Harness, Simulator Agent, Personas and template links go somewhere sensible, Personas opens as a tab on Environments, and a new org sees only Environment in the menu and gets not found from direct Scenarios, Run Simulation and Agent Definition links  
+**Spec:** `flows/simulate/environments-only-routing.spec.ts:33`  
 **Tags:** —
 
 **User steps:**
@@ -1827,7 +1827,7 @@
 6. open the Prebuilt template links
 7. read the Simulate menu
 8. open the old Agent Definition link
-9. open the Scenarios link directly
+9. open the Scenarios, Run Simulation and Agent Definition links directly
 
 **Browser observations:**
 
@@ -1839,12 +1839,12 @@
 - both template URLs stay on their URL and open their page by title
 - agent-definitions lands on Connected agents
 - the Simulate menu is exactly Environment
-- /dashboard/simulate/scenarios lands on /404
+- /dashboard/simulate/scenarios, /test and /agent-definitions/<id> land on /404
 
 ### SIM-E2E-002 — an org from before the Simulate cutoff keeps Scenarios and Run Simulation
 
 **Goal:** An existing customer, whose org predates the cutoff, still reaches every Simulate page from the menu  
-**Spec:** `flows/simulate/existing-customer-pages.spec.ts:25`  
+**Spec:** `flows/simulate/existing-customer-pages.spec.ts:22`  
 **Tags:** —
 
 **User steps:**

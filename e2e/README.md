@@ -167,8 +167,8 @@ fails at the probe, by design: there is no silent skip.
 
 The existing-customer `test` (see Fixtures below) dates its org through `E2E_PG_URL`, so any flow on
 it needs `E2E_PG_URL` too. Once the Simulate restriction (#3502) is in, the attached backend must also
-set `RESTRICT_SIMULATE_TO_ENVIRONMENTS_CUTOFF=2026-10-01T00:00:00Z`, as both overlays do, or
-SIM-E2E-001 and `harness/provisioning.spec.ts` fail.
+set `RESTRICT_SIMULATE_TO_ENVIRONMENTS_CUTOFF=2026-10-01T00:00:00Z`, as both overlays and the root
+`docker-compose.dev.yml` do, or SIM-E2E-001 and `harness/provisioning.spec.ts` fail.
 
 For split-store attachments, set `E2E_CATALOG_CH_URL` and/or `E2E_CATALOG_CH_DB`
 for catalog assertions (`probe.catalogCh()`). Source assertions (`probe.ch()`)

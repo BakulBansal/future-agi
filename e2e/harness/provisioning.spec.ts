@@ -1,7 +1,7 @@
 import { request } from '@playwright/test';
 import { test, expect } from '../lib/fixtures';
 import { E2E } from '../lib/env';
-import { provisionActor } from '../lib/provisioning';
+import { provisionActor, type UserInfo } from '../lib/provisioning';
 
 test('provisionActor creates an isolated, API-usable tenant', async () => {
   const req = await request.newContext({ baseURL: E2E.apiUrl });
@@ -35,8 +35,7 @@ test('the ordinary actor is a new org: created in this run, restricted to Enviro
     [actor.organizationId]);
   expect(rows).toEqual([{ fresh: true }]);
 
-  const info = await actor.api.get<{ organization: { id: string }; restrict_simulate_to_environments?: boolean }>(
-    '/accounts/user-info/');
+  const info = await actor.api.get<UserInfo>('/accounts/user-info/');
   expect(info.organization.id).toBe(actor.organizationId);
   // Both stacks set the cutoff to 2026-10-01T00:00:00Z, before any run's signup.
   expect(info.restrict_simulate_to_environments).toBe(true);
