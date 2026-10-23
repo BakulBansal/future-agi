@@ -28,7 +28,7 @@ test('authenticated page fixture lands on the dashboard', async ({ page, actor }
   await userInfo;
 });
 
-test('the ordinary actor is a new org: created in this run, restricted to Environments once user-info reports the flag', async ({ actor, probe }, testInfo) => {
+test('the ordinary actor is a new org: created in this run, restricted to Environments', async ({ actor, probe }, testInfo) => {
   // The database's own clock: Colima's VM clock can drift from the host's.
   const rows = await probe.pg<{ fresh: boolean }>(
     "SELECT created_at > now() - interval '6 hours' AS fresh FROM accounts_organization WHERE id = $1",
@@ -38,11 +38,6 @@ test('the ordinary actor is a new org: created in this run, restricted to Enviro
   const info = await actor.api.get<{ organization: { id: string }; restrict_simulate_to_environments?: boolean }>(
     '/accounts/user-info/');
   expect(info.organization.id).toBe(actor.organizationId);
-  if (info.restrict_simulate_to_environments === undefined) {
-    testInfo.annotations.push({ type: 'flag-check-skipped',
-      description: 'user-info has no restrict_simulate_to_environments (#3502 not in this build)' });
-  } else {
-    // Both stacks set the cutoff to 2026-10-01T00:00:00Z, before any run's signup.
-    expect(info.restrict_simulate_to_environments).toBe(true);
-  }
+  // Both stacks set the cutoff to 2026-10-01T00:00:00Z, before any run's signup.
+  expect(info.restrict_simulate_to_environments).toBe(true);
 });

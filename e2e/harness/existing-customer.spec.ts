@@ -19,10 +19,5 @@ test('the existing-customer actor is an org dated before the Simulate cutoff, an
   const info = await (await userInfo).json() as UserInfo;
   expect(info.organization.id).toBe(actor.organizationId);
 
-  if (info.restrict_simulate_to_environments === undefined) {
-    testInfo.annotations.push({ type: 'flag-check-skipped',
-      description: 'user-info has no restrict_simulate_to_environments (#3502 not in this build)' });
-  } else {
-    expect(info.restrict_simulate_to_environments).toBe(false);
-  }
+  expect(info.restrict_simulate_to_environments).toBe(false);
 });

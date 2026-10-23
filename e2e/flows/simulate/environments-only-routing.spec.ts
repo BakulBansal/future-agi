@@ -8,9 +8,8 @@ const UI_READY = 60_000;
 const SIMULATE = '/dashboard/simulate';
 const ENVIRONMENTS = `${SIMULATE}/environments`;
 
-// Pinned off the pages' <Helmet> titles: Scenarios.jsx,
-// RunTests.jsx, and environments/PrebuiltEnvironments.jsx and
-// environments/UseTemplate.jsx for the templates.
+// Pinned off the template pages' <Helmet> titles:
+// environments/PrebuiltEnvironments.jsx and environments/UseTemplate.jsx.
 
 // Each Prebuilt template URL and its page title. The template id comes from
 // frontend/src/api/simulate-environments/_fixtures/prebuiltEnvironments.js.
@@ -19,39 +18,23 @@ const TEMPLATE_PAGES = [
   { path: `${ENVIRONMENTS}/templates/env-voice-support`, title: 'Use template | Future AGI' },
 ];
 
-// The Simulate menu for an org created before the cutoff, in order
+// The Simulate menu of an org created after the cutoff, the ordinary actor
 // (frontend/src/layouts/dashboard/config-navigation.jsx, Simulate section).
-const SIMULATE_MENU = ['Environment', 'Scenarios', 'Run Simulation'];
-
-// Each non-Environment menu item and the page it must open.
-const LEGACY_PAGES = [
-  { item: 'Scenarios', path: `${SIMULATE}/scenarios`, title: 'Scenarios' },
-  { item: 'Run Simulation', path: `${SIMULATE}/test`, title: 'Run Tests | Dashboard' },
-];
-
-interface UserInfo {
-  organization: { id: string };
-  restrict_simulate_to_environments?: boolean;
-}
+const NEW_ORG_MENU = ['Environment'];
 
 function exactPath(path: string) {
   return new RegExp(`${path.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`);
 }
 
-test('SIM-E2E-001: Simulate opens on Environments and an org from before the cutoff keeps every page', {
+test('SIM-E2E-001: Simulate opens on Environments, and an org from after the cutoff sees only Environments', {
   tag: ['@flow'],
   annotation: flowAnnotation({
     id: 'SIM-E2E-001', area: 'simulate',
-    userGoal: 'A developer opening Simulate lands on Environments, old Harness, Simulator Agent, Personas and '
-      + 'template links go somewhere sensible, Personas opens as a tab on Environments, and an org from before '
-      + 'the cutoff still reaches every other Simulate page (the restricted side for new orgs is not claimed: the harness cannot create an '
-      + 'org dated after a cutoff)',
+    userGoal: 'A developer opening Simulate lands on Environments, old Harness, Simulator Agent, Personas and template links go somewhere sensible, Personas opens as a tab on Environments, and a new org sees only Environment in the menu and gets not found from a direct Scenarios link',
     steps: ['open /dashboard/simulate', 'open the old Harness list, new and job links',
             'open the old Simulator Agent link', 'open the old Personas link', 'open the Personas tab',
             'open the Prebuilt template links', 'read the Simulate menu',
-            'open the old Agent Definition link', 'open Scenarios and Run Simulation from the menu'],
-    backendChecks: ["user-info for the actor's org does not report restrict_simulate_to_environments: true "
-                    + '(false, or absent on a backend from before the flag)'],
+            'open the old Agent Definition link', 'open the Scenarios link directly'],
     browserChecks: ['/dashboard/simulate lands on Environments',
                     'harness lands on Environments, harness/new on the Build tab, harness/<id> on environments/<id>',
                     'simulator-agent lands on Environments',
@@ -59,24 +42,17 @@ test('SIM-E2E-001: Simulate opens on Environments and an org from before the cut
                     'the Personas tab is selected and shows the persona search',
                     'both template URLs stay on their URL and open their page by title',
                     'agent-definitions lands on Connected agents',
-                    'the Simulate menu is exactly Environment, Scenarios, Run Simulation',
-                    'each of those two items opens its page by URL and title, never /404'],
+                    'the Simulate menu is exactly Environment',
+                    '/dashboard/simulate/scenarios lands on /404'],
   }),
 }, async ({ page, actor }, testInfo) => {
-  // 13 browser actions, each its own UI_READY step: 13 × 60s = 780s, plus
+  // 12 browser actions, each its own UI_READY step: 12 × 60s = 720s, plus
   // 60s headroom so a slow run fails on the step that ran out.
-  test.setTimeout(840_000);
+  test.setTimeout(780_000);
   const jobId = `e2e-sim1-${testInfo.workerIndex}-${Date.now().toString(36)}`;
   await testInfo.attach('seeded', {
     body: JSON.stringify({ organizationId: actor.organizationId, jobId }),
     contentType: 'application/json',
-  });
-
-  await test.step('api: the actor org is not restricted to Environments', async () => {
-    // The request the app makes at boot (auth-provider.jsx initialize).
-    const info = await actor.api.get<UserInfo>('/accounts/user-info/');
-    expect(info.organization.id).toBe(actor.organizationId);
-    expect(info.restrict_simulate_to_environments).not.toBe(true);
   });
 
   await test.step('ui: /dashboard/simulate opens Environments', async () => {
@@ -116,16 +92,13 @@ test('SIM-E2E-001: Simulate opens on Environments and an org from before the cut
   }
 
   const menu = page.locator('nav a[href^="/dashboard/simulate/"]');
-  await test.step('ui: the Simulate menu lists every Simulate page', async () => {
+  await test.step('ui: the Simulate menu is Environment only', async () => {
     await page.goto(ENVIRONMENTS);
-    await expect(menu).toHaveText(SIMULATE_MENU, { timeout: UI_READY });
+    await expect(menu).toHaveText(NEW_ORG_MENU, { timeout: UI_READY });
   }, { timeout: UI_READY });
 
-  for (const legacy of LEGACY_PAGES) {
-    await test.step(`ui: ${legacy.item} opens ${legacy.path}`, async () => {
-      await menu.filter({ hasText: legacy.item }).click();
-      await expect(page).toHaveURL(exactPath(legacy.path), { timeout: UI_READY });
-      await expect(page).toHaveTitle(legacy.title, { timeout: UI_READY });
-    }, { timeout: UI_READY });
-  }
+  await test.step('ui: a direct Scenarios link lands on /404', async () => {
+    await page.goto(`${SIMULATE}/scenarios`);
+    await expect(page).toHaveURL(exactPath('/404'), { timeout: UI_READY });
+  }, { timeout: UI_READY });
 });

@@ -1811,10 +1811,10 @@
 
 ## simulate
 
-### SIM-E2E-001 — Simulate opens on Environments and an org from before the cutoff keeps every page
+### SIM-E2E-001 — Simulate opens on Environments, and an org from after the cutoff sees only Environments
 
-**Goal:** A developer opening Simulate lands on Environments, old Harness, Simulator Agent, Personas and template links go somewhere sensible, Personas opens as a tab on Environments, and an org from before the cutoff still reaches every other Simulate page (the restricted side for new orgs is not claimed: the harness cannot create an org dated after a cutoff)  
-**Spec:** `flows/simulate/environments-only-routing.spec.ts:41`  
+**Goal:** A developer opening Simulate lands on Environments, old Harness, Simulator Agent, Personas and template links go somewhere sensible, Personas opens as a tab on Environments, and a new org sees only Environment in the menu and gets not found from a direct Scenarios link  
+**Spec:** `flows/simulate/environments-only-routing.spec.ts:29`  
 **Tags:** —
 
 **User steps:**
@@ -1827,11 +1827,7 @@
 6. open the Prebuilt template links
 7. read the Simulate menu
 8. open the old Agent Definition link
-9. open Scenarios and Run Simulation from the menu
-
-**Backend state verified:**
-
-- user-info for the actor's org does not report restrict_simulate_to_environments: true (false, or absent on a backend from before the flag)
+9. open the Scenarios link directly
 
 **Browser observations:**
 
@@ -1842,5 +1838,25 @@
 - the Personas tab is selected and shows the persona search
 - both template URLs stay on their URL and open their page by title
 - agent-definitions lands on Connected agents
+- the Simulate menu is exactly Environment
+- /dashboard/simulate/scenarios lands on /404
+
+### SIM-E2E-002 — an org from before the Simulate cutoff keeps Scenarios and Run Simulation
+
+**Goal:** An existing customer, whose org predates the cutoff, still reaches every Simulate page from the menu  
+**Spec:** `flows/simulate/existing-customer-pages.spec.ts:25`  
+**Tags:** —
+
+**User steps:**
+
+1. read the Simulate menu
+2. open Scenarios and Run Simulation from the menu
+
+**Backend state verified:**
+
+- user-info for the actor's org reports restrict_simulate_to_environments: false
+
+**Browser observations:**
+
 - the Simulate menu is exactly Environment, Scenarios, Run Simulation
 - each of those two items opens its page by URL and title, never /404
