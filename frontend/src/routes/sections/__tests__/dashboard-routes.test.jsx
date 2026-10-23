@@ -166,35 +166,3 @@ describe("old Agent Definition link", () => {
     ).toBeTruthy();
   });
 });
-
-describe("Agents routes", () => {
-  const AGENTS_LANDING = "agents";
-
-  function matchChain(url) {
-    return matchRoutes(dashboardRoutes(null, null, { isCloud: true }), url).map(
-      (m) => m.route,
-    );
-  }
-
-  // The landing is the pathless layout route under "agents".
-  function inLanding(url) {
-    const chain = matchChain(url);
-    const agents = chain.find((r) => r.path === AGENTS_LANDING);
-    return chain.some((r) => agents?.children?.includes(r) && !r.path);
-  }
-
-  it("renders Connected agents inside the Agents landing", () => {
-    expect(inLanding("/dashboard/agents/connected")).toBe(true);
-  });
-
-  it("renders the Playground list as its own page, outside the landing", () => {
-    const leaf = matchChain("/dashboard/agents/playground").at(-1);
-    expect(leaf.path).toBe("playground");
-    expect(inLanding("/dashboard/agents/playground")).toBe(false);
-  });
-
-  it("still opens a Playground agent's builder", () => {
-    const leaf = matchChain("/dashboard/agents/playground/abc/build").at(-1);
-    expect(leaf.path).toBe("build");
-  });
-});
