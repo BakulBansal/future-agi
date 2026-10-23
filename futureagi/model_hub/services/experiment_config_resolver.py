@@ -7,11 +7,8 @@ consume directly — one model per config, no inner loop needed.
 """
 
 
-def _get_saved_template_format(prompt_version):
-    """Return configuration.template_format from a prompt version snapshot."""
-    if prompt_version is None:
-        return None
-    snapshot = prompt_version.prompt_config_snapshot
+def get_snapshot_template_format(snapshot):
+    """Return configuration.template_format from a prompt_config_snapshot."""
     if isinstance(snapshot, list):
         snapshot = snapshot[0] if snapshot else None
     if not isinstance(snapshot, dict):
@@ -20,6 +17,13 @@ def _get_saved_template_format(prompt_version):
     if not isinstance(configuration, dict):
         return None
     return configuration.get("template_format") or None
+
+
+def _get_saved_template_format(prompt_version):
+    """Return configuration.template_format from a prompt version snapshot."""
+    if prompt_version is None:
+        return None
+    return get_snapshot_template_format(prompt_version.prompt_config_snapshot)
 
 
 def resolve_template_format(exp_prompt_config):

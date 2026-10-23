@@ -8,6 +8,7 @@ prompt renders as mustache.
 """
 
 from types import SimpleNamespace
+from unittest import mock
 
 import pytest
 
@@ -16,6 +17,7 @@ from model_hub.models.develop_dataset import Cell, Column, Dataset, Row
 from model_hub.models.experiments import ExperimentPromptConfig
 from model_hub.models.run_prompt import PromptVersion
 from model_hub.services.experiment_config_resolver import resolve_prompt_config
+from model_hub.views import eval_runner
 from model_hub.views.eval_runner import _resolve_special_value
 from model_hub.views.run_prompt import populate_placeholders
 
@@ -145,6 +147,22 @@ def _prompt_chain(epc, dataset_row):
     return _resolve_special_value("prompt_chain", row, runner)
 
 
+def _agent_prompt_chain(node_snapshot, dataset_row):
+    """prompt_chain for an agent experiment whose LLM node has this snapshot."""
+    dataset, row = dataset_row
+    runner = SimpleNamespace(
+        experiment_dataset=SimpleNamespace(
+            id="edt", prompt_config=None, agent_config=object()
+        ),
+        dataset=dataset,
+        column=None,
+    )
+    with mock.patch.object(
+        eval_runner, "_get_agent_node_messages", return_value=node_snapshot
+    ):
+        return _resolve_special_value("prompt_chain", row, runner)
+
+
 @pytest.mark.django_db
 class TestExperimentRendersInSavedFormat:
     def test_jinja_saved_prompt_renders_as_jinja(self, dataset_row):
@@ -175,3 +193,12 @@ class TestExperimentRendersInSavedFormat:
         messages = [{"role": "user", "content": [{"type": "text", "text": "{{ctx}}"}]}]
         epc = _epc(None, {"template_format": "mustache"}, messages)
         assert _render_like_experiment_run(epc, dataset_row) == JSON_CELL
+
+    def test_agent_prompt_chain_uses_node_saved_jinja_format(self, dataset_row):
+        # The agent runtime renders a Jinja-saved LLM node with Jinja.
+        snapshot = _version(JINJA_TEXT, "jinja").prompt_config_snapshot
+        assert _agent_prompt_chain(snapshot, dataset_row) == "user: Hi Karthik!"
+
+    def test_agent_prompt_chain_node_without_format_uses_default(self, dataset_row):
+        snapshot = _version(MUSTACHE_TEXT).prompt_config_snapshot
+        assert _agent_prompt_chain(snapshot, dataset_row) == "user: Hi Karthik!"
