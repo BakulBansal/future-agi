@@ -32,10 +32,14 @@ def resolve_template_format(exp_prompt_config):
 
     The experiment's own configuration.template_format wins. Otherwise LLM
     messages, which are locked from the prompt version, use the format that
-    version was saved with. None lets the renderer apply its default.
+    version was saved with. Older experiment configs default to Mustache.
     """
     configured = (exp_prompt_config.configuration or {}).get("template_format")
-    return configured or _get_saved_template_format(exp_prompt_config.prompt_version)
+    return (
+        configured
+        or _get_saved_template_format(exp_prompt_config.prompt_version)
+        or "mustache"
+    )
 
 
 def resolve_prompt_config(exp_prompt_config):

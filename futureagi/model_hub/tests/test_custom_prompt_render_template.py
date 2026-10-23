@@ -216,7 +216,9 @@ class TestRenderTemplateMustacheEscaping:
 
     def test_experiment_variable_is_not_html_escaped(self):
         out = render_template(
-            "In: {{ ctx }}", {"ctx": self.VALUE}, TEMPLATE_FORMAT_MUSTACHE,
+            "In: {{ ctx }}",
+            {"ctx": self.VALUE},
+            TEMPLATE_FORMAT_MUSTACHE,
             escape_mustache=False,
         )
         assert out == f"In: {self.VALUE}"
